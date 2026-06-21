@@ -295,7 +295,7 @@ class InstallerTests(unittest.TestCase):
     def test_default_utopic_source_uses_package_managed_dependency_contract(self):
         self.assertEqual(
             installer.UTOPIC_NATIVE_REF,
-            "70ef26f20e712377259f7a02abe2169362e23a57",
+            "1fb77ec47577f3e6ed25f8a14afda3f86c35769d",
         )
 
     def test_llama_build_flags_disable_user_facing_llama_targets(self):
