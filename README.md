@@ -109,12 +109,6 @@ files, but was stale for DiffusionGemma prompt wrapping.
 
 ## Development
 
-Run the Python wrapper tests:
-
-```sh
-PYTHONPATH=python python -m unittest discover -s tests -p 'test_*.py'
-```
-
 Build a wheel:
 
 ```sh
