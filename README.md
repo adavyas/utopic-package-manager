@@ -2,9 +2,9 @@
 
 Python package management for the Utopic native runtime.
 
-This repository is intentionally thin. The wheel installs Python launchers only.
-Native source checkout, build configuration, and binary installation all happen
-later through `utopic setup`.
+This repository is intentionally thin. The wheel installs Python launchers plus
+the small Utopic native source tree. Dependency checkout, build configuration,
+and binary installation all happen later through `utopic setup`.
 
 ## Install
 
@@ -92,7 +92,8 @@ curl http://127.0.0.1:8910/v1/models
 
 The package manager owns the user-facing setup path:
 
-- fetch the pinned compatible native runtime and dependency sources
+- use the packaged Utopic native source
+- fetch the pinned compatible public llama.cpp dependency source
 - configure the native build for CPU or CUDA, including CUDA compiler and architecture detection
 - build the dependency layer and Utopic
 - copy the final binaries into the Utopic cache

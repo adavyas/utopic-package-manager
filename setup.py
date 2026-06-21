@@ -7,7 +7,7 @@ setup(
     description="Python package manager for the Utopic native runtime",
     package_dir={"": "python"},
     packages=find_packages(where="python"),
-    package_data={"utopic": ["patches/*.patch"]},
+    package_data={"utopic": ["native/*"]},
     python_requires=">=3.9",
     entry_points={
         "console_scripts": [

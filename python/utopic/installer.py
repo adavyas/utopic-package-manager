@@ -7,6 +7,7 @@ from typing import Mapping, Optional, Sequence
 
 
 PACKAGE_DIR = Path(__file__).resolve().parent
+PACKAGED_NATIVE_DIR = PACKAGE_DIR / "native"
 UTOPIC_NATIVE_REPO = "https://github.com/adavyas/utopic.git"
 UTOPIC_NATIVE_REF = "92ca14f12fe45f78d605511bc4e7e21c3ed9bebd"
 LLAMA_REPO = "https://github.com/ggml-org/llama.cpp.git"
@@ -60,6 +61,8 @@ def default_native_dir() -> Path:
     configured = os.environ.get("UTOPIC_NATIVE_DIR")
     if configured:
         return Path(configured).expanduser()
+    if PACKAGED_NATIVE_DIR.exists():
+        return PACKAGED_NATIVE_DIR
     return source_root() / "Utopic"
 
 
@@ -216,11 +219,17 @@ def _verify_llama_apis(llama_dir: Path) -> None:
         )
 
 
+def _native_cmake_source(native_dir: Path) -> Path:
+    if (native_dir / "CMakeLists.txt").exists():
+        return native_dir
+    return native_dir / "native"
+
+
 def _build_utopic(native_dir: Path, llama_dir: Path, *, jobs: Optional[int], dry_run: bool) -> Path:
     out_dir = build_root() / "utopic"
 
     _run(
-        ["cmake", "-B", out_dir, "-S", native_dir / "native", f"-DUTOPIC_LLAMACPP_DIR={llama_dir}"],
+        ["cmake", "-B", out_dir, "-S", _native_cmake_source(native_dir), f"-DUTOPIC_LLAMACPP_DIR={llama_dir}"],
         dry_run=dry_run,
     )
     _run(_build_command(out_dir, jobs=jobs), dry_run=dry_run)
@@ -311,6 +320,8 @@ def setup(argv: Optional[Sequence[str]] = None) -> int:
 
     if args.native_dir or os.environ.get("UTOPIC_NATIVE_DIR"):
         print(f"Using external Utopic source at {native_dir}")
+    elif native_dir == PACKAGED_NATIVE_DIR:
+        print(f"Using packaged Utopic source at {native_dir}")
     else:
         print(f"Managing Utopic source at {native_dir}")
         _clone_or_checkout(
