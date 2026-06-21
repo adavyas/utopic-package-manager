@@ -86,6 +86,40 @@ class InstallerTests(unittest.TestCase):
         self.assertTrue(run.called)
         self.assertTrue(all(call.kwargs["dry_run"] for call in run.call_args_list))
 
+    def test_setup_help_keeps_llama_checkout_internal(self):
+        out = StringIO()
+        with redirect_stdout(out):
+            with self.assertRaises(SystemExit):
+                installer.setup(["--help"])
+
+        help_text = out.getvalue()
+        self.assertIn("utopic setup", help_text)
+        self.assertNotIn("--llama-dir", help_text)
+        self.assertNotIn("--skip-llama-build", help_text)
+        self.assertNotIn("llama.cpp checkout", help_text)
+
+    def test_backend_cuda_adds_cuda_cmake_flag(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.dict(os.environ, {"UTOPIC_HOME": tmp}, clear=True):
+                with mock.patch.object(installer, "_run") as run:
+                    with redirect_stdout(StringIO()):
+                        result = installer.setup(["--dry-run", "--backend", "cuda"])
+
+        self.assertEqual(result, 0)
+        commands = [call.args[0] for call in run.call_args_list]
+        self.assertIn(
+            [
+                "cmake",
+                "-B",
+                Path(tmp) / "src" / "llama.cpp" / "build",
+                "-S",
+                Path(tmp) / "src" / "llama.cpp",
+                *installer.LLAMA_CMAKE_FLAGS,
+                "-DGGML_CUDA=ON",
+            ],
+            commands,
+        )
+
     def test_setup_dry_run_fetches_and_patches_managed_llama(self):
         with tempfile.TemporaryDirectory() as tmp:
             with mock.patch.dict(os.environ, {"UTOPIC_HOME": tmp}, clear=True):
@@ -124,6 +158,13 @@ class PackagingTests(unittest.TestCase):
 
     def test_no_package_manager_cmake_entrypoint(self):
         self.assertFalse((ROOT / "CMakeLists.txt").exists())
+
+    def test_readme_keeps_user_setup_package_managed(self):
+        text = (ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertIn("utopic setup", text)
+        self.assertIn("package-managed", text)
+        self.assertNotIn("utopic setup --llama-dir", text)
+        self.assertNotIn("UTOPIC_LLAMACPP_DIR", text)
 
 
 if __name__ == "__main__":

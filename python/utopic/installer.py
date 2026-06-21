@@ -23,6 +23,7 @@ LLAMA_CMAKE_FLAGS = (
     "-DLLAMA_BUILD_TESTS=OFF",
     "-DLLAMA_BUILD_TOOLS=OFF",
 )
+BACKENDS = ("auto", "cpu", "cuda")
 
 
 def llama_patch_path() -> Path:
@@ -103,9 +104,9 @@ def _apply_llama_patch(llama_dir: Path, *, dry_run: bool) -> None:
     _run(["git", "apply", patch], cwd=llama_dir, dry_run=dry_run)
 
 
-def _build_llama(llama_dir: Path, *, cuda: bool, dry_run: bool) -> None:
+def _build_llama(llama_dir: Path, *, backend: str, dry_run: bool) -> None:
     command = ["cmake", "-B", llama_dir / "build", "-S", llama_dir, *LLAMA_CMAKE_FLAGS]
-    if cuda:
+    if backend == "cuda":
         command.append("-DGGML_CUDA=ON")
     _run(command, dry_run=dry_run)
     _run(["cmake", "--build", llama_dir / "build", "-j"], dry_run=dry_run)
@@ -157,21 +158,28 @@ def _install_binaries(build_dir: Path) -> None:
 def setup(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         prog="utopic setup",
-        description="Build and cache the Utopic native runtime binaries.",
+        description="Build and cache Utopic from package-managed native sources.",
     )
-    parser.add_argument("--cuda", action="store_true", help="Build llama.cpp with GGML_CUDA=ON.")
+    parser.add_argument(
+        "--backend",
+        choices=BACKENDS,
+        default=os.environ.get("UTOPIC_BACKEND", "auto"),
+        help="Native acceleration backend to build. Use cuda on NVIDIA hosts.",
+    )
+    parser.add_argument("--cuda", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--dry-run", action="store_true", help="Print commands without running them.")
     parser.add_argument("--force", action="store_true", help="Remove cached binaries before rebuilding.")
-    parser.add_argument("--llama-dir", help="Use an existing llama.cpp checkout instead of the managed cache.")
-    parser.add_argument("--native-dir", help="Use an existing Utopic checkout instead of the managed cache.")
+    parser.add_argument("--llama-dir", help=argparse.SUPPRESS)
+    parser.add_argument("--native-dir", help=argparse.SUPPRESS)
     parser.add_argument(
         "--skip-llama-build",
         action="store_true",
-        help="Do not run the llama.cpp CMake build before building Utopic.",
+        help=argparse.SUPPRESS,
     )
     args = parser.parse_args(list(argv) if argv is not None else None)
 
     dry_run = bool(args.dry_run)
+    backend = "cuda" if args.cuda else args.backend
     llama_dir = Path(args.llama_dir).expanduser() if args.llama_dir else default_llama_dir()
     native_dir = Path(args.native_dir).expanduser() if args.native_dir else default_native_dir()
 
@@ -181,8 +189,9 @@ def setup(argv: Optional[Sequence[str]] = None) -> int:
             shutil.rmtree(bin_dir())
 
     if args.llama_dir or os.environ.get("UTOPIC_LLAMACPP_DIR"):
-        print(f"Using llama.cpp checkout at {llama_dir}")
+        print(f"Using external llama.cpp source at {llama_dir}")
     else:
+        print(f"Managing llama.cpp source at {llama_dir}")
         _clone_or_checkout(
             os.environ.get("UTOPIC_LLAMA_REPO", LLAMA_REPO),
             os.environ.get("UTOPIC_LLAMA_REF", LLAMA_REF),
@@ -196,11 +205,12 @@ def setup(argv: Optional[Sequence[str]] = None) -> int:
         _verify_llama_apis(llama_dir)
 
     if not args.skip_llama_build:
-        _build_llama(llama_dir, cuda=bool(args.cuda), dry_run=dry_run)
+        _build_llama(llama_dir, backend=backend, dry_run=dry_run)
 
     if args.native_dir or os.environ.get("UTOPIC_NATIVE_DIR"):
-        print(f"Using Utopic checkout at {native_dir}")
+        print(f"Using external Utopic source at {native_dir}")
     else:
+        print(f"Managing Utopic source at {native_dir}")
         _clone_or_checkout(
             os.environ.get("UTOPIC_NATIVE_REPO", UTOPIC_NATIVE_REPO),
             os.environ.get("UTOPIC_NATIVE_REF", UTOPIC_NATIVE_REF),
