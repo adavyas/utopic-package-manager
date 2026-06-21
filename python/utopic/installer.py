@@ -8,9 +8,9 @@ from typing import Mapping, Optional, Sequence
 
 PACKAGE_DIR = Path(__file__).resolve().parent
 UTOPIC_NATIVE_REPO = "https://github.com/adavyas/utopic.git"
-UTOPIC_NATIVE_REF = "8f89b1351ee9908eeffec1f202e3737faaf028f7"
+UTOPIC_NATIVE_REF = "92ca14f12fe45f78d605511bc4e7e21c3ed9bebd"
 LLAMA_REPO = "https://github.com/ggml-org/llama.cpp.git"
-LLAMA_REF = "9b4dae81f48b96765b6e24539c229c6ec304fc6c"
+LLAMA_REF = "refs/pull/24423/head"
 BIN_NAMES = ("utopic", "utopic_server", "utopic_mcp", "utopic_acp")
 REQUIRED_LLAMA_SYMBOLS = (
     "llama_diffusion_set_sc",
@@ -96,9 +96,15 @@ def _clone_or_checkout(repo: str, ref: str, dest: Path, *, dry_run: bool, reset:
         if not dry_run:
             dest.parent.mkdir(parents=True, exist_ok=True)
         _run(["git", "clone", repo, dest], dry_run=dry_run)
-    _run(["git", "checkout", ref], cwd=dest, dry_run=dry_run)
+
+    checkout_ref = ref
+    if ref.startswith("refs/"):
+        _run(["git", "fetch", "origin", ref], cwd=dest, dry_run=dry_run)
+        checkout_ref = "FETCH_HEAD"
+
+    _run(["git", "checkout", checkout_ref], cwd=dest, dry_run=dry_run)
     if reset:
-        _run(["git", "reset", "--hard", ref], cwd=dest, dry_run=dry_run)
+        _run(["git", "reset", "--hard", checkout_ref], cwd=dest, dry_run=dry_run)
 
 
 def _cuda_compiler_candidates(cuda_architectures: Optional[str] = None) -> list[Path]:

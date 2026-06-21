@@ -3,7 +3,7 @@ from setuptools import find_packages, setup
 
 setup(
     name="utopic",
-    version="0.1.0",
+    version="0.1.1",
     description="Python package manager for the Utopic native runtime",
     package_dir={"": "python"},
     packages=find_packages(where="python"),
