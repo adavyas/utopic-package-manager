@@ -55,3 +55,32 @@ def test_metal_backend_adds_explicit_cmake_flags(monkeypatch, tmp_path):
     configure = commands[0]
     assert "-DGGML_METAL=ON" in configure
     assert "-DGGML_CUDA=OFF" in configure
+
+
+def test_build_utopic_clears_stale_cmake_cache_when_source_changes(monkeypatch, tmp_path):
+    cache_root = tmp_path / "cache"
+    old_source = cache_root / "src" / "Utopic" / "native"
+    new_source = tmp_path / "site-packages" / "utopic" / "native"
+    llama_dir = cache_root / "src" / "llama.cpp"
+    build_dir = cache_root / "build" / "utopic"
+
+    old_source.mkdir(parents=True)
+    new_source.mkdir(parents=True)
+    llama_dir.mkdir(parents=True)
+    build_dir.mkdir(parents=True)
+    (new_source / "CMakeLists.txt").write_text("cmake_minimum_required(VERSION 3.20)\n", encoding="utf-8")
+    (build_dir / "CMakeCache.txt").write_text(
+        f"CMAKE_HOME_DIRECTORY:INTERNAL={old_source}\n",
+        encoding="utf-8",
+    )
+    stale_marker = build_dir / "stale-object.o"
+    stale_marker.write_text("old build output", encoding="utf-8")
+
+    commands = []
+    monkeypatch.setattr(installer, "build_root", lambda: cache_root / "build")
+    monkeypatch.setattr(installer, "_run", lambda command, **kwargs: commands.append(command))
+
+    installer._build_utopic(new_source, llama_dir, jobs=None, dry_run=False)
+
+    assert not stale_marker.exists()
+    assert commands[0][:5] == ["cmake", "-B", build_dir, "-S", new_source]

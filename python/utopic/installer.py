@@ -361,11 +361,36 @@ def _native_cmake_source(native_dir: Path) -> Path:
     return native_dir / "native"
 
 
+def _normalize_path(path: Path) -> Path:
+    return path.expanduser().resolve(strict=False)
+
+
+def _cached_cmake_source(build_dir: Path) -> Optional[Path]:
+    cache = build_dir / "CMakeCache.txt"
+    if not cache.exists():
+        return None
+    for line in cache.read_text(encoding="utf-8", errors="replace").splitlines():
+        if line.startswith("CMAKE_HOME_DIRECTORY:INTERNAL="):
+            return _normalize_path(Path(line.split("=", 1)[1]))
+    return None
+
+
+def _prepare_cmake_build_dir(build_dir: Path, source_dir: Path, *, dry_run: bool) -> None:
+    cached_source = _cached_cmake_source(build_dir)
+    if cached_source is None or cached_source == _normalize_path(source_dir):
+        return
+    print(f"+ remove stale CMake build directory {build_dir}")
+    if not dry_run:
+        shutil.rmtree(build_dir)
+
+
 def _build_utopic(native_dir: Path, llama_dir: Path, *, jobs: Optional[int], dry_run: bool) -> Path:
     out_dir = build_root() / "utopic"
+    source_dir = _native_cmake_source(native_dir)
+    _prepare_cmake_build_dir(out_dir, source_dir, dry_run=dry_run)
 
     _run(
-        ["cmake", "-B", out_dir, "-S", _native_cmake_source(native_dir), f"-DUTOPIC_LLAMACPP_DIR={llama_dir}"],
+        ["cmake", "-B", out_dir, "-S", source_dir, f"-DUTOPIC_LLAMACPP_DIR={llama_dir}"],
         dry_run=dry_run,
     )
     _run(_build_command(out_dir, jobs=jobs), dry_run=dry_run)

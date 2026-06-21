@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "utopic"
-version = "0.1.2"
+version = "0.1.3"
 description = "Python package manager for the Utopic native runtime"
 readme = "README.md"
 requires-python = ">=3.9"
