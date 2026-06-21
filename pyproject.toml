@@ -29,7 +29,7 @@ classifiers = [
 [project.urls]
 Homepage = "https://github.com/adavyas/utopic-package-manager"
 Source = "https://github.com/adavyas/utopic-package-manager"
-NativeRuntime = "https://github.com/adavyas/Utopic"
+NativeRuntime = "https://github.com/adavyas/utopic"
 
 [project.scripts]
 utopic = "utopic.cli:main"
