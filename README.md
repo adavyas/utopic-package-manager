@@ -3,7 +3,7 @@
 Python package management for the Utopic native runtime.
 
 This repository is intentionally thin. The wheel installs Python launchers only.
-Native source checkout, compatibility patching, CMake configuration, and binary
+Native source checkout, compatibility patching, build configuration, and binary
 installation all happen later through `utopic setup`.
 
 ## Install
@@ -80,15 +80,15 @@ curl http://127.0.0.1:8910/v1/models
 
 The package manager owns the user-facing setup path:
 
-- fetch the pinned compatible native and llama.cpp sources
-- apply Utopic's llama.cpp compatibility overlay
-- configure CMake for CPU or CUDA, including CUDA compiler and architecture detection
-- build llama.cpp and Utopic
+- fetch the pinned compatible native runtime and dependency sources
+- apply Utopic's native compatibility overlay
+- configure the native build for CPU or CUDA, including CUDA compiler and architecture detection
+- build the dependency layer and Utopic
 - copy the final binaries into the Utopic cache
 
 The published wheel stays pure Python and does not fetch or compile native code
-during `pip install`. Users should not need to clone llama.cpp or run CMake
-directly for normal setup.
+during `pip install`. Users should not need to clone dependency repositories or
+run build-system commands directly for normal setup.
 
 ## Development
 

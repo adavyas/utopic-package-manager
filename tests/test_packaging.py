@@ -266,6 +266,20 @@ class InstallerTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "llama_diffusion_set_block_decode"):
                 installer._verify_llama_apis(Path(tmp))
 
+    def test_verify_llama_apis_keeps_escape_hatches_internal(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            include = Path(tmp) / "include"
+            include.mkdir()
+            (include / "llama.h").write_text("llama_diffusion_set_sc\n", encoding="utf-8")
+
+            with self.assertRaises(RuntimeError) as raised:
+                installer._verify_llama_apis(Path(tmp))
+
+        message = str(raised.exception)
+        self.assertIn("utopic setup --force", message)
+        self.assertNotIn("--llama-dir", message)
+        self.assertNotIn("UTOPIC_LLAMACPP_DIR", message)
+
 
 class PackagingTests(unittest.TestCase):
     def test_pyproject_uses_pure_python_build_backend(self):

@@ -206,15 +206,17 @@ def _build_llama(
 def _verify_llama_apis(llama_dir: Path) -> None:
     header = llama_dir / "include" / "llama.h"
     if not header.exists():
-        raise RuntimeError(f"llama.cpp header was not found: {header}")
+        raise RuntimeError(
+            f"Utopic native dependency header was not found: {header}. "
+            "Run `utopic setup --force` to refresh the package-managed sources."
+        )
     text = header.read_text(encoding="utf-8")
     missing = [symbol for symbol in REQUIRED_LLAMA_SYMBOLS if symbol not in text]
     if missing:
         names = ", ".join(missing)
         raise RuntimeError(
-            "This llama.cpp checkout is missing Utopic diffusion APIs: "
-            f"{names}. Use a Utopic-compatible checkout with --llama-dir, "
-            "or set UTOPIC_LLAMA_REPO and UTOPIC_LLAMA_REF before running `utopic setup`."
+            "The Utopic native dependency is missing required diffusion APIs: "
+            f"{names}. Run `utopic setup --force` to refresh the package-managed sources."
         )
 
 
@@ -291,9 +293,9 @@ def setup(argv: Optional[Sequence[str]] = None) -> int:
             shutil.rmtree(bin_dir())
 
     if args.llama_dir or os.environ.get("UTOPIC_LLAMACPP_DIR"):
-        print(f"Using external llama.cpp source at {llama_dir}")
+        print(f"Using maintainer-provided native dependency source at {llama_dir}")
     else:
-        print(f"Managing llama.cpp source at {llama_dir}")
+        print(f"Managing native dependency source at {llama_dir}")
         _clone_or_checkout(
             os.environ.get("UTOPIC_LLAMA_REPO", LLAMA_REPO),
             os.environ.get("UTOPIC_LLAMA_REF", LLAMA_REF),
