@@ -8,15 +8,14 @@ from typing import Mapping, Optional, Sequence
 
 PACKAGE_DIR = Path(__file__).resolve().parent
 UTOPIC_NATIVE_REPO = "https://github.com/adavyas/Utopic.git"
-UTOPIC_NATIVE_REF = "b704c5ce7341ee594df86132a39a2807b2c2e698"
-LLAMA_REPO = "https://github.com/danielhanchen/llama.cpp.git"
-LLAMA_REF = "ef5e2dcce81881ffad262576d073f25ca6c1ad50"
+UTOPIC_NATIVE_REF = "2563eea6fb38f686989934a318d418380d3eb4c2"
+LLAMA_REPO = "https://github.com/ggml-org/llama.cpp.git"
+LLAMA_REF = "9b4dae81f48b96765b6e24539c229c6ec304fc6c"
 BIN_NAMES = ("utopic", "utopic_server", "utopic_mcp", "utopic_acp")
 REQUIRED_LLAMA_SYMBOLS = (
     "llama_diffusion_set_sc",
     "llama_diffusion_device_sample",
     "llama_diffusion_set_phase",
-    "llama_diffusion_set_block_decode",
 )
 LLAMA_CMAKE_FLAGS = (
     "-DLLAMA_BUILD_EXAMPLES=OFF",
@@ -33,10 +32,6 @@ def _positive_int(value: str) -> int:
     if parsed < 1:
         raise argparse.ArgumentTypeError("must be at least 1")
     return parsed
-
-
-def llama_patch_path() -> Path:
-    return PACKAGE_DIR / "patches" / "llama.cpp-utopic.patch"
 
 
 def cache_root() -> Path:
@@ -104,13 +99,6 @@ def _clone_or_checkout(repo: str, ref: str, dest: Path, *, dry_run: bool, reset:
     _run(["git", "checkout", ref], cwd=dest, dry_run=dry_run)
     if reset:
         _run(["git", "reset", "--hard", ref], cwd=dest, dry_run=dry_run)
-
-
-def _apply_llama_patch(llama_dir: Path, *, dry_run: bool) -> None:
-    patch = llama_patch_path()
-    if not dry_run and not patch.exists():
-        raise RuntimeError(f"Utopic llama.cpp compatibility patch was not found: {patch}")
-    _run(["git", "apply", patch], cwd=llama_dir, dry_run=dry_run)
 
 
 def _cuda_compiler_candidates(cuda_architectures: Optional[str] = None) -> list[Path]:
@@ -222,15 +210,12 @@ def _verify_llama_apis(llama_dir: Path) -> None:
 
 def _build_utopic(native_dir: Path, llama_dir: Path, *, jobs: Optional[int], dry_run: bool) -> Path:
     out_dir = build_root() / "utopic"
-    env = os.environ.copy()
-    env["UTOPIC_LLAMACPP_DIR"] = str(llama_dir)
 
     _run(
-        ["cmake", "-B", out_dir, "-S", native_dir / "native"],
-        env=env,
+        ["cmake", "-B", out_dir, "-S", native_dir / "native", f"-DUTOPIC_LLAMACPP_DIR={llama_dir}"],
         dry_run=dry_run,
     )
-    _run(_build_command(out_dir, jobs=jobs), env=env, dry_run=dry_run)
+    _run(_build_command(out_dir, jobs=jobs), dry_run=dry_run)
     return out_dir
 
 
@@ -303,7 +288,6 @@ def setup(argv: Optional[Sequence[str]] = None) -> int:
             dry_run=dry_run,
             reset=True,
         )
-        _apply_llama_patch(llama_dir, dry_run=dry_run)
 
     if not dry_run:
         _verify_llama_apis(llama_dir)

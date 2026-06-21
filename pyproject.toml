@@ -39,6 +39,3 @@ utopic-acp = "utopic.acp:main"
 
 [tool.setuptools.packages.find]
 where = ["python"]
-
-[tool.setuptools.package-data]
-utopic = ["patches/*.patch"]

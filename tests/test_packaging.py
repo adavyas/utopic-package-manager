@@ -232,7 +232,27 @@ class InstallerTests(unittest.TestCase):
         self.assertIn(["cmake", "--build", Path(tmp) / "src" / "llama.cpp" / "build", "-j", "2"], commands)
         self.assertIn(["cmake", "--build", Path(tmp) / "build" / "utopic", "-j", "2"], commands)
 
-    def test_setup_dry_run_fetches_and_patches_managed_llama(self):
+    def test_setup_passes_managed_dependency_as_internal_cmake_option(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.dict(os.environ, {"UTOPIC_HOME": tmp}, clear=True):
+                with mock.patch.object(installer, "_run") as run:
+                    with redirect_stdout(StringIO()):
+                        result = installer.setup(["--dry-run"])
+
+        self.assertEqual(result, 0)
+        configure_calls = [
+            call for call in run.call_args_list if call.args[0][:2] == ["cmake", "-B"]
+        ]
+        utopic_configure = next(
+            call for call in configure_calls if call.args[0][2] == Path(tmp) / "build" / "utopic"
+        )
+        self.assertIn(
+            f"-DUTOPIC_LLAMACPP_DIR={Path(tmp) / 'src' / 'llama.cpp'}",
+            utopic_configure.args[0],
+        )
+        self.assertNotIn("UTOPIC_LLAMACPP_DIR", utopic_configure.kwargs.get("env", {}))
+
+    def test_setup_dry_run_fetches_managed_dependency_without_patch_overlay(self):
         with tempfile.TemporaryDirectory() as tmp:
             with mock.patch.dict(os.environ, {"UTOPIC_HOME": tmp}, clear=True):
                 with mock.patch.object(installer, "_run") as run:
@@ -243,12 +263,11 @@ class InstallerTests(unittest.TestCase):
         commands = [call.args[0] for call in run.call_args_list]
         self.assertIn(["git", "clone", installer.LLAMA_REPO, Path(tmp) / "src" / "llama.cpp"], commands)
         self.assertIn(["git", "checkout", installer.LLAMA_REF], commands)
-        self.assertIn(["git", "apply", installer.llama_patch_path()], commands)
+        self.assertFalse(any(command[:2] == ["git", "apply"] for command in commands))
 
-    def test_default_llama_source_is_package_managed_compatible_pin(self):
-        self.assertNotEqual(installer.LLAMA_REPO, "https://github.com/ggml-org/llama.cpp.git")
+    def test_default_llama_source_is_official_stock_good_pin(self):
+        self.assertEqual(installer.LLAMA_REPO, "https://github.com/ggml-org/llama.cpp.git")
         self.assertRegex(installer.LLAMA_REF, r"^[0-9a-f]{40}$")
-        self.assertTrue(installer.llama_patch_path().exists())
 
     def test_llama_build_flags_disable_user_facing_llama_targets(self):
         self.assertIn("-DLLAMA_BUILD_EXAMPLES=OFF", installer.LLAMA_CMAKE_FLAGS)
@@ -263,7 +282,7 @@ class InstallerTests(unittest.TestCase):
             include.mkdir()
             (include / "llama.h").write_text("llama_diffusion_set_sc\n", encoding="utf-8")
 
-            with self.assertRaisesRegex(RuntimeError, "llama_diffusion_set_block_decode"):
+            with self.assertRaisesRegex(RuntimeError, "llama_diffusion_device_sample"):
                 installer._verify_llama_apis(Path(tmp))
 
     def test_verify_llama_apis_keeps_escape_hatches_internal(self):
@@ -287,7 +306,7 @@ class PackagingTests(unittest.TestCase):
         self.assertIn('build-backend = "setuptools.build_meta"', text)
         self.assertNotIn("scikit-build-core", text)
         self.assertNotIn("[tool.scikit-build]", text)
-        self.assertIn('utopic = ["patches/*.patch"]', text)
+        self.assertNotIn("patches/*.patch", text)
 
     def test_setup_py_keeps_old_setuptools_metadata_usable(self):
         text = (ROOT / "setup.py").read_text(encoding="utf-8")
@@ -303,6 +322,7 @@ class PackagingTests(unittest.TestCase):
         self.assertIn("utopic setup", text)
         self.assertIn("package-managed", text)
         self.assertIn("python3 -m venv", text)
+        self.assertNotIn("compatibility overlay", text)
         self.assertNotIn("CUDACXX=/usr/local/cuda-13.0/bin/nvcc", text)
         self.assertNotIn("utopic setup --llama-dir", text)
         self.assertNotIn("UTOPIC_LLAMACPP_DIR", text)
