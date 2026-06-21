@@ -126,6 +126,29 @@ class InstallerTests(unittest.TestCase):
             commands,
         )
 
+    def test_backend_cpu_disables_gpu_backends(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.dict(os.environ, {"UTOPIC_HOME": tmp}, clear=True):
+                with mock.patch.object(installer, "_run") as run:
+                    with redirect_stdout(StringIO()):
+                        result = installer.setup(["--dry-run", "--backend", "cpu"])
+
+        self.assertEqual(result, 0)
+        commands = [call.args[0] for call in run.call_args_list]
+        self.assertIn(
+            [
+                "cmake",
+                "-B",
+                Path(tmp) / "src" / "llama.cpp" / "build",
+                "-S",
+                Path(tmp) / "src" / "llama.cpp",
+                *installer.LLAMA_CMAKE_FLAGS,
+                "-DGGML_CUDA=OFF",
+                "-DGGML_METAL=OFF",
+            ],
+            commands,
+        )
+
     def test_backend_cuda_adds_discovered_nvcc_path(self):
         with tempfile.TemporaryDirectory() as tmp:
             nvcc = Path(tmp) / "cuda" / "bin" / "nvcc"

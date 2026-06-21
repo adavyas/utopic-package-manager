@@ -8,7 +8,7 @@ from typing import Mapping, Optional, Sequence
 
 PACKAGE_DIR = Path(__file__).resolve().parent
 UTOPIC_NATIVE_REPO = "https://github.com/adavyas/Utopic.git"
-UTOPIC_NATIVE_REF = "2563eea6fb38f686989934a318d418380d3eb4c2"
+UTOPIC_NATIVE_REF = "dad769dd687feda089d7cd36d780cd9e6c979a3a"
 LLAMA_REPO = "https://github.com/ggml-org/llama.cpp.git"
 LLAMA_REF = "9b4dae81f48b96765b6e24539c229c6ec304fc6c"
 BIN_NAMES = ("utopic", "utopic_server", "utopic_mcp", "utopic_acp")
@@ -178,7 +178,9 @@ def _build_llama(
     dry_run: bool,
 ) -> None:
     command = ["cmake", "-B", llama_dir / "build", "-S", llama_dir, *LLAMA_CMAKE_FLAGS]
-    if backend == "cuda":
+    if backend == "cpu":
+        command.extend(["-DGGML_CUDA=OFF", "-DGGML_METAL=OFF"])
+    elif backend == "cuda":
         command.append("-DGGML_CUDA=ON")
         if cuda_architectures is None:
             cuda_architectures = _detect_cuda_architectures()

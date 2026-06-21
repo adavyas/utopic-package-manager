@@ -39,6 +39,12 @@ constrained hosts, limit build parallelism:
 utopic setup --backend cuda --jobs 2
 ```
 
+If a Mac cannot initialize Metal, or you want a portable CPU-only build:
+
+```sh
+utopic setup --backend cpu
+```
+
 For local development from this checkout:
 
 ```sh
