@@ -292,6 +292,12 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(installer.LLAMA_REPO, "https://github.com/ggml-org/llama.cpp.git")
         self.assertRegex(installer.LLAMA_REF, r"^[0-9a-f]{40}$")
 
+    def test_default_utopic_source_uses_package_managed_dependency_contract(self):
+        self.assertEqual(
+            installer.UTOPIC_NATIVE_REF,
+            "70ef26f20e712377259f7a02abe2169362e23a57",
+        )
+
     def test_llama_build_flags_disable_user_facing_llama_targets(self):
         self.assertIn("-DLLAMA_BUILD_EXAMPLES=OFF", installer.LLAMA_CMAKE_FLAGS)
         self.assertIn("-DLLAMA_BUILD_TESTS=OFF", installer.LLAMA_CMAKE_FLAGS)
