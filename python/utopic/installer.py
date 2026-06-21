@@ -8,7 +8,7 @@ from typing import Mapping, Optional, Sequence
 
 PACKAGE_DIR = Path(__file__).resolve().parent
 UTOPIC_NATIVE_REPO = "https://github.com/adavyas/Utopic.git"
-UTOPIC_NATIVE_REF = "6943cab5a80ac165bd6c4a14962c6d4b64cb6226"
+UTOPIC_NATIVE_REF = "06e3774ca50535d20b7cc923281ca0f4e6018664"
 LLAMA_REPO = "https://github.com/danielhanchen/llama.cpp.git"
 LLAMA_REF = "ef5e2dcce81881ffad262576d073f25ca6c1ad50"
 BIN_NAMES = ("utopic", "utopic_server", "utopic_mcp", "utopic_acp")
