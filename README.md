@@ -3,38 +3,60 @@
 Python packaging for the Utopic native runtime.
 
 This repository is intentionally thin. It does not carry the C++ runtime source.
-During a pip build it fetches the pinned native Utopic repository, builds the
-native binaries with CMake through `scikit-build-core`, and installs Python
-console entrypoints that exec those packaged binaries.
+`pip install` only installs Python launchers. The native C++ build happens later
+through `utopic setup`, which fetches pinned sources, builds them with CMake, and
+caches the resulting binaries under `~/.cache/utopic/bin`.
 
 ## Install
 
-Utopic currently links against a diffusion-capable llama.cpp checkout. Build
-that dependency first, then point the package build at it:
+Install the package:
 
 ```sh
-git clone https://github.com/ggml-org/llama.cpp ~/llama.cpp
-cmake -B ~/llama.cpp/build -S ~/llama.cpp
-cmake --build ~/llama.cpp/build -j
-
 git clone https://github.com/adavyas/utopic-package-manager.git
 cd utopic-package-manager
-UTOPIC_LLAMACPP_DIR=~/llama.cpp pip install .
+pip install .
 ```
 
-For CUDA llama.cpp builds:
+Build and cache the native runtime:
 
 ```sh
-cmake -B ~/llama.cpp/build -S ~/llama.cpp -DGGML_CUDA=ON
-cmake --build ~/llama.cpp/build -j
+utopic setup
 ```
 
-If you are developing against a local Utopic native checkout instead of the
-pinned GitHub revision:
+`utopic setup` expects a llama.cpp checkout that exports Utopic's diffusion APIs,
+including `llama_diffusion_set_sc`, `llama_diffusion_device_sample`,
+`llama_diffusion_set_phase`, and `llama_diffusion_set_block_decode`. If your
+checkout lives somewhere else:
 
 ```sh
-UTOPIC_LLAMACPP_DIR=/path/to/llama.cpp \
-pip install . --config-settings=cmake.define.UTOPIC_NATIVE_SOURCE_DIR=/path/to/Utopic
+utopic setup --llama-dir /path/to/compatible/llama.cpp
+```
+
+Setup will build that checkout before building Utopic. If it is already built
+and you only want to rebuild the Utopic binaries:
+
+```sh
+utopic setup --llama-dir /path/to/compatible/llama.cpp --skip-llama-build
+```
+
+For CUDA llama.cpp builds, pass:
+
+```sh
+utopic setup --cuda
+```
+
+To make setup fetch a different llama.cpp source:
+
+```sh
+UTOPIC_LLAMA_REPO=https://github.com/your-org/llama.cpp.git \
+UTOPIC_LLAMA_REF=your-compatible-ref \
+utopic setup
+```
+
+If you are developing against a local native Utopic checkout:
+
+```sh
+utopic setup --native-dir /path/to/Utopic --llama-dir /path/to/llama.cpp
 ```
 
 ## Commands
@@ -49,7 +71,7 @@ The package installs:
 Example:
 
 ```sh
-utopic -m /path/to/model.gguf -p "Answer with one word: 2+2?" -n 16
+utopic run -m /path/to/model.gguf -p "Answer with one word: 2+2?" -n 16
 ```
 
 Server:
@@ -69,5 +91,7 @@ PYTHONPATH=python python -m unittest discover -s tests -p 'test_*.py'
 Build a wheel:
 
 ```sh
-UTOPIC_LLAMACPP_DIR=/path/to/llama.cpp python -m pip wheel . --no-deps -w dist/
+python -m pip wheel . --no-deps -w dist/
 ```
+
+The wheel is pure Python. It should not fetch or compile native code.

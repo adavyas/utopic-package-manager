@@ -1,10 +1,9 @@
 [build-system]
 requires = [
-  "scikit-build-core>=0.10",
-  "cmake>=3.18",
-  "ninja",
+  "setuptools>=69",
+  "wheel",
 ]
-build-backend = "scikit_build_core.build"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "utopic"
@@ -22,7 +21,6 @@ classifiers = [
   "Environment :: Console",
   "Intended Audience :: Developers",
   "License :: OSI Approved :: Apache Software License",
-  "Programming Language :: C++",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3 :: Only",
   "Topic :: Scientific/Engineering :: Artificial Intelligence",
@@ -39,6 +37,5 @@ utopic-server = "utopic.server:main"
 utopic-mcp = "utopic.mcp:main"
 utopic-acp = "utopic.acp:main"
 
-[tool.scikit-build]
-cmake.source-dir = "."
-wheel.packages = ["python/utopic"]
+[tool.setuptools.packages.find]
+where = ["python"]
