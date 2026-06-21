@@ -9,21 +9,40 @@ and binary installation all happen later through `utopic setup`.
 ## Install
 
 ```sh
-pip install git+https://github.com/adavyas/utopic-package-manager.git
+uv tool install utopic
 utopic setup
 ```
 
-On Linux distributions that enforce PEP 668, install the launcher in an isolated
-environment instead of the system Python:
+`utopic setup` detects the best local backend and builds the matching native
+runtime:
+
+- macOS with a usable Metal device: `metal`
+- NVIDIA host with a usable CUDA compiler: `cuda`
+- everything else: `cpu`
+
+The setup command prints the selected backend, detected device, and reason before
+building. It installs runtime binaries under `~/.cache/utopic/bin`.
+
+If you prefer a project-local environment:
 
 ```sh
 python3 -m venv ~/.venvs/utopic
-~/.venvs/utopic/bin/pip install git+https://github.com/adavyas/utopic-package-manager.git
+~/.venvs/utopic/bin/pip install utopic
 ~/.venvs/utopic/bin/utopic setup
 ```
 
-`utopic setup` builds from package-managed native sources and installs the
-runtime binaries under `~/.cache/utopic/bin`.
+For local development from this checkout:
+
+```sh
+git clone https://github.com/adavyas/utopic-package-manager.git
+cd utopic-package-manager
+pip install .
+utopic setup
+```
+
+## Backend Overrides
+
+Most users should run plain `utopic setup`. To force a backend:
 
 On NVIDIA hosts, build the CUDA backend:
 
@@ -45,13 +64,10 @@ If a Mac cannot initialize Metal, or you want a portable CPU-only build:
 utopic setup --backend cpu
 ```
 
-For local development from this checkout:
+To force Metal on macOS:
 
 ```sh
-git clone https://github.com/adavyas/utopic-package-manager.git
-cd utopic-package-manager
-pip install .
-utopic setup
+utopic setup --backend metal
 ```
 
 ## Commands

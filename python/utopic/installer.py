@@ -1,7 +1,10 @@
 import argparse
 import os
+import platform
 import shutil
 import subprocess
+import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping, Optional, Sequence
 
@@ -25,7 +28,15 @@ LLAMA_CMAKE_FLAGS = (
     "-DLLAMA_BUILD_SERVER=OFF",
     "-DLLAMA_BUILD_APP=OFF",
 )
-BACKENDS = ("auto", "cpu", "cuda")
+BACKENDS = ("auto", "cpu", "cuda", "metal")
+
+
+@dataclass(frozen=True)
+class BackendDecision:
+    backend: str
+    reason: str
+    device: str
+    cuda_architectures: Optional[str] = None
 
 
 def _positive_int(value: str) -> int:
@@ -171,6 +182,129 @@ def _detect_cuda_architectures() -> Optional[str]:
     return ";".join(arches) if arches else None
 
 
+def _detect_metal_device() -> Optional[str]:
+    if platform.system() != "Darwin":
+        return None
+
+    compiler = shutil.which("clang++") or shutil.which("clang")
+    if compiler is None:
+        return None
+
+    source = """
+#import <Foundation/Foundation.h>
+#import <Metal/Metal.h>
+
+int main() {
+    @autoreleasepool {
+        id<MTLDevice> device = MTLCreateSystemDefaultDevice();
+        if (!device) {
+            printf("device=null\\n");
+            return 2;
+        }
+        id<MTLCommandQueue> queue = [device newCommandQueue];
+        if (!queue) {
+            printf("device=%s\\nqueue=null\\n", [[device name] UTF8String]);
+            return 3;
+        }
+        printf("device=%s\\nqueue=ok\\n", [[device name] UTF8String]);
+        return 0;
+    }
+}
+""".lstrip()
+
+    with tempfile.TemporaryDirectory(prefix="utopic-metal-probe-") as tmp:
+        tmp_dir = Path(tmp)
+        src = tmp_dir / "metal_probe.mm"
+        exe = tmp_dir / "metal_probe"
+        src.write_text(source, encoding="utf-8")
+        compile_result = subprocess.run(
+            [compiler, "-ObjC++", src, "-framework", "Foundation", "-framework", "Metal", "-o", exe],
+            capture_output=True,
+            text=True,
+        )
+        if compile_result.returncode != 0:
+            return None
+
+        run_result = subprocess.run([exe], capture_output=True, text=True)
+        if run_result.returncode != 0:
+            return None
+
+    for line in run_result.stdout.splitlines():
+        if line.startswith("device="):
+            device = line.removeprefix("device=").strip()
+            if device and device != "null":
+                return device
+    return None
+
+
+def _resolve_backend(requested_backend: str, cuda_architectures: Optional[str]) -> BackendDecision:
+    if requested_backend == "auto":
+        metal_device = _detect_metal_device()
+        if metal_device:
+            return BackendDecision(
+                backend="metal",
+                reason="Metal device available",
+                device=metal_device,
+            )
+
+        detected_cuda_architectures = cuda_architectures or _detect_cuda_architectures()
+        cuda_compiler = _find_cuda_compiler(detected_cuda_architectures)
+        if cuda_compiler:
+            device = (
+                f"CUDA arch {detected_cuda_architectures}"
+                if detected_cuda_architectures
+                else "NVIDIA CUDA"
+            )
+            return BackendDecision(
+                backend="cuda",
+                reason="NVIDIA CUDA compiler available",
+                device=device,
+                cuda_architectures=detected_cuda_architectures,
+            )
+
+        return BackendDecision(
+            backend="cpu",
+            reason="No usable Metal device or CUDA compiler found",
+            device="CPU",
+        )
+
+    if requested_backend == "cuda":
+        detected_cuda_architectures = cuda_architectures or _detect_cuda_architectures()
+        device = (
+            f"CUDA arch {detected_cuda_architectures}"
+            if detected_cuda_architectures
+            else "NVIDIA CUDA"
+        )
+        return BackendDecision(
+            backend="cuda",
+            reason="Requested by --backend cuda",
+            device=device,
+            cuda_architectures=detected_cuda_architectures,
+        )
+
+    if requested_backend == "metal":
+        return BackendDecision(
+            backend="metal",
+            reason="Requested by --backend metal",
+            device=_detect_metal_device() or "Metal",
+        )
+
+    return BackendDecision(
+        backend="cpu",
+        reason="Requested by --backend cpu",
+        device="CPU",
+    )
+
+
+def _print_backend_decision(decision: BackendDecision, requested_backend: str) -> None:
+    label = "Detected" if requested_backend == "auto" else "Selected"
+    print(f"{label} backend: {decision.backend}")
+    print(f"Device: {decision.device}")
+    print(f"Reason: {decision.reason}")
+    if decision.cuda_architectures:
+        print(f"CUDA architectures: {decision.cuda_architectures}")
+
+
 def _build_command(build_dir: Path, *, jobs: Optional[int]) -> list[object]:
     command: list[object] = ["cmake", "--build", build_dir, "-j"]
     if jobs is not None:
@@ -198,6 +332,8 @@ def _build_llama(
             command.append(f"-DCMAKE_CUDA_COMPILER={cuda_compiler}")
         if cuda_architectures:
             command.append(f"-DCMAKE_CUDA_ARCHITECTURES={cuda_architectures}")
+    elif backend == "metal":
+        command.extend(["-DGGML_METAL=ON", "-DGGML_CUDA=OFF"])
     _run(command, dry_run=dry_run)
     _run(_build_command(llama_dir / "build", jobs=jobs), dry_run=dry_run)
 
@@ -285,7 +421,9 @@ def setup(argv: Optional[Sequence[str]] = None) -> int:
     args = parser.parse_args(list(argv) if argv is not None else None)
 
     dry_run = bool(args.dry_run)
-    backend = "cuda" if args.cuda else args.backend
+    requested_backend = "cuda" if args.cuda else args.backend
+    backend_decision = _resolve_backend(requested_backend, args.cuda_architectures)
+    _print_backend_decision(backend_decision, requested_backend)
     llama_dir = Path(args.llama_dir).expanduser() if args.llama_dir else default_llama_dir()
     native_dir = Path(args.native_dir).expanduser() if args.native_dir else default_native_dir()
 
@@ -312,8 +450,8 @@ def setup(argv: Optional[Sequence[str]] = None) -> int:
     if not args.skip_llama_build:
         _build_llama(
             llama_dir,
-            backend=backend,
-            cuda_architectures=args.cuda_architectures,
+            backend=backend_decision.backend,
+            cuda_architectures=backend_decision.cuda_architectures,
             jobs=args.jobs,
             dry_run=dry_run,
         )
