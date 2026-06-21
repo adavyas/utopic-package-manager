@@ -22,6 +22,13 @@ On NVIDIA hosts, build the CUDA backend:
 utopic setup --backend cuda
 ```
 
+The CUDA setup path detects `nvcc` and the local GPU architecture when possible.
+On constrained hosts, limit build parallelism:
+
+```sh
+utopic setup --backend cuda --jobs 2
+```
+
 For local development from this checkout:
 
 ```sh
@@ -63,13 +70,15 @@ curl http://127.0.0.1:8910/v1/models
 
 The package manager owns the user-facing setup path:
 
-- fetch the pinned compatible native sources
-- apply Utopic's compatibility overlay
-- configure and build with CMake
+- fetch the pinned compatible native and llama.cpp sources
+- apply Utopic's llama.cpp compatibility overlay
+- configure CMake for CPU or CUDA, including CUDA compiler and architecture detection
+- build llama.cpp and Utopic
 - copy the final binaries into the Utopic cache
 
 The published wheel stays pure Python and does not fetch or compile native code
-during `pip install`.
+during `pip install`. Users should not need to clone llama.cpp or run CMake
+directly for normal setup.
 
 ## Development
 

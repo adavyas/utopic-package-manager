@@ -22,8 +22,17 @@ LLAMA_CMAKE_FLAGS = (
     "-DLLAMA_BUILD_EXAMPLES=OFF",
     "-DLLAMA_BUILD_TESTS=OFF",
     "-DLLAMA_BUILD_TOOLS=OFF",
+    "-DLLAMA_BUILD_SERVER=OFF",
+    "-DLLAMA_BUILD_APP=OFF",
 )
 BACKENDS = ("auto", "cpu", "cuda")
+
+
+def _positive_int(value: str) -> int:
+    parsed = int(value)
+    if parsed < 1:
+        raise argparse.ArgumentTypeError("must be at least 1")
+    return parsed
 
 
 def llama_patch_path() -> Path:
@@ -104,12 +113,79 @@ def _apply_llama_patch(llama_dir: Path, *, dry_run: bool) -> None:
     _run(["git", "apply", patch], cwd=llama_dir, dry_run=dry_run)
 
 
-def _build_llama(llama_dir: Path, *, backend: str, dry_run: bool) -> None:
+def _find_cuda_compiler() -> Optional[Path]:
+    configured = os.environ.get("CUDACXX")
+    if configured:
+        path = Path(configured).expanduser()
+        if path.exists():
+            return path
+
+    found = shutil.which("nvcc")
+    if found:
+        return Path(found)
+
+    for candidate in (
+        Path("/usr/local/cuda/bin/nvcc"),
+        Path("/usr/local/cuda-12.4/bin/nvcc"),
+        Path("/usr/local/cuda-12.3/bin/nvcc"),
+        Path("/usr/local/cuda-12.2/bin/nvcc"),
+        Path("/usr/local/cuda-12.1/bin/nvcc"),
+        Path("/usr/local/cuda-12.0/bin/nvcc"),
+    ):
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _detect_cuda_architectures() -> Optional[str]:
+    try:
+        completed = subprocess.run(
+            ["nvidia-smi", "--query-gpu=compute_cap", "--format=csv,noheader"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return None
+
+    arches: list[str] = []
+    for line in completed.stdout.splitlines():
+        cap = line.strip()
+        if not cap:
+            continue
+        arch = cap.replace(".", "")
+        if arch and arch not in arches:
+            arches.append(arch)
+    return ";".join(arches) if arches else None
+
+
+def _build_command(build_dir: Path, *, jobs: Optional[int]) -> list[object]:
+    command: list[object] = ["cmake", "--build", build_dir, "-j"]
+    if jobs is not None:
+        command.append(str(jobs))
+    return command
+
+
+def _build_llama(
+    llama_dir: Path,
+    *,
+    backend: str,
+    cuda_architectures: Optional[str],
+    jobs: Optional[int],
+    dry_run: bool,
+) -> None:
     command = ["cmake", "-B", llama_dir / "build", "-S", llama_dir, *LLAMA_CMAKE_FLAGS]
     if backend == "cuda":
         command.append("-DGGML_CUDA=ON")
+        cuda_compiler = _find_cuda_compiler()
+        if cuda_compiler:
+            command.append(f"-DCMAKE_CUDA_COMPILER={cuda_compiler}")
+        if cuda_architectures is None:
+            cuda_architectures = _detect_cuda_architectures()
+        if cuda_architectures:
+            command.append(f"-DCMAKE_CUDA_ARCHITECTURES={cuda_architectures}")
     _run(command, dry_run=dry_run)
-    _run(["cmake", "--build", llama_dir / "build", "-j"], dry_run=dry_run)
+    _run(_build_command(llama_dir / "build", jobs=jobs), dry_run=dry_run)
 
 
 def _verify_llama_apis(llama_dir: Path) -> None:
@@ -127,7 +203,7 @@ def _verify_llama_apis(llama_dir: Path) -> None:
         )
 
 
-def _build_utopic(native_dir: Path, llama_dir: Path, *, dry_run: bool) -> Path:
+def _build_utopic(native_dir: Path, llama_dir: Path, *, jobs: Optional[int], dry_run: bool) -> Path:
     out_dir = build_root() / "utopic"
     env = os.environ.copy()
     env["UTOPIC_LLAMACPP_DIR"] = str(llama_dir)
@@ -137,7 +213,7 @@ def _build_utopic(native_dir: Path, llama_dir: Path, *, dry_run: bool) -> Path:
         env=env,
         dry_run=dry_run,
     )
-    _run(["cmake", "--build", out_dir, "-j"], env=env, dry_run=dry_run)
+    _run(_build_command(out_dir, jobs=jobs), env=env, dry_run=dry_run)
     return out_dir
 
 
@@ -167,8 +243,19 @@ def setup(argv: Optional[Sequence[str]] = None) -> int:
         help="Native acceleration backend to build. Use cuda on NVIDIA hosts.",
     )
     parser.add_argument("--cuda", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument(
+        "--cuda-architectures",
+        default=os.environ.get("UTOPIC_CUDA_ARCHITECTURES"),
+        help="CUDA architecture list for llama.cpp, for example 89 on RTX 4090 hosts.",
+    )
     parser.add_argument("--dry-run", action="store_true", help="Print commands without running them.")
     parser.add_argument("--force", action="store_true", help="Remove cached binaries before rebuilding.")
+    parser.add_argument(
+        "--jobs",
+        type=_positive_int,
+        default=int(os.environ["UTOPIC_BUILD_JOBS"]) if os.environ.get("UTOPIC_BUILD_JOBS") else None,
+        help="Limit native build parallelism when disk or temporary space is constrained.",
+    )
     parser.add_argument("--llama-dir", help=argparse.SUPPRESS)
     parser.add_argument("--native-dir", help=argparse.SUPPRESS)
     parser.add_argument(
@@ -205,7 +292,13 @@ def setup(argv: Optional[Sequence[str]] = None) -> int:
         _verify_llama_apis(llama_dir)
 
     if not args.skip_llama_build:
-        _build_llama(llama_dir, backend=backend, dry_run=dry_run)
+        _build_llama(
+            llama_dir,
+            backend=backend,
+            cuda_architectures=args.cuda_architectures,
+            jobs=args.jobs,
+            dry_run=dry_run,
+        )
 
     if args.native_dir or os.environ.get("UTOPIC_NATIVE_DIR"):
         print(f"Using external Utopic source at {native_dir}")
@@ -218,7 +311,7 @@ def setup(argv: Optional[Sequence[str]] = None) -> int:
             dry_run=dry_run,
         )
 
-    native_build_dir = _build_utopic(native_dir, llama_dir, dry_run=dry_run)
+    native_build_dir = _build_utopic(native_dir, llama_dir, jobs=args.jobs, dry_run=dry_run)
     if dry_run:
         print(f"Would install Utopic native binaries to {bin_dir()}")
         return 0

@@ -768,3 +768,213 @@ index a499730..f4d4262 100644
  
      ~llama_model_diffusion_gemma() override;
  
+diff --git a/src/models/diffusion-common.h b/src/models/diffusion-common.h
+new file mode 100644
+index 000000000..bfc34d651
+--- /dev/null
++++ b/src/models/diffusion-common.h
+@@ -0,0 +1,204 @@
++#pragma once
++
++#include "models.h"
++
++#include <algorithm>
++#include <type_traits>
++#include <vector>
++
++// Shared building blocks for diffusion LMs (DiffusionGemma canvas path + LLaDA/Dream masked path):
++// the region-aware attention masks and the device-resident prompt-KV store. Mirrors gemma4-common.h
++// (static-inline cross-arch helpers). The prompt's per-layer K,V are step-invariant within a block, so
++// PREFILL computes them once and DECODE reuses them instead of re-encoding [prompt|canvas] every step.
++
++// Region-aware additive mask for the UNIFIED [prompt | canvas] forward. Prompt queries are causal
++// (SWA-clipped in sliding layers); canvas queries are bidirectional over all prompt+canvas. Canvas->prompt
++// reach: global layers see all prompt, sliding layers only the last (n_swa-1). For swa_type==NONE (LLaDA/
++// Dream) the SWA branches are inert. Note: prompt rows are causal here (DiffusionGemma's design); fully-
++// bidirectional masked models use the plain no-cache path for PREFILL and only need the DECODE mask below.
++class llm_graph_input_attn_diffusion : public llm_graph_input_attn_no_cache {
++public:
++    llm_graph_input_attn_diffusion(const llama_hparams & hparams, const llama_cparams & cparams,
++                                   int64_t n_prompt) :
++        llm_graph_input_attn_no_cache(hparams, cparams), n_prompt(n_prompt) {}
++    ~llm_graph_input_attn_diffusion() = default;
++
++    void set_input(const llama_ubatch * ubatch) override {
++        const int64_t n_tokens = ubatch->n_tokens;
++        const int64_t P        = n_prompt;
++
++        const auto fill = [&](auto * data, bool swa) {
++            using T = std::remove_reference_t<decltype(*data)>;
++            std::fill(data, data + n_tokens * n_tokens, llama_cast<T>(-INFINITY));
++            for (int64_t q = 0; q < n_tokens; ++q) {
++                const bool q_is_canvas = q >= P;
++                const uint64_t row = q * n_tokens;
++                const int64_t canvas_prompt_lo = P - (int64_t) hparams.n_swa + 1;
++                for (int64_t k = 0; k < n_tokens; ++k) {
++                    const bool k_is_canvas = k >= P;
++                    bool allow;
++                    if (q_is_canvas) {
++                        if (swa) {
++                            allow = k_is_canvas || (k >= canvas_prompt_lo);
++                        } else {
++                            allow = true;
++                        }
++                    } else {
++                        allow = (!k_is_canvas) && (k <= q);
++                    }
++                    if (allow && swa && !q_is_canvas &&
++                        llama_hparams::is_masked_swa(hparams.n_swa, hparams.swa_type, k, q)) {
++                        allow = false;
++                    }
++                    if (allow) {
++                        data[row + k] = llama_cast<T>(0.0f);
++                    }
++                }
++            }
++        };
++
++        GGML_ASSERT(self_kq_mask && ggml_backend_buffer_is_host(self_kq_mask->buffer));
++        if (self_kq_mask->type == GGML_TYPE_F16) {
++            fill((ggml_fp16_t *) self_kq_mask->data, false);
++        } else {
++            fill((float *) self_kq_mask->data, false);
++        }
++        if (self_kq_mask_swa) {
++            GGML_ASSERT(ggml_backend_buffer_is_host(self_kq_mask_swa->buffer));
++            if (self_kq_mask_swa->type == GGML_TYPE_F16) {
++                fill((ggml_fp16_t *) self_kq_mask_swa->data, true);
++            } else {
++                fill((float *) self_kq_mask_swa->data, true);
++            }
++        }
++    }
++
++    bool can_reuse(const llm_graph_params & /*params*/) override { return false; }
++
++    int64_t n_prompt;
++};
++
++// DECODE-phase mask (prompt-KV caching): canvas queries over [cached prompt (first P) | fresh canvas
++// (last C)], rectangular [P+C, C]. Global sees all prompt; sliding the last (n_swa-1). For swa_type==NONE
++// (LLaDA/Dream) every key is allowed -> a fully-bidirectional rectangular mask, exactly what masked models
++// need for canvas-only decode.
++class llm_graph_input_attn_diffusion_decode : public llm_graph_input_attn_no_cache {
++public:
++    llm_graph_input_attn_diffusion_decode(const llama_hparams & hparams, const llama_cparams & cparams,
++                                          int64_t n_prompt, int64_t n_canvas) :
++        llm_graph_input_attn_no_cache(hparams, cparams), n_prompt(n_prompt), n_canvas(n_canvas) {}
++    ~llm_graph_input_attn_diffusion_decode() = default;
++
++    void set_input(const llama_ubatch * /*ubatch*/) override {
++        const int64_t P    = n_prompt;
++        const int64_t C    = n_canvas;
++        const int64_t n_kv = P + C;
++        const int64_t canvas_prompt_lo = P - (int64_t) hparams.n_swa + 1;
++
++        const auto fill = [&](auto * data, bool swa) {
++            using T = std::remove_reference_t<decltype(*data)>;
++            std::fill(data, data + n_kv * C, llama_cast<T>(-INFINITY));
++            for (int64_t q = 0; q < C; ++q) {
++                const uint64_t row = q * n_kv;
++                for (int64_t k = 0; k < n_kv; ++k) {
++                    bool allow;
++                    if (k < P) {
++                        allow = swa ? (k >= canvas_prompt_lo) : true;
++                    } else {
++                        allow = true;
++                    }
++                    if (allow) {
++                        data[row + k] = llama_cast<T>(0.0f);
++                    }
++                }
++            }
++        };
++
++        GGML_ASSERT(self_kq_mask && ggml_backend_buffer_is_host(self_kq_mask->buffer));
++        if (self_kq_mask->type == GGML_TYPE_F16) {
++            fill((ggml_fp16_t *) self_kq_mask->data, false);
++        } else {
++            fill((float *) self_kq_mask->data, false);
++        }
++        if (self_kq_mask_swa) {
++            GGML_ASSERT(ggml_backend_buffer_is_host(self_kq_mask_swa->buffer));
++            if (self_kq_mask_swa->type == GGML_TYPE_F16) {
++                fill((ggml_fp16_t *) self_kq_mask_swa->data, true);
++            } else {
++                fill((float *) self_kq_mask_swa->data, true);
++            }
++        }
++    }
++
++    bool can_reuse(const llm_graph_params & /*params*/) override { return false; }
++
++    int64_t n_prompt;
++    int64_t n_canvas;
++};
++
++// Block-decode (Fast-dLLM dual-cache) mask: the active block's n_q queries attend to ALL n_kv keys, where the
++// keys are the full [cached prompt+finished-blocks | fresh active block | cached all-mask suffix]. For
++// swa_type==NONE (LLaDA/Dream) every key is allowed -> an all-zero rectangular [n_kv, n_q] mask. (SWA/canvas
++// block-decode would need the prompt-window structure; future work.)
++class llm_graph_input_attn_diffusion_block : public llm_graph_input_attn_no_cache {
++public:
++    llm_graph_input_attn_diffusion_block(const llama_hparams & hparams, const llama_cparams & cparams,
++                                         int64_t n_kv, int64_t n_q) :
++        llm_graph_input_attn_no_cache(hparams, cparams), n_kv(n_kv), n_q(n_q) {}
++    ~llm_graph_input_attn_diffusion_block() = default;
++
++    void set_input(const llama_ubatch * /*ubatch*/) override {
++        const auto fill = [&](auto * data) {
++            using T = std::remove_reference_t<decltype(*data)>;
++            std::fill(data, data + n_kv * n_q, llama_cast<T>(0.0f));  // fully bidirectional (swa NONE)
++        };
++        GGML_ASSERT(self_kq_mask && ggml_backend_buffer_is_host(self_kq_mask->buffer));
++        if (self_kq_mask->type == GGML_TYPE_F16) { fill((ggml_fp16_t *) self_kq_mask->data); }
++        else                                     { fill((float *) self_kq_mask->data); }
++    }
++
++    bool can_reuse(const llm_graph_params & /*params*/) override { return false; }
++
++    int64_t n_kv;
++    int64_t n_q;
++};
++
++// Lazily (re)allocate the device-resident F32 prompt-KV store (per-layer K,V, grow-only) for a prompt of
++// length P, on layer-0's buffer type (single-GPU; cross-device would need a per-buft context map).
++static inline void diffusion_ensure_pkv_store(const llama_model_diffusion_base & m, int64_t P) {
++    if (m.pkv_buf != nullptr && m.pkv_cap >= P) {
++        return;
++    }
++    if (m.pkv_buf) { ggml_backend_buffer_free(m.pkv_buf); m.pkv_buf = nullptr; }
++    if (m.pkv_ctx) { ggml_free(m.pkv_ctx); m.pkv_ctx = nullptr; }
++    m.pkv_k.clear();
++    m.pkv_v.clear();
++
++    const int     n_layer = (int) m.hparams.n_layer();
++    const int64_t cap     = P;
++
++    ggml_init_params ip = {
++        /*.mem_size   =*/ ggml_tensor_overhead() * (size_t) (2 * n_layer + 4),
++        /*.mem_buffer =*/ nullptr,
++        /*.no_alloc   =*/ true,
++    };
++    m.pkv_ctx = ggml_init(ip);
++    GGML_ASSERT(m.pkv_ctx != nullptr);
++    m.pkv_k.resize(n_layer);
++    m.pkv_v.resize(n_layer);
++    for (int il = 0; il < n_layer; ++il) {
++        const int64_t hd  = m.hparams.n_embd_head_k(il);
++        const int64_t nkv = m.hparams.n_head_kv(il);
++        m.pkv_k[il] = ggml_new_tensor_3d(m.pkv_ctx, GGML_TYPE_F32, hd, nkv, cap);
++        m.pkv_v[il] = ggml_new_tensor_3d(m.pkv_ctx, GGML_TYPE_F32, hd, nkv, cap);
++        ggml_format_name(m.pkv_k[il], "pkv_k_l%d", il);
++        ggml_format_name(m.pkv_v[il], "pkv_v_l%d", il);
++    }
++
++    ggml_backend_dev_t dev = m.dev_layer(0);
++    ggml_backend_buffer_type_t buft = dev ? ggml_backend_dev_buffer_type(dev)
++                                          : ggml_backend_cpu_buffer_type();
++    m.pkv_buf = ggml_backend_alloc_ctx_tensors_from_buft(m.pkv_ctx, buft);
++    GGML_ASSERT(m.pkv_buf != nullptr);
++    m.pkv_cap = cap;
++}

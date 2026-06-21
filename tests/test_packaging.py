@@ -12,6 +12,10 @@ from utopic import _native, cli, installer
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def subprocess_completed(*, stdout: str):
+    return mock.Mock(stdout=stdout)
+
+
 class NativeLauncherTests(unittest.TestCase):
     def test_binary_path_resolves_cached_binary(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -101,9 +105,11 @@ class InstallerTests(unittest.TestCase):
     def test_backend_cuda_adds_cuda_cmake_flag(self):
         with tempfile.TemporaryDirectory() as tmp:
             with mock.patch.dict(os.environ, {"UTOPIC_HOME": tmp}, clear=True):
-                with mock.patch.object(installer, "_run") as run:
-                    with redirect_stdout(StringIO()):
-                        result = installer.setup(["--dry-run", "--backend", "cuda"])
+                with mock.patch.object(installer, "_find_cuda_compiler", return_value=None):
+                    with mock.patch.object(installer, "_detect_cuda_architectures", return_value=None):
+                        with mock.patch.object(installer, "_run") as run:
+                            with redirect_stdout(StringIO()):
+                                result = installer.setup(["--dry-run", "--backend", "cuda"])
 
         self.assertEqual(result, 0)
         commands = [call.args[0] for call in run.call_args_list]
@@ -119,6 +125,104 @@ class InstallerTests(unittest.TestCase):
             ],
             commands,
         )
+
+    def test_backend_cuda_adds_discovered_nvcc_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            nvcc = Path(tmp) / "cuda" / "bin" / "nvcc"
+            nvcc.parent.mkdir(parents=True)
+            nvcc.write_text("", encoding="utf-8")
+
+            with mock.patch.dict(os.environ, {"UTOPIC_HOME": tmp}, clear=True):
+                with mock.patch.object(installer, "_find_cuda_compiler", return_value=nvcc):
+                    with mock.patch.object(installer, "_detect_cuda_architectures", return_value=None):
+                        with mock.patch.object(installer, "_run") as run:
+                            with redirect_stdout(StringIO()):
+                                result = installer.setup(["--dry-run", "--backend", "cuda"])
+
+        self.assertEqual(result, 0)
+        commands = [call.args[0] for call in run.call_args_list]
+        self.assertIn(
+            [
+                "cmake",
+                "-B",
+                Path(tmp) / "src" / "llama.cpp" / "build",
+                "-S",
+                Path(tmp) / "src" / "llama.cpp",
+                *installer.LLAMA_CMAKE_FLAGS,
+                "-DGGML_CUDA=ON",
+                f"-DCMAKE_CUDA_COMPILER={nvcc}",
+            ],
+            commands,
+        )
+
+    def test_backend_cuda_adds_requested_cuda_architectures(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.dict(os.environ, {"UTOPIC_HOME": tmp}, clear=True):
+                with mock.patch.object(installer, "_find_cuda_compiler", return_value=None):
+                    with mock.patch.object(installer, "_run") as run:
+                        with redirect_stdout(StringIO()):
+                            result = installer.setup(
+                                ["--dry-run", "--backend", "cuda", "--cuda-architectures", "89"]
+                            )
+
+        self.assertEqual(result, 0)
+        commands = [call.args[0] for call in run.call_args_list]
+        self.assertIn(
+            [
+                "cmake",
+                "-B",
+                Path(tmp) / "src" / "llama.cpp" / "build",
+                "-S",
+                Path(tmp) / "src" / "llama.cpp",
+                *installer.LLAMA_CMAKE_FLAGS,
+                "-DGGML_CUDA=ON",
+                "-DCMAKE_CUDA_ARCHITECTURES=89",
+            ],
+            commands,
+        )
+
+    def test_backend_cuda_detects_cuda_architectures(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.dict(os.environ, {"UTOPIC_HOME": tmp}, clear=True):
+                with mock.patch.object(installer, "_find_cuda_compiler", return_value=None):
+                    with mock.patch.object(installer, "_detect_cuda_architectures", return_value="89"):
+                        with mock.patch.object(installer, "_run") as run:
+                            with redirect_stdout(StringIO()):
+                                result = installer.setup(["--dry-run", "--backend", "cuda"])
+
+        self.assertEqual(result, 0)
+        commands = [call.args[0] for call in run.call_args_list]
+        self.assertIn(
+            [
+                "cmake",
+                "-B",
+                Path(tmp) / "src" / "llama.cpp" / "build",
+                "-S",
+                Path(tmp) / "src" / "llama.cpp",
+                *installer.LLAMA_CMAKE_FLAGS,
+                "-DGGML_CUDA=ON",
+                "-DCMAKE_CUDA_ARCHITECTURES=89",
+            ],
+            commands,
+        )
+
+    def test_detect_cuda_architectures_deduplicates_nvidia_smi_caps(self):
+        completed = subprocess_completed(stdout="8.9\n8.9\n9.0\n")
+
+        with mock.patch("subprocess.run", return_value=completed):
+            self.assertEqual(installer._detect_cuda_architectures(), "89;90")
+
+    def test_jobs_limits_native_and_llama_build_parallelism(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.dict(os.environ, {"UTOPIC_HOME": tmp}, clear=True):
+                with mock.patch.object(installer, "_run") as run:
+                    with redirect_stdout(StringIO()):
+                        result = installer.setup(["--dry-run", "--jobs", "2"])
+
+        self.assertEqual(result, 0)
+        commands = [call.args[0] for call in run.call_args_list]
+        self.assertIn(["cmake", "--build", Path(tmp) / "src" / "llama.cpp" / "build", "-j", "2"], commands)
+        self.assertIn(["cmake", "--build", Path(tmp) / "build" / "utopic", "-j", "2"], commands)
 
     def test_setup_dry_run_fetches_and_patches_managed_llama(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -138,6 +242,13 @@ class InstallerTests(unittest.TestCase):
         self.assertRegex(installer.LLAMA_REF, r"^[0-9a-f]{40}$")
         self.assertTrue(installer.llama_patch_path().exists())
 
+    def test_llama_build_flags_disable_user_facing_llama_targets(self):
+        self.assertIn("-DLLAMA_BUILD_EXAMPLES=OFF", installer.LLAMA_CMAKE_FLAGS)
+        self.assertIn("-DLLAMA_BUILD_TESTS=OFF", installer.LLAMA_CMAKE_FLAGS)
+        self.assertIn("-DLLAMA_BUILD_TOOLS=OFF", installer.LLAMA_CMAKE_FLAGS)
+        self.assertIn("-DLLAMA_BUILD_SERVER=OFF", installer.LLAMA_CMAKE_FLAGS)
+        self.assertIn("-DLLAMA_BUILD_APP=OFF", installer.LLAMA_CMAKE_FLAGS)
+
     def test_verify_llama_apis_reports_missing_symbols(self):
         with tempfile.TemporaryDirectory() as tmp:
             include = Path(tmp) / "include"
@@ -155,6 +266,12 @@ class PackagingTests(unittest.TestCase):
         self.assertNotIn("scikit-build-core", text)
         self.assertNotIn("[tool.scikit-build]", text)
         self.assertIn('utopic = ["patches/*.patch"]', text)
+
+    def test_setup_py_keeps_old_setuptools_metadata_usable(self):
+        text = (ROOT / "setup.py").read_text(encoding="utf-8")
+        self.assertIn('name="utopic"', text)
+        self.assertIn('version="0.1.0"', text)
+        self.assertIn('"utopic=utopic.cli:main"', text)
 
     def test_no_package_manager_cmake_entrypoint(self):
         self.assertFalse((ROOT / "CMakeLists.txt").exists())
