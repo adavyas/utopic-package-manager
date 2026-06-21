@@ -86,6 +86,24 @@ class InstallerTests(unittest.TestCase):
         self.assertTrue(run.called)
         self.assertTrue(all(call.kwargs["dry_run"] for call in run.call_args_list))
 
+    def test_setup_dry_run_fetches_and_patches_managed_llama(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.dict(os.environ, {"UTOPIC_HOME": tmp}, clear=True):
+                with mock.patch.object(installer, "_run") as run:
+                    with redirect_stdout(StringIO()):
+                        result = installer.setup(["--dry-run"])
+
+        self.assertEqual(result, 0)
+        commands = [call.args[0] for call in run.call_args_list]
+        self.assertIn(["git", "clone", installer.LLAMA_REPO, Path(tmp) / "src" / "llama.cpp"], commands)
+        self.assertIn(["git", "checkout", installer.LLAMA_REF], commands)
+        self.assertIn(["git", "apply", installer.llama_patch_path()], commands)
+
+    def test_default_llama_source_is_package_managed_compatible_pin(self):
+        self.assertNotEqual(installer.LLAMA_REPO, "https://github.com/ggml-org/llama.cpp.git")
+        self.assertRegex(installer.LLAMA_REF, r"^[0-9a-f]{40}$")
+        self.assertTrue(installer.llama_patch_path().exists())
+
     def test_verify_llama_apis_reports_missing_symbols(self):
         with tempfile.TemporaryDirectory() as tmp:
             include = Path(tmp) / "include"
@@ -102,6 +120,7 @@ class PackagingTests(unittest.TestCase):
         self.assertIn('build-backend = "setuptools.build_meta"', text)
         self.assertNotIn("scikit-build-core", text)
         self.assertNotIn("[tool.scikit-build]", text)
+        self.assertIn('utopic = ["patches/*.patch"]', text)
 
     def test_no_package_manager_cmake_entrypoint(self):
         self.assertFalse((ROOT / "CMakeLists.txt").exists())

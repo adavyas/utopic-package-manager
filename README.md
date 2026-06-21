@@ -23,10 +23,20 @@ Build and cache the native runtime:
 utopic setup
 ```
 
-`utopic setup` expects a llama.cpp checkout that exports Utopic's diffusion APIs,
-including `llama_diffusion_set_sc`, `llama_diffusion_device_sample`,
-`llama_diffusion_set_phase`, and `llama_diffusion_set_block_decode`. If your
-checkout lives somewhere else:
+`utopic setup` fetches the package-managed compatible llama.cpp source, applies
+the Utopic compatibility patch, builds llama.cpp, then builds the Utopic native
+binaries.
+
+For CUDA llama.cpp builds, pass:
+
+```sh
+utopic setup --cuda
+```
+
+If you are developing against a local llama.cpp checkout, it must export
+Utopic's diffusion APIs, including `llama_diffusion_set_sc`,
+`llama_diffusion_device_sample`, `llama_diffusion_set_phase`, and
+`llama_diffusion_set_block_decode`:
 
 ```sh
 utopic setup --llama-dir /path/to/compatible/llama.cpp
@@ -39,13 +49,7 @@ and you only want to rebuild the Utopic binaries:
 utopic setup --llama-dir /path/to/compatible/llama.cpp --skip-llama-build
 ```
 
-For CUDA llama.cpp builds, pass:
-
-```sh
-utopic setup --cuda
-```
-
-To make setup fetch a different llama.cpp source:
+To make setup fetch a different llama.cpp source, use the advanced override:
 
 ```sh
 UTOPIC_LLAMA_REPO=https://github.com/your-org/llama.cpp.git \

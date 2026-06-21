@@ -1,0 +1,770 @@
+diff --git a/include/llama.h b/include/llama.h
+index dd33a94..f79ee5c 100644
+--- a/include/llama.h
++++ b/include/llama.h
+@@ -591,21 +591,22 @@ extern "C" {
+                              float     inv_temp);
+ 
+     // DiffusionGemma prompt KV caching: select the forward phase for the next llama_decode (P = block
+-    // prompt length, used to size the store; no-op otherwise).  0 = UNIFIED (no-cache [prompt|canvas]),
+-    // 1 = PREFILL (forward the prompt chunk starting at off, writing the K,V store causally),  2 = DECODE
+-    // (forward the canvas, read the cached prompt K,V).  off is the chunk's global start (PREFILL only;
+-    // pass 0 for an unchunked single-shot prefill).
++    // prompt length; no-op otherwise).  0 = UNIFIED (no-cache [prompt|canvas]),  1 = PREFILL (forward the
++    // P prompt tokens, write the K,V store),  2 = DECODE (forward the canvas, read the cached prompt K,V).
+     LLAMA_API void llama_diffusion_set_phase(
+             struct llama_model * model,
+                            int   phase,
+-                       int32_t   P,
+-                       int32_t   off);
++                       int32_t   P);
+ 
+-    // DiffusionGemma prompt-KV store bytes per prompt token (0 for other models). Pass use_f16 = whether
+-    // flash attention is enabled (the store is F16 under FA, F32 otherwise). Sizes context against the store.
+-    LLAMA_API size_t llama_diffusion_pkv_bytes_per_token(
+-            const struct llama_model * model,
+-                              bool      use_f16);
++    // Fast-dLLM dual-cache: select PKV_BLOCK_DECODE for the next llama_decode. The next forward should contain
++    // ONLY the active block (blkC tokens at absolute positions blk0..blk0+blkC); keys = cached [0,blk0) +
++    // fresh active + cached [blk0+blkC,total). The K/V store must already be populated for [0,total) (e.g. by a
++    // prior PREFILL with P=total over the full [prompt|canvas]). Ensures the store capacity is `total`.
++    LLAMA_API void llama_diffusion_set_block_decode(
++            struct llama_model * model,
++                       int32_t   blk0,
++                       int32_t   blkC,
++                       int32_t   total);
+ 
+     LLAMA_API int32_t llama_model_n_ctx_train(const struct llama_model * model);
+     LLAMA_API int32_t llama_model_n_embd     (const struct llama_model * model);
+diff --git a/src/models/diffusion-gemma.cpp b/src/models/diffusion-gemma.cpp
+index 096f587..3456017 100644
+--- a/src/models/diffusion-gemma.cpp
++++ b/src/models/diffusion-gemma.cpp
+@@ -1,5 +1,6 @@
+ #include "models.h"
+ #include "gemma4-common.h"
++#include "diffusion-common.h"  // shared diffusion attn-mask inputs + prompt-KV store allocator
+ 
+ #include <algorithm>
+ #include <cstring>
+@@ -15,75 +16,8 @@
+ //   3. attention mask: prompt causal over prompt only; canvas bidirectional over all prompt+canvas
+ // The Gemma-4 backbone is identical to gemma4 (shared via gemma4-common.h).
+ 
+-// Region-aware additive mask for the unified [prompt | canvas] forward. Prompt queries are causal
+-// (SWA-clipped in sliding layers); canvas queries are bidirectional. Canvas->prompt reach: global
+-// layers see all prompt, sliding layers only the last (n_swa-1) prompt positions.
+-class llm_graph_input_attn_diffusion : public llm_graph_input_attn_no_cache {
+-public:
+-    llm_graph_input_attn_diffusion(const llama_hparams & hparams, const llama_cparams & cparams,
+-                                   int64_t n_prompt) :
+-        llm_graph_input_attn_no_cache(hparams, cparams), n_prompt(n_prompt) {}
+-    ~llm_graph_input_attn_diffusion() = default;
+-
+-    void set_input(const llama_ubatch * ubatch) override {
+-        const int64_t n_tokens = ubatch->n_tokens;
+-        const int64_t P        = n_prompt;
+-
+-        // swa clips keys outside the sliding window, but only for prompt (causal) queries.
+-        const auto fill = [&](auto * data, bool swa) {
+-            using T = std::remove_reference_t<decltype(*data)>;
+-            std::fill(data, data + n_tokens * n_tokens, llama_cast<T>(-INFINITY));
+-            for (int64_t q = 0; q < n_tokens; ++q) {
+-                const bool q_is_canvas = q >= P;
+-                const uint64_t row = q * n_tokens;
+-                // canvas->prompt sliding bound: last (n_swa-1) prompt positions (<= 0 for short prompts)
+-                const int64_t canvas_prompt_lo = P - (int64_t) hparams.n_swa + 1;
+-                for (int64_t k = 0; k < n_tokens; ++k) {
+-                    const bool k_is_canvas = k >= P;
+-                    bool allow;
+-                    if (q_is_canvas) {
+-                        if (swa) {
+-                            // sliding: last (n_swa-1) prompt + all canvas
+-                            allow = k_is_canvas || (k >= canvas_prompt_lo);
+-                        } else {
+-                            allow = true; // global: all prompt + canvas
+-                        }
+-                    } else {
+-                        // prompt query: causal over earlier prompt, never canvas
+-                        allow = (!k_is_canvas) && (k <= q);
+-                    }
+-                    if (allow && swa && !q_is_canvas &&
+-                        llama_hparams::is_masked_swa(hparams.n_swa, hparams.swa_type, k, q)) {
+-                        allow = false;
+-                    }
+-                    if (allow) {
+-                        data[row + k] = llama_cast<T>(0.0f);
+-                    }
+-                }
+-            }
+-        };
+-
+-        GGML_ASSERT(self_kq_mask && ggml_backend_buffer_is_host(self_kq_mask->buffer));
+-        if (self_kq_mask->type == GGML_TYPE_F16) {
+-            fill((ggml_fp16_t *) self_kq_mask->data, false);
+-        } else {
+-            fill((float *) self_kq_mask->data, false);
+-        }
+-
+-        if (self_kq_mask_swa) {
+-            GGML_ASSERT(ggml_backend_buffer_is_host(self_kq_mask_swa->buffer));
+-            if (self_kq_mask_swa->type == GGML_TYPE_F16) {
+-                fill((ggml_fp16_t *) self_kq_mask_swa->data, true);
+-            } else {
+-                fill((float *) self_kq_mask_swa->data, true);
+-            }
+-        }
+-    }
+-
+-    bool can_reuse(const llm_graph_params & /*params*/) override { return false; }
+-
+-    int64_t n_prompt;
+-};
++// (llm_graph_input_attn_diffusion + llm_graph_input_attn_diffusion_decode moved to diffusion-common.h,
++//  shared with the masked archs.)
+ 
+ // Self-conditioning input: uploads the previous step's raw logits [n_vocab, C] for the canvas embedding.
+ class llm_graph_input_sc : public llm_graph_input_i {
+@@ -107,109 +41,7 @@ public:
+     int64_t       C;
+ };
+ 
+-// Decode-phase mask (prompt-KV caching): canvas queries over [cached prompt (first P) | fresh canvas
+-// (last C)], rectangular [P+C, C]. Global sees all prompt; sliding the last (n_swa-1) prompt.
+-class llm_graph_input_attn_diffusion_decode : public llm_graph_input_attn_no_cache {
+-public:
+-    llm_graph_input_attn_diffusion_decode(const llama_hparams & hparams, const llama_cparams & cparams,
+-                                          int64_t n_prompt, int64_t n_canvas) :
+-        llm_graph_input_attn_no_cache(hparams, cparams), n_prompt(n_prompt), n_canvas(n_canvas) {}
+-    ~llm_graph_input_attn_diffusion_decode() = default;
+-
+-    void set_input(const llama_ubatch * /*ubatch*/) override {
+-        const int64_t P    = n_prompt;
+-        const int64_t C    = n_canvas;
+-        const int64_t n_kv = P + C;
+-        const int64_t canvas_prompt_lo = P - (int64_t) hparams.n_swa + 1;
+-
+-        const auto fill = [&](auto * data, bool swa) {
+-            using T = std::remove_reference_t<decltype(*data)>;
+-            std::fill(data, data + n_kv * C, llama_cast<T>(-INFINITY));
+-            for (int64_t q = 0; q < C; ++q) {            // canvas query (position P+q)
+-                const uint64_t row = q * n_kv;
+-                for (int64_t k = 0; k < n_kv; ++k) {     // key: k<P prompt (pos k), else canvas
+-                    bool allow;
+-                    if (k < P) {
+-                        allow = swa ? (k >= canvas_prompt_lo) : true;
+-                    } else {
+-                        allow = true;                     // bidirectional over the canvas
+-                    }
+-                    if (allow) {
+-                        data[row + k] = llama_cast<T>(0.0f);
+-                    }
+-                }
+-            }
+-        };
+-
+-        GGML_ASSERT(self_kq_mask && ggml_backend_buffer_is_host(self_kq_mask->buffer));
+-        if (self_kq_mask->type == GGML_TYPE_F16) {
+-            fill((ggml_fp16_t *) self_kq_mask->data, false);
+-        } else {
+-            fill((float *) self_kq_mask->data, false);
+-        }
+-        if (self_kq_mask_swa) {
+-            GGML_ASSERT(ggml_backend_buffer_is_host(self_kq_mask_swa->buffer));
+-            if (self_kq_mask_swa->type == GGML_TYPE_F16) {
+-                fill((ggml_fp16_t *) self_kq_mask_swa->data, true);
+-            } else {
+-                fill((float *) self_kq_mask_swa->data, true);
+-            }
+-        }
+-    }
+-
+-    bool can_reuse(const llm_graph_params & /*params*/) override { return false; }
+-
+-    int64_t n_prompt;
+-    int64_t n_canvas;
+-};
+-
+-// Chunked-prefill mask: n_q prompt queries at [off, off+n_q) attend causally over keys [0, off+n_q)
+-// (prior chunks in the store + this chunk), with SWA clipping; off=0 is the single-shot causal prefill.
+-class llm_graph_input_attn_diffusion_prefill : public llm_graph_input_attn_no_cache {
+-public:
+-    llm_graph_input_attn_diffusion_prefill(const llama_hparams & hparams, const llama_cparams & cparams,
+-                                           int64_t off, int64_t n_q) :
+-        llm_graph_input_attn_no_cache(hparams, cparams), off(off), n_q(n_q) {}
+-    ~llm_graph_input_attn_diffusion_prefill() = default;
+-
+-    void set_input(const llama_ubatch * /*ubatch*/) override {
+-        const int64_t n_kv = off + n_q;
+-        const auto fill = [&](auto * data, bool swa) {
+-            using T = std::remove_reference_t<decltype(*data)>;
+-            std::fill(data, data + n_kv * n_q, llama_cast<T>(-INFINITY));
+-            for (int64_t i = 0; i < n_q; ++i) {        // query local i -> global position off+i
+-                const int64_t  q   = off + i;
+-                const uint64_t row = i * n_kv;
+-                for (int64_t k = 0; k <= q; ++k) {     // causal: keys [0, q]
+-                    if (swa && llama_hparams::is_masked_swa(hparams.n_swa, hparams.swa_type, k, q)) {
+-                        continue;                       // sliding layers clip keys outside the window
+-                    }
+-                    data[row + k] = llama_cast<T>(0.0f);
+-                }
+-            }
+-        };
+-
+-        GGML_ASSERT(self_kq_mask && ggml_backend_buffer_is_host(self_kq_mask->buffer));
+-        if (self_kq_mask->type == GGML_TYPE_F16) {
+-            fill((ggml_fp16_t *) self_kq_mask->data, false);
+-        } else {
+-            fill((float *) self_kq_mask->data, false);
+-        }
+-        if (self_kq_mask_swa) {
+-            GGML_ASSERT(ggml_backend_buffer_is_host(self_kq_mask_swa->buffer));
+-            if (self_kq_mask_swa->type == GGML_TYPE_F16) {
+-                fill((ggml_fp16_t *) self_kq_mask_swa->data, true);
+-            } else {
+-                fill((float *) self_kq_mask_swa->data, true);
+-            }
+-        }
+-    }
+-
+-    bool can_reuse(const llm_graph_params & /*params*/) override { return false; }
+-
+-    int64_t off;
+-    int64_t n_q;
+-};
++// (llm_graph_input_attn_diffusion_decode moved to diffusion-common.h)
+ 
+ void llama_model_diffusion_gemma::load_arch_hparams(llama_model_loader & ml) {
+     hparams.swa_type = LLAMA_SWA_TYPE_STANDARD;
+@@ -328,9 +160,6 @@ void llama_model_diffusion_gemma::load_arch_tensors(llama_model_loader &) {
+ static void dg_ensure_sc_embT(const llama_model_diffusion_gemma & m);
+ // fwd decl: lazily (re)allocate the device-resident prev-step canvas-logits buffer for device SC (defined below)
+ static void dg_ensure_sc_dev(const llama_model_diffusion_gemma & m, int64_t C);
+-// fwd decl: lazily (re)allocate the device-resident prompt-KV store (per-layer K,V, grow-only) at the given
+-// element type. Allocated from the graph so the type can follow cparams.flash_attn (F16 under FA).
+-static void dg_ensure_pkv_store(const llama_model_diffusion_gemma & m, int64_t P, ggml_type type);
+ 
+ std::unique_ptr<llm_graph_context> llama_model_diffusion_gemma::build_arch_graph(const llm_graph_params & params) const {
+     return std::make_unique<graph>(*this, params);
+@@ -362,19 +191,9 @@ llama_model_diffusion_gemma::graph::graph(const llama_model & model, const llm_g
+         C = n_tokens - P;
+     }
+ 
+-    // PREFILL processes one prompt chunk of n_tokens queries starting at global position prefill_off; its
+-    // keys span [0, prefill_off + n_tokens) (prior chunks live in the store, this chunk is fresh).
+-    const int64_t prefill_off = is_prefill ? dmodel.pkv_prefill_off : 0;
+-
+-    // Allocate the store on the first PREFILL chunk, sized to the whole prompt (pkv_P). Type follows FA so it
+-    // is precision-neutral: under FA, build_attn casts K,V to F16 regardless. DECODE only reads a prior store.
+-    if (is_prefill && dmodel.pkv_P > 0) {
+-        dg_ensure_pkv_store(dmodel, dmodel.pkv_P, cparams.flash_attn ? GGML_TYPE_F16 : GGML_TYPE_F32);
+-    }
+-
+     // guard the prompt-KV store is allocated and large enough (misuse fails loudly, not OOB)
+     if (is_prefill || is_decode) {
+-        const int64_t need = is_prefill ? (prefill_off + n_tokens) : P;
++        const int64_t need = is_prefill ? n_tokens : P;
+         GGML_ASSERT(!dmodel.pkv_k.empty() && !dmodel.pkv_v.empty() && dmodel.pkv_cap >= need &&
+                     "DiffusionGemma prompt-KV store not allocated/sized for this phase");
+     }
+@@ -448,8 +267,7 @@ llama_model_diffusion_gemma::graph::graph(const llama_model & model, const llm_g
+     ggml_tensor * inp_pos = build_inp_pos();
+ 
+     // region-aware no-cache mask. DECODE: rectangular [P+C keys, C queries] over cached prompt + fresh
+-    // canvas K,V. PREFILL: rectangular [prefill_off+n_tokens keys, n_tokens queries], causal over the chunk
+-    // + prior chunks. UNIFIED: square [n_tokens, n_tokens] region-aware (prompt causal, canvas bidirectional).
++    // canvas K,V. UNIFIED/PREFILL: square [n_tokens, n_tokens] (PREFILL has P=n_tokens, all causal rows).
+     const auto type_mask = cparams.flash_attn ? GGML_TYPE_F16 : GGML_TYPE_F32;
+     llm_graph_input_attn_no_cache * inp_attn = nullptr;
+     if (is_decode) {
+@@ -464,18 +282,6 @@ llama_model_diffusion_gemma::graph::graph(const llama_model & model, const llm_g
+             uptr->self_kq_mask_swa_cnv = uptr->self_kq_mask_swa;
+         }
+         inp_attn = (llm_graph_input_attn_no_cache *) res->add_input(std::move(uptr));
+-    } else if (is_prefill) {
+-        const int64_t n_kv = prefill_off + n_tokens;
+-        auto uptr = std::make_unique<llm_graph_input_attn_diffusion_prefill>(hparams, cparams, prefill_off, n_tokens);
+-        uptr->self_kq_mask = ggml_new_tensor_4d(ctx0, type_mask, n_kv, n_tokens, 1, 1);
+-        ggml_set_input(uptr->self_kq_mask);
+-        uptr->self_kq_mask_cnv = uptr->self_kq_mask;
+-        if (hparams.swa_type != LLAMA_SWA_TYPE_NONE) {
+-            uptr->self_kq_mask_swa = ggml_new_tensor_4d(ctx0, type_mask, n_kv, n_tokens, 1, 1);
+-            ggml_set_input(uptr->self_kq_mask_swa);
+-            uptr->self_kq_mask_swa_cnv = uptr->self_kq_mask_swa;
+-        }
+-        inp_attn = (llm_graph_input_attn_no_cache *) res->add_input(std::move(uptr));
+     } else {
+         auto uptr = std::make_unique<llm_graph_input_attn_diffusion>(hparams, cparams, P);
+         uptr->self_kq_mask = ggml_new_tensor_4d(ctx0, type_mask, n_tokens, n_tokens, 1, 1);
+@@ -505,39 +311,16 @@ llama_model_diffusion_gemma::graph::graph(const llama_model & model, const llm_g
+         ggml_tensor * Kcur = kv.k;
+         ggml_tensor * Vcur = kv.v;
+ 
+-        // The store is F16 under FA (halves the persistent K,V store; FA casts K,V to F16 anyway, so it is
+-        // precision-neutral) and F32 otherwise. The fresh K,V stay F32: the store WRITE is an F32->store-type
+-        // cpy (F32->F16 supported), but the prefix READ is cast back to F32 because the CUDA concat op is
+-        // F32-only and FA re-casts to F16 itself. cast_kv() is a no-op when the store is already F32 (non-FA).
+-        const auto cast_kv = [&](ggml_tensor * t) {
+-            return t->type == GGML_TYPE_F32 ? t : ggml_cast(ctx0, t, GGML_TYPE_F32);
+-        };
+-
+         if (is_prefill) {
+-            // PREFILL: persist this chunk's K,V into the store at [prefill_off, prefill_off+n_tokens) for later
+-            // chunks and the block's DECODE steps. Disjoint from the [0,prefill_off) prefix read.
+-            const size_t koff = (size_t) prefill_off * dmodel.pkv_k[il]->nb[2];
+-            const size_t voff = (size_t) prefill_off * dmodel.pkv_v[il]->nb[2];
++            // PREFILL: persist this layer's prompt K,V (F32) into the store for the block's DECODE steps
+             ggml_tensor * sk = ggml_view_3d(ctx0, dmodel.pkv_k[il], n_embd_head, n_head_kv, n_tokens,
+-                                            dmodel.pkv_k[il]->nb[1], dmodel.pkv_k[il]->nb[2], koff);
++                                            dmodel.pkv_k[il]->nb[1], dmodel.pkv_k[il]->nb[2], 0);
+             ggml_tensor * sv = ggml_view_3d(ctx0, dmodel.pkv_v[il], n_embd_head, n_head_kv, n_tokens,
+-                                            dmodel.pkv_v[il]->nb[1], dmodel.pkv_v[il]->nb[2], voff);
+-            ggml_build_forward_expand(gf, ggml_cpy(ctx0, Kcur, sk));   // F32 -> store type (F16/F32)
++                                            dmodel.pkv_v[il]->nb[1], dmodel.pkv_v[il]->nb[2], 0);
++            ggml_build_forward_expand(gf, ggml_cpy(ctx0, Kcur, sk));
+             ggml_build_forward_expand(gf, ggml_cpy(ctx0, Vcur, sv));
+-            // Attend causally over [0, prefill_off+n_tokens): prepend the prior chunks' cached K,V (written by
+-            // earlier llama_decode calls) to this chunk's fresh K,V. First chunk (off=0) needs no prefix.
+-            ggml_tensor * Kfull = Kcur;
+-            ggml_tensor * Vfull = Vcur;
+-            if (prefill_off > 0) {
+-                ggml_tensor * pk = ggml_view_3d(ctx0, dmodel.pkv_k[il], n_embd_head, n_head_kv, prefill_off,
+-                                                dmodel.pkv_k[il]->nb[1], dmodel.pkv_k[il]->nb[2], 0);
+-                ggml_tensor * pv = ggml_view_3d(ctx0, dmodel.pkv_v[il], n_embd_head, n_head_kv, prefill_off,
+-                                                dmodel.pkv_v[il]->nb[1], dmodel.pkv_v[il]->nb[2], 0);
+-                Kfull = ggml_concat(ctx0, cast_kv(pk), Kcur, 2);
+-                Vfull = ggml_concat(ctx0, cast_kv(pv), Vcur, 2);
+-            }
+             cur = build_attn(inp_attn, model.layers[il].wo, nullptr, nullptr,
+-                             Qcur, Kfull, Vfull, nullptr, nullptr, nullptr,
++                             Qcur, Kcur, Vcur, nullptr, nullptr, nullptr,
+                              hparams.f_attention_scale, il);
+         } else if (is_decode) {
+             // DECODE: prepend cached prompt K,V (first P) to the fresh canvas K,V
+@@ -545,8 +328,8 @@ llama_model_diffusion_gemma::graph::graph(const llama_model & model, const llm_g
+                                             dmodel.pkv_k[il]->nb[1], dmodel.pkv_k[il]->nb[2], 0);
+             ggml_tensor * pv = ggml_view_3d(ctx0, dmodel.pkv_v[il], n_embd_head, n_head_kv, P,
+                                             dmodel.pkv_v[il]->nb[1], dmodel.pkv_v[il]->nb[2], 0);
+-            ggml_tensor * Kfull = ggml_concat(ctx0, cast_kv(pk), Kcur, 2);
+-            ggml_tensor * Vfull = ggml_concat(ctx0, cast_kv(pv), Vcur, 2);
++            ggml_tensor * Kfull = ggml_concat(ctx0, pk, Kcur, 2);
++            ggml_tensor * Vfull = ggml_concat(ctx0, pv, Vcur, 2);
+             cur = build_attn(inp_attn, model.layers[il].wo, nullptr, nullptr,
+                              Qcur, Kfull, Vfull, nullptr, nullptr, nullptr,
+                              hparams.f_attention_scale, il);
+@@ -772,73 +555,33 @@ static void dg_ensure_sc_dev(const llama_model_diffusion_gemma & m, int64_t C) {
+     m.sc_dev_C = C;
+ }
+ 
+-// Lazily (re)allocate the device-resident prompt-KV store (per-layer K,V, grow-only) for a prompt of length
+-// P at element type `type`, on layer-0's buffer type (single-GPU; cross-device would need a per-buft context
+-// map). Reallocates when the capacity grows or the type changes. Called from the graph (PREFILL), where the
+-// type can follow cparams.flash_attn - F16 halves the store and is precision-neutral under FA.
+-static void dg_ensure_pkv_store(const llama_model_diffusion_gemma & m, int64_t P, ggml_type type) {
+-    if (m.pkv_buf != nullptr && m.pkv_cap >= P && !m.pkv_k.empty() && m.pkv_k[0]->type == type) {
+-        return;
+-    }
+-    if (m.pkv_buf) { ggml_backend_buffer_free(m.pkv_buf); m.pkv_buf = nullptr; }
+-    if (m.pkv_ctx) { ggml_free(m.pkv_ctx); m.pkv_ctx = nullptr; }
+-    m.pkv_k.clear();
+-    m.pkv_v.clear();
+-
+-    const int     n_layer = (int) m.hparams.n_layer();
+-    const int64_t cap     = P;
+-
+-    ggml_init_params ip = {
+-        /*.mem_size   =*/ ggml_tensor_overhead() * (size_t) (2 * n_layer + 4),
+-        /*.mem_buffer =*/ nullptr,
+-        /*.no_alloc   =*/ true,
+-    };
+-    m.pkv_ctx = ggml_init(ip);
+-    GGML_ASSERT(m.pkv_ctx != nullptr);
+-    m.pkv_k.resize(n_layer);
+-    m.pkv_v.resize(n_layer);
+-    for (int il = 0; il < n_layer; ++il) {
+-        const int64_t hd  = m.hparams.n_embd_head_k(il);
+-        const int64_t nkv = m.hparams.n_head_kv(il);
+-        m.pkv_k[il] = ggml_new_tensor_3d(m.pkv_ctx, type, hd, nkv, cap);
+-        m.pkv_v[il] = ggml_new_tensor_3d(m.pkv_ctx, type, hd, nkv, cap);
+-        ggml_format_name(m.pkv_k[il], "pkv_k_l%d", il);
+-        ggml_format_name(m.pkv_v[il], "pkv_v_l%d", il);
+-    }
++// (prompt-KV store allocator moved to diffusion-common.h as diffusion_ensure_pkv_store, shared with the
++//  masked archs.)
+ 
+-    ggml_backend_dev_t dev = m.dev_layer(0);
+-    ggml_backend_buffer_type_t buft = dev ? ggml_backend_dev_buffer_type(dev)
+-                                          : ggml_backend_cpu_buffer_type();
+-    m.pkv_buf = ggml_backend_alloc_ctx_tensors_from_buft(m.pkv_ctx, buft);
+-    GGML_ASSERT(m.pkv_buf != nullptr);
+-    m.pkv_cap = cap;
+-}
+-
+-// Public API: bytes the prompt-KV store consumes per prompt token (sum over layers of K+V element counts x
+-// element size). 0 for non-DiffusionGemma. Lets a caller size context against the store, the dominant runtime
+-// allocation once the activation buffer is chunked. use_f16 must match the store type (FA on -> F16).
+-size_t llama_diffusion_pkv_bytes_per_token(const struct llama_model * model, bool use_f16) {
+-    const auto * dm = dynamic_cast<const llama_model_diffusion_gemma *>(model);
++// Public API: select the prompt-KV-caching phase for the next llama_decode (no-op for non-diffusion models).
++// UNIFIED = no-cache forward; PREFILL writes the prompt K,V store (P = prompt length); DECODE reads it.
++// Generalized to any diffusion arch (DiffusionGemma canvas + LLaDA/Dream masked) via the shared base.
++void llama_diffusion_set_phase(struct llama_model * model, int phase, int32_t P) {
++    auto * dm = dynamic_cast<llama_model_diffusion_base *>(model);
+     if (!dm) {
+-        return 0;
++        return;
+     }
+-    const size_t elt = use_f16 ? sizeof(ggml_fp16_t) : sizeof(float);
+-    size_t bytes = 0;
+-    for (int il = 0; il < (int) dm->hparams.n_layer(); ++il) {
+-        bytes += (size_t) dm->hparams.n_embd_head_k(il) * dm->hparams.n_head_kv(il) * 2 * elt; // K + V
++    dm->pkv_phase = (llama_model_diffusion_base::pkv_phase_t) phase;
++    dm->pkv_P     = P;
++    if (phase != llama_model_diffusion_base::PKV_UNIFIED && P > 0) {
++        diffusion_ensure_pkv_store(*dm, P);
+     }
+-    return bytes;
+ }
+ 
+-// Public API: select the prompt-KV-caching phase for the next llama_decode (no-op otherwise). UNIFIED =
+-// no-cache forward; PREFILL writes the prompt K,V store chunk at off (P = whole-prompt length, sizes the
+-// store); DECODE reads it. The store itself is allocated lazily from the PREFILL graph (type follows FA).
+-void llama_diffusion_set_phase(struct llama_model * model, int phase, int32_t P, int32_t off) {
+-    auto * dm = dynamic_cast<llama_model_diffusion_gemma *>(model);
++void llama_diffusion_set_block_decode(struct llama_model * model, int32_t blk0, int32_t blkC, int32_t total) {
++    auto * dm = dynamic_cast<llama_model_diffusion_base *>(model);
+     if (!dm) {
+         return;
+     }
+-    dm->pkv_phase       = (llama_model_diffusion_gemma::pkv_phase_t) phase;
+-    dm->pkv_P           = P;
+-    dm->pkv_prefill_off = off;   // PREFILL chunk start; ignored by UNIFIED/DECODE
++    dm->pkv_phase = llama_model_diffusion_base::PKV_BLOCK_DECODE;
++    dm->pkv_blk0  = blk0;
++    dm->pkv_blkC  = blkC;
++    dm->pkv_total = total;
++    dm->pkv_P     = blk0;   // cached-prefix length
++    diffusion_ensure_pkv_store(*dm, total);
+ }
+diff --git a/src/models/dream.cpp b/src/models/dream.cpp
+index abe737c..1c27b21 100644
+--- a/src/models/dream.cpp
++++ b/src/models/dream.cpp
+@@ -1,4 +1,5 @@
+ #include "models.h"
++#include "diffusion-common.h"  // prefix-KV: shared diffusion attn-mask inputs + prompt-KV store
+ 
+ void llama_model_dream::load_arch_hparams(llama_model_loader & ml) {
+     ml.get_key(LLM_KV_ATTENTION_LAYERNORM_RMS_EPS, hparams.f_norm_rms_eps);
+@@ -65,7 +66,42 @@ llama_model_dream::graph::graph(const llama_model & model, const llm_graph_param
+     // inp_pos - contains the positions
+     ggml_tensor * inp_pos = build_inp_pos();
+ 
+-    auto * inp_attn = build_attn_inp_no_cache();
++    // Prefix-KV cache (see diffusion-common.h / llada.cpp): PREFILL writes the prompt's per-layer K,V once;
++    // DECODE forwards only the canvas and prepends the cached prompt K,V. UNIFIED = original full forward.
++    const auto &  dmodel     = (const llama_model_diffusion_base &) model;
++    const bool    is_prefill = dmodel.pkv_phase == llama_model_diffusion_base::PKV_PREFILL;
++    const bool    is_decode  = dmodel.pkv_phase == llama_model_diffusion_base::PKV_DECODE;
++    const int64_t P          = dmodel.pkv_P;
++    const int64_t C          = n_tokens;
++    if (getenv("DG_GRAPH_DBG")) {
++        fprintf(stderr, "[dream-graph] prefill=%d decode=%d P=%lld C=%lld n_tokens=%lld pkv_layers=%zu n_head_kv=%lld n_embd_head=%lld\n",
++                (int)is_prefill, (int)is_decode, (long long)P, (long long)C, (long long)n_tokens,
++                dmodel.pkv_k.size(), (long long)hparams.n_head_kv(0), (long long)hparams.n_embd_head_v());
++    }
++
++    llm_graph_input_attn_no_cache * inp_attn = nullptr;
++    if (is_decode) {
++        const int64_t n_kv      = P + C;
++        const auto    type_mask = cparams.flash_attn ? GGML_TYPE_F16 : GGML_TYPE_F32;
++        auto uptr = std::make_unique<llm_graph_input_attn_diffusion_decode>(hparams, cparams, P, C);
++        uptr->self_kq_mask     = ggml_new_tensor_4d(ctx0, type_mask, n_kv, C, 1, 1);
++        ggml_set_input(uptr->self_kq_mask);
++        uptr->self_kq_mask_cnv = uptr->self_kq_mask;
++        if (getenv("DG_DUMP")) {
++            ggml_set_name(uptr->self_kq_mask, "DG_mask");
++            fprintf(stderr, "[dump] decode mask: type=%s (F32=%d F16=%d) flash_attn=%d n_kv=%lld C=%lld\n",
++                    ggml_type_name(type_mask), GGML_TYPE_F32, GGML_TYPE_F16, (int)cparams.flash_attn,
++                    (long long)n_kv, (long long)C);
++        }
++        if (hparams.swa_type != LLAMA_SWA_TYPE_NONE) {
++            uptr->self_kq_mask_swa     = ggml_new_tensor_4d(ctx0, type_mask, n_kv, C, 1, 1);
++            ggml_set_input(uptr->self_kq_mask_swa);
++            uptr->self_kq_mask_swa_cnv = uptr->self_kq_mask_swa;
++        }
++        inp_attn = (llm_graph_input_attn_no_cache *) res->add_input(std::move(uptr));
++    } else {
++        inp_attn = build_attn_inp_no_cache();
++    }
+ 
+     ggml_tensor * inp_out_ids = build_inp_out_ids();
+ 
+@@ -91,9 +127,39 @@ llama_model_dream::graph::graph(const llama_model & model, const llm_graph_param
+             cb(Kcur, "Kcur", il);
+             cb(Vcur, "Vcur", il);
+ 
++            // prefix-KV: PREFILL persists this layer's prompt K,V; DECODE prepends the cached prompt K,V.
++            ggml_tensor * Kall = Kcur;
++            ggml_tensor * Vall = Vcur;
++            if (is_prefill) {
++                ggml_tensor * sk = ggml_view_3d(ctx0, dmodel.pkv_k[il], n_embd_head, n_head_kv, n_tokens,
++                                                dmodel.pkv_k[il]->nb[1], dmodel.pkv_k[il]->nb[2], 0);
++                ggml_tensor * sv = ggml_view_3d(ctx0, dmodel.pkv_v[il], n_embd_head, n_head_kv, n_tokens,
++                                                dmodel.pkv_v[il]->nb[1], dmodel.pkv_v[il]->nb[2], 0);
++                ggml_build_forward_expand(gf, ggml_cpy(ctx0, Kcur, sk));
++                ggml_build_forward_expand(gf, ggml_cpy(ctx0, Vcur, sv));
++                if (il == 0 && getenv("DG_DUMP")) {  // K being stored (post-RoPE prompt K)
++                    ggml_tensor * d = ggml_cont(ctx0, Kcur); ggml_set_name(d, "DG_prefillK");
++                    ggml_build_forward_expand(gf, d);
++                }
++            } else if (is_decode) {
++                ggml_tensor * pk = ggml_view_3d(ctx0, dmodel.pkv_k[il], n_embd_head, n_head_kv, P,
++                                                dmodel.pkv_k[il]->nb[1], dmodel.pkv_k[il]->nb[2], 0);
++                ggml_tensor * pv = ggml_view_3d(ctx0, dmodel.pkv_v[il], n_embd_head, n_head_kv, P,
++                                                dmodel.pkv_v[il]->nb[1], dmodel.pkv_v[il]->nb[2], 0);
++                Kall = ggml_concat(ctx0, pk, Kcur, 2);
++                Vall = ggml_concat(ctx0, pv, Vcur, 2);
++                if (il == 0 && getenv("DG_DUMP")) {  // cached prompt K read back + fresh canvas K
++                    ggml_tensor * dp = ggml_cont(ctx0, pk);   ggml_set_name(dp, "DG_decodePK");
++                    ggml_tensor * dc = ggml_cont(ctx0, Kcur); ggml_set_name(dc, "DG_decodeCanvasK");
++                    ggml_build_forward_expand(gf, dp);
++                    ggml_build_forward_expand(gf, dc);
++                }
++            }
++
+             cur = build_attn(inp_attn,
+                     model.layers[il].wo, model.layers[il].wo_b, model.layers[il].wo_s,
+-                    Qcur, Kcur, Vcur, nullptr, nullptr, nullptr, 1.0f / sqrtf(float(n_embd_head)), il);
++                    Qcur, Kall, Vall, nullptr, nullptr, nullptr, 1.0f / sqrtf(float(n_embd_head)), il);
++            if (il == 0 && getenv("DG_DUMP")) { ggml_set_name(cur, "DG_attnout"); }
+         }
+         if (il == n_layer - 1 && inp_out_ids) {
+             cur   = ggml_get_rows(ctx0, cur, inp_out_ids);
+diff --git a/src/models/llada.cpp b/src/models/llada.cpp
+index 87d4259..cb2fb5d 100644
+--- a/src/models/llada.cpp
++++ b/src/models/llada.cpp
+@@ -1,4 +1,5 @@
+ #include "models.h"
++#include "diffusion-common.h"  // prefix-KV: shared diffusion attn-mask inputs + prompt-KV store
+ 
+ void llama_model_llada::load_arch_hparams(llama_model_loader & ml) {
+     ml.get_key(LLM_KV_ATTENTION_LAYERNORM_RMS_EPS, hparams.f_norm_rms_eps);
+@@ -83,8 +84,48 @@ llama_model_llada::graph::graph(const llama_model & model, const llm_graph_param
+     // inp_pos - contains the positions
+     ggml_tensor * inp_pos = build_inp_pos();
+ 
+-    // Non-causal attention for diffusion
+-    auto * inp_attn = build_attn_inp_no_cache();
++    // Prefix-KV cache (see diffusion-common.h): PREFILL forwards the prompt and writes its per-layer K,V into
++    // the store; DECODE forwards only the canvas and prepends the cached prompt K,V (so each denoise step
++    // skips re-encoding the prompt). UNIFIED = the original full [prompt|canvas] no-cache forward.
++    const auto &  dmodel     = (const llama_model_diffusion_base &) model;
++    const bool    is_prefill = dmodel.pkv_phase == llama_model_diffusion_base::PKV_PREFILL;
++    const bool    is_decode  = dmodel.pkv_phase == llama_model_diffusion_base::PKV_DECODE;
++    const bool    is_refresh = dmodel.pkv_phase == llama_model_diffusion_base::PKV_REFRESH;
++    const bool    is_block_decode = dmodel.pkv_phase == llama_model_diffusion_base::PKV_BLOCK_DECODE;
++    const int64_t P          = dmodel.pkv_P;   // cached prompt length (DECODE)
++    const int64_t C          = n_tokens;       // DECODE batch is canvas-only
++    const int64_t blk0       = dmodel.pkv_blk0;   // BLOCK_DECODE: active block start in [prompt|canvas]
++    const int64_t blkC       = dmodel.pkv_blkC;   // BLOCK_DECODE: active block length (== n_tokens)
++    const int64_t total      = dmodel.pkv_total;  // BLOCK_DECODE: full [prompt|canvas] length P+C
++
++    // Non-causal attention for diffusion. UNIFIED/PREFILL use the bidirectional square no-cache mask;
++    // DECODE uses the rectangular [P+C keys, C queries] prompt-KV mask (fully bidirectional for swa NONE).
++    llm_graph_input_attn_no_cache * inp_attn = nullptr;
++    if (is_decode) {
++        const int64_t n_kv      = P + C;
++        const auto    type_mask = cparams.flash_attn ? GGML_TYPE_F16 : GGML_TYPE_F32;
++        auto uptr = std::make_unique<llm_graph_input_attn_diffusion_decode>(hparams, cparams, P, C);
++        uptr->self_kq_mask     = ggml_new_tensor_4d(ctx0, type_mask, n_kv, C, 1, 1);
++        ggml_set_input(uptr->self_kq_mask);
++        uptr->self_kq_mask_cnv = uptr->self_kq_mask;
++        if (hparams.swa_type != LLAMA_SWA_TYPE_NONE) {
++            uptr->self_kq_mask_swa     = ggml_new_tensor_4d(ctx0, type_mask, n_kv, C, 1, 1);
++            ggml_set_input(uptr->self_kq_mask_swa);
++            uptr->self_kq_mask_swa_cnv = uptr->self_kq_mask_swa;
++        }
++        inp_attn = (llm_graph_input_attn_no_cache *) res->add_input(std::move(uptr));
++    } else if (is_block_decode) {
++        // active block (n_tokens=blkC queries) attends to ALL `total` keys ([cached prefix | fresh active | cached suffix]).
++        const int64_t n_kv      = total;
++        const auto    type_mask = cparams.flash_attn ? GGML_TYPE_F16 : GGML_TYPE_F32;
++        auto uptr = std::make_unique<llm_graph_input_attn_diffusion_block>(hparams, cparams, n_kv, n_tokens);
++        uptr->self_kq_mask     = ggml_new_tensor_4d(ctx0, type_mask, n_kv, n_tokens, 1, 1);
++        ggml_set_input(uptr->self_kq_mask);
++        uptr->self_kq_mask_cnv = uptr->self_kq_mask;
++        inp_attn = (llm_graph_input_attn_no_cache *) res->add_input(std::move(uptr));
++    } else {
++        inp_attn = build_attn_inp_no_cache();
++    }
+ 
+     ggml_tensor * inp_out_ids = build_inp_out_ids();
+ 
+@@ -111,9 +152,62 @@ llama_model_llada::graph::graph(const llama_model & model, const llm_graph_param
+             cb(Kcur, "Kcur", il);
+             cb(Vcur, "Vcur", il);
+ 
++            // prefix-KV: PREFILL persists this layer's prompt K,V (post-RoPE); DECODE prepends the cached
++            // prompt K,V (post-RoPE @ pos 0..P-1) to the fresh canvas K,V (@ pos P..P+C-1).
++            ggml_tensor * Kall = Kcur;
++            ggml_tensor * Vall = Vcur;
++            if (is_prefill) {
++                ggml_tensor * sk = ggml_view_3d(ctx0, dmodel.pkv_k[il], n_embd_head, n_head_kv, n_tokens,
++                                                dmodel.pkv_k[il]->nb[1], dmodel.pkv_k[il]->nb[2], 0);
++                ggml_tensor * sv = ggml_view_3d(ctx0, dmodel.pkv_v[il], n_embd_head, n_head_kv, n_tokens,
++                                                dmodel.pkv_v[il]->nb[1], dmodel.pkv_v[il]->nb[2], 0);
++                ggml_build_forward_expand(gf, ggml_cpy(ctx0, Kcur, sk));
++                ggml_build_forward_expand(gf, ggml_cpy(ctx0, Vcur, sv));
++            } else if (is_refresh) {
++                // REFRESH: full [prompt|canvas] forward (Kall=Kcur, bidirectional). Re-store the CANVAS-AWARE
++                // prompt K,V (first P rows of this forward) so later DECODEs read fresh, not stale, prompt KV.
++                ggml_tensor * sk = ggml_view_3d(ctx0, dmodel.pkv_k[il], n_embd_head, n_head_kv, P,
++                                                dmodel.pkv_k[il]->nb[1], dmodel.pkv_k[il]->nb[2], 0);
++                ggml_tensor * sv = ggml_view_3d(ctx0, dmodel.pkv_v[il], n_embd_head, n_head_kv, P,
++                                                dmodel.pkv_v[il]->nb[1], dmodel.pkv_v[il]->nb[2], 0);
++                ggml_tensor * Kp = ggml_view_3d(ctx0, Kcur, n_embd_head, n_head_kv, P, Kcur->nb[1], Kcur->nb[2], 0);
++                ggml_tensor * Vp = ggml_view_3d(ctx0, Vcur, n_embd_head, n_head_kv, P, Vcur->nb[1], Vcur->nb[2], 0);
++                ggml_build_forward_expand(gf, ggml_cpy(ctx0, Kp, sk));
++                ggml_build_forward_expand(gf, ggml_cpy(ctx0, Vp, sv));
++            } else if (is_decode) {
++                ggml_tensor * pk = ggml_view_3d(ctx0, dmodel.pkv_k[il], n_embd_head, n_head_kv, P,
++                                                dmodel.pkv_k[il]->nb[1], dmodel.pkv_k[il]->nb[2], 0);
++                ggml_tensor * pv = ggml_view_3d(ctx0, dmodel.pkv_v[il], n_embd_head, n_head_kv, P,
++                                                dmodel.pkv_v[il]->nb[1], dmodel.pkv_v[il]->nb[2], 0);
++                Kall = ggml_concat(ctx0, pk, Kcur, 2);
++                Vall = ggml_concat(ctx0, pv, Vcur, 2);
++            } else if (is_block_decode) {
++                // Fast-dLLM dual-cache: store the active block's K,V into rows [blk0, blk0+blkC) for FUTURE
++                // forwards (once this block is committed it becomes cached prefix), and build the keys for THIS
++                // forward from cached prefix [0,blk0) + fresh active Kcur + cached all-mask suffix [blk0+blkC,total).
++                // Non-overlapping with the store-write region, so no read-after-write hazard (mirrors REFRESH).
++                const size_t nb1k = dmodel.pkv_k[il]->nb[1], nb2k = dmodel.pkv_k[il]->nb[2];
++                const size_t nb1v = dmodel.pkv_v[il]->nb[1], nb2v = dmodel.pkv_v[il]->nb[2];
++                ggml_tensor * sk = ggml_view_3d(ctx0, dmodel.pkv_k[il], n_embd_head, n_head_kv, blkC, nb1k, nb2k, blk0 * nb2k);
++                ggml_tensor * sv = ggml_view_3d(ctx0, dmodel.pkv_v[il], n_embd_head, n_head_kv, blkC, nb1v, nb2v, blk0 * nb2v);
++                ggml_build_forward_expand(gf, ggml_cpy(ctx0, Kcur, sk));
++                ggml_build_forward_expand(gf, ggml_cpy(ctx0, Vcur, sv));
++                const int64_t suff = total - (blk0 + blkC);
++                ggml_tensor * pk = ggml_view_3d(ctx0, dmodel.pkv_k[il], n_embd_head, n_head_kv, blk0, nb1k, nb2k, 0);
++                ggml_tensor * pv = ggml_view_3d(ctx0, dmodel.pkv_v[il], n_embd_head, n_head_kv, blk0, nb1v, nb2v, 0);
++                Kall = ggml_concat(ctx0, pk, Kcur, 2);
++                Vall = ggml_concat(ctx0, pv, Vcur, 2);
++                if (suff > 0) {
++                    ggml_tensor * fk = ggml_view_3d(ctx0, dmodel.pkv_k[il], n_embd_head, n_head_kv, suff, nb1k, nb2k, (blk0 + blkC) * nb2k);
++                    ggml_tensor * fv = ggml_view_3d(ctx0, dmodel.pkv_v[il], n_embd_head, n_head_kv, suff, nb1v, nb2v, (blk0 + blkC) * nb2v);
++                    Kall = ggml_concat(ctx0, Kall, fk, 2);
++                    Vall = ggml_concat(ctx0, Vall, fv, 2);
++                }
++            }
++
+             cur = build_attn(inp_attn,
+                     model.layers[il].wo, NULL, model.layers[il].wo_s,
+-                    Qcur, Kcur, Vcur, nullptr, nullptr, nullptr, 1.0f / sqrtf(float(n_embd_head)), il);
++                    Qcur, Kall, Vall, nullptr, nullptr, nullptr, 1.0f / sqrtf(float(n_embd_head)), il);
+         }
+         if (il == n_layer - 1 && inp_out_ids) {
+             cur   = ggml_get_rows(ctx0, cur, inp_out_ids);
+diff --git a/src/models/models.h b/src/models/models.h
+index a499730..f4d4262 100644
+--- a/src/models/models.h
++++ b/src/models/models.h
+@@ -450,8 +450,37 @@ struct llama_model_qwen2 : public llama_model_base {
+ };
+ 
+ 
+-struct llama_model_dream : public llama_model_base {
+-    llama_model_dream(const struct llama_model_params & params) : llama_model_base(params) {}
++// Shared state for diffusion LMs: the device-resident prompt-KV cache (see diffusion-common.h). PREFILL
++// writes the prompt's per-layer K,V once; DECODE reuses them so each denoise step forwards only the canvas.
++struct llama_model_diffusion_base : public llama_model_base {
++    llama_model_diffusion_base(const struct llama_model_params & params) : llama_model_base(params) {}
++
++    // PKV_REFRESH: forward the full [prompt|canvas] (bidirectional, prompt sees the committed canvas) AND
++    // re-store the prompt's per-layer K,V into the store , so subsequent DECODE steps read CANVAS-AWARE prompt
++    // K/V instead of the stale prefill (the near-lossless dual-cache refresh; fixes static-prefix accuracy loss).
++    // PKV_BLOCK_DECODE: Fast-dLLM dual-cache. Forward ONLY the active block [pkv_blk0, pkv_blk0+pkv_blkC);
++    // keys = [cached prompt+finished-blocks (0..pkv_blk0) | fresh active block | cached all-mask suffix].
++    // Per-step cost is O(block) not O(canvas). pkv_valid = rows of the [prompt|canvas] store currently populated.
++    enum pkv_phase_t { PKV_UNIFIED = 0, PKV_PREFILL = 1, PKV_DECODE = 2, PKV_REFRESH = 3, PKV_BLOCK_DECODE = 4 };
++    mutable pkv_phase_t pkv_phase = PKV_UNIFIED;
++    mutable int64_t     pkv_P     = 0;   // prompt length (DECODE) / cached-prefix length up to active block (BLOCK_DECODE)
++    mutable int64_t     pkv_cap   = 0;   // allocated capacity of the store (P for prompt-only; P+C for dual-cache)
++    mutable int64_t     pkv_blk0  = 0;   // BLOCK_DECODE: absolute start index of the active block in [prompt|canvas]
++    mutable int64_t     pkv_blkC  = 0;   // BLOCK_DECODE: active block length (tokens forwarded this step)
++    mutable int64_t     pkv_total = 0;   // BLOCK_DECODE: total [prompt|canvas] length P+C (for the suffix-cache tail)
++    mutable std::vector<ggml_tensor *> pkv_k;   // per layer [n_embd_head_k(il), n_head_kv(il), pkv_cap]
++    mutable std::vector<ggml_tensor *> pkv_v;
++    mutable ggml_context        * pkv_ctx = nullptr;
++    mutable ggml_backend_buffer_t pkv_buf = nullptr;
++
++    ~llama_model_diffusion_base() override {
++        if (pkv_buf) { ggml_backend_buffer_free(pkv_buf); pkv_buf = nullptr; }
++        if (pkv_ctx) { ggml_free(pkv_ctx);               pkv_ctx = nullptr; }
++    }
++};
++
++struct llama_model_dream : public llama_model_diffusion_base {
++    llama_model_dream(const struct llama_model_params & params) : llama_model_diffusion_base(params) {}
+     void load_arch_hparams(llama_model_loader & ml) override;
+     void load_arch_tensors(llama_model_loader & ml) override;
+ 
+@@ -463,8 +492,8 @@ struct llama_model_dream : public llama_model_base {
+ };
+ 
+ 
+-struct llama_model_llada : public llama_model_base {
+-    llama_model_llada(const struct llama_model_params & params) : llama_model_base(params) {}
++struct llama_model_llada : public llama_model_diffusion_base {
++    llama_model_llada(const struct llama_model_params & params) : llama_model_diffusion_base(params) {}
+     void load_arch_hparams(llama_model_loader & ml) override;
+     void load_arch_tensors(llama_model_loader & ml) override;
+ 
+@@ -476,8 +505,8 @@ struct llama_model_llada : public llama_model_base {
+ };
+ 
+ 
+-struct llama_model_llada_moe : public llama_model_base {
+-    llama_model_llada_moe(const struct llama_model_params & params) : llama_model_base(params) {}
++struct llama_model_llada_moe : public llama_model_diffusion_base {
++    llama_model_llada_moe(const struct llama_model_params & params) : llama_model_diffusion_base(params) {}
+     void load_arch_hparams(llama_model_loader & ml) override;
+     void load_arch_tensors(llama_model_loader & ml) override;
+ 
+@@ -822,8 +851,8 @@ struct llama_model_gemma4 : public llama_model_base {
+ };
+ 
+ 
+-struct llama_model_diffusion_gemma : public llama_model_base {
+-    llama_model_diffusion_gemma(const struct llama_model_params & params) : llama_model_base(params) {}
++struct llama_model_diffusion_gemma : public llama_model_diffusion_base {
++    llama_model_diffusion_gemma(const struct llama_model_params & params) : llama_model_diffusion_base(params) {}
+     void load_arch_hparams(llama_model_loader & ml) override;
+     void load_arch_tensors(llama_model_loader & ml) override;
+ 
+@@ -853,22 +882,8 @@ struct llama_model_diffusion_gemma : public llama_model_base {
+     mutable ggml_backend_buffer_t sc_dev_buf  = nullptr;
+     mutable int64_t               sc_dev_C    = 0;        // allocated canvas capacity (grow-only)
+ 
+-    // prompt KV caching: the prompt's per-layer K,V are step-invariant, so compute once per block and
+-    // reuse across denoising steps instead of recomputing the whole [prompt|canvas] forward.
+-    //   PKV_UNIFIED : no-cache forward over [prompt|canvas] (default + safety fallback).
+-    //   PKV_PREFILL : forward a chunk of the prompt; write its per-layer K,V into the store at pkv_prefill_off.
+-    //   PKV_DECODE  : forward the canvas only; read the cached prompt K,V.
+-    // Store is device-resident (in pkv_buf/pkv_ctx), allocated lazily from the PREFILL graph; element type
+-    // follows flash-attn (F16 under FA - precision-neutral since FA casts K,V to F16 anyway - else F32).
+-    enum pkv_phase_t { PKV_UNIFIED = 0, PKV_PREFILL = 1, PKV_DECODE = 2 };
+-    mutable pkv_phase_t pkv_phase = PKV_UNIFIED;
+-    mutable int64_t     pkv_P     = 0;   // prompt length of the current block
+-    mutable int64_t     pkv_prefill_off = 0;   // PREFILL: global start position of the current prompt chunk
+-    mutable int64_t     pkv_cap   = 0;   // allocated capacity (max P) of the store
+-    mutable std::vector<ggml_tensor *> pkv_k;   // per layer [n_embd_head_k(il), n_head_kv(il), pkv_cap]
+-    mutable std::vector<ggml_tensor *> pkv_v;
+-    mutable ggml_context        * pkv_ctx = nullptr;
+-    mutable ggml_backend_buffer_t pkv_buf = nullptr;
++    // prompt-KV cache (pkv_phase/pkv_P/pkv_cap/pkv_k/pkv_v/pkv_ctx/pkv_buf) is now inherited from
++    // llama_model_diffusion_base and shared with the masked archs (LLaDA/Dream).
+ 
+     ~llama_model_diffusion_gemma() override;
+ 

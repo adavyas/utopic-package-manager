@@ -6,10 +6,11 @@ from pathlib import Path
 from typing import Mapping, Optional, Sequence
 
 
+PACKAGE_DIR = Path(__file__).resolve().parent
 UTOPIC_NATIVE_REPO = "https://github.com/adavyas/Utopic.git"
 UTOPIC_NATIVE_REF = "6943cab5a80ac165bd6c4a14962c6d4b64cb6226"
-LLAMA_REPO = "https://github.com/ggml-org/llama.cpp.git"
-LLAMA_REF = "master"
+LLAMA_REPO = "https://github.com/danielhanchen/llama.cpp.git"
+LLAMA_REF = "ef5e2dcce81881ffad262576d073f25ca6c1ad50"
 BIN_NAMES = ("utopic", "utopic_server", "utopic_mcp", "utopic_acp")
 REQUIRED_LLAMA_SYMBOLS = (
     "llama_diffusion_set_sc",
@@ -17,6 +18,15 @@ REQUIRED_LLAMA_SYMBOLS = (
     "llama_diffusion_set_phase",
     "llama_diffusion_set_block_decode",
 )
+LLAMA_CMAKE_FLAGS = (
+    "-DLLAMA_BUILD_EXAMPLES=OFF",
+    "-DLLAMA_BUILD_TESTS=OFF",
+    "-DLLAMA_BUILD_TOOLS=OFF",
+)
+
+
+def llama_patch_path() -> Path:
+    return PACKAGE_DIR / "patches" / "llama.cpp-utopic.patch"
 
 
 def cache_root() -> Path:
@@ -74,7 +84,7 @@ def _run(
     )
 
 
-def _clone_or_checkout(repo: str, ref: str, dest: Path, *, dry_run: bool) -> None:
+def _clone_or_checkout(repo: str, ref: str, dest: Path, *, dry_run: bool, reset: bool = False) -> None:
     if dest.exists():
         _run(["git", "fetch", "--all", "--tags"], cwd=dest, dry_run=dry_run)
     else:
@@ -82,10 +92,19 @@ def _clone_or_checkout(repo: str, ref: str, dest: Path, *, dry_run: bool) -> Non
             dest.parent.mkdir(parents=True, exist_ok=True)
         _run(["git", "clone", repo, dest], dry_run=dry_run)
     _run(["git", "checkout", ref], cwd=dest, dry_run=dry_run)
+    if reset:
+        _run(["git", "reset", "--hard", ref], cwd=dest, dry_run=dry_run)
+
+
+def _apply_llama_patch(llama_dir: Path, *, dry_run: bool) -> None:
+    patch = llama_patch_path()
+    if not dry_run and not patch.exists():
+        raise RuntimeError(f"Utopic llama.cpp compatibility patch was not found: {patch}")
+    _run(["git", "apply", patch], cwd=llama_dir, dry_run=dry_run)
 
 
 def _build_llama(llama_dir: Path, *, cuda: bool, dry_run: bool) -> None:
-    command = ["cmake", "-B", llama_dir / "build", "-S", llama_dir]
+    command = ["cmake", "-B", llama_dir / "build", "-S", llama_dir, *LLAMA_CMAKE_FLAGS]
     if cuda:
         command.append("-DGGML_CUDA=ON")
     _run(command, dry_run=dry_run)
@@ -169,7 +188,9 @@ def setup(argv: Optional[Sequence[str]] = None) -> int:
             os.environ.get("UTOPIC_LLAMA_REF", LLAMA_REF),
             llama_dir,
             dry_run=dry_run,
+            reset=True,
         )
+        _apply_llama_patch(llama_dir, dry_run=dry_run)
 
     if not dry_run:
         _verify_llama_apis(llama_dir)
