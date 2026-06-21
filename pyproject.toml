@@ -1,0 +1,44 @@
+[build-system]
+requires = [
+  "scikit-build-core>=0.10",
+  "cmake>=3.18",
+  "ninja",
+]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "utopic"
+version = "0.1.0"
+description = "Python package manager for the Utopic native runtime"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "Apache-2.0" }
+authors = [
+  { name = "Utopic contributors" },
+]
+keywords = ["diffusion", "llm", "gguf", "llama.cpp", "inference"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: C++",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+[project.urls]
+Homepage = "https://github.com/adavyas/utopic-package-manager"
+Source = "https://github.com/adavyas/utopic-package-manager"
+NativeRuntime = "https://github.com/adavyas/Utopic"
+
+[project.scripts]
+utopic = "utopic.cli:main"
+utopic-server = "utopic.server:main"
+utopic-mcp = "utopic.mcp:main"
+utopic-acp = "utopic.acp:main"
+
+[tool.scikit-build]
+cmake.source-dir = "."
+wheel.packages = ["python/utopic"]
