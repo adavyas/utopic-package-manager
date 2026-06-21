@@ -98,9 +98,9 @@ class InstallerTests(unittest.TestCase):
 
         help_text = out.getvalue()
         self.assertIn("utopic setup", help_text)
+        self.assertNotIn("llama.cpp", help_text)
         self.assertNotIn("--llama-dir", help_text)
         self.assertNotIn("--skip-llama-build", help_text)
-        self.assertNotIn("llama.cpp checkout", help_text)
 
     def test_backend_cuda_adds_cuda_cmake_flag(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -289,7 +289,7 @@ class PackagingTests(unittest.TestCase):
         self.assertIn("utopic setup", text)
         self.assertIn("package-managed", text)
         self.assertIn("python3 -m venv", text)
-        self.assertIn("CUDACXX=/usr/local/cuda-13.0/bin/nvcc", text)
+        self.assertNotIn("CUDACXX=/usr/local/cuda-13.0/bin/nvcc", text)
         self.assertNotIn("utopic setup --llama-dir", text)
         self.assertNotIn("UTOPIC_LLAMACPP_DIR", text)
 

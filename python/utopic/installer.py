@@ -261,7 +261,7 @@ def setup(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument(
         "--cuda-architectures",
         default=os.environ.get("UTOPIC_CUDA_ARCHITECTURES"),
-        help="CUDA architecture list for llama.cpp, for example 89 on RTX 4090 hosts.",
+        help="CUDA architecture list for the Utopic native build, for example 89 on RTX 4090 hosts.",
     )
     parser.add_argument("--dry-run", action="store_true", help="Print commands without running them.")
     parser.add_argument("--force", action="store_true", help="Remove cached binaries before rebuilding.")

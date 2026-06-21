@@ -31,15 +31,9 @@ On NVIDIA hosts, build the CUDA backend:
 utopic setup --backend cuda
 ```
 
-GB10/DGX Spark hosts should use CUDA 13's compiler if the default `nvcc` points
-at CUDA 12.x:
-
-```sh
-CUDACXX=/usr/local/cuda-13.0/bin/nvcc utopic setup --backend cuda
-```
-
-The CUDA setup path detects `nvcc` and the local GPU architecture when possible.
-On constrained hosts, limit build parallelism:
+The CUDA setup path detects the local GPU architecture and selects a suitable
+CUDA compiler when possible, including CUDA 13 on GB10/DGX Spark hosts. On
+constrained hosts, limit build parallelism:
 
 ```sh
 utopic setup --backend cuda --jobs 2
