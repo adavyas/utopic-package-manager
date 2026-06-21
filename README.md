@@ -69,6 +69,12 @@ Run a one-shot prompt:
 utopic run -m /path/to/model.gguf -p "Answer with one word: 2+2?" -n 16
 ```
 
+For DiffusionGemma-style canvas models, use the entropy-bound path:
+
+```sh
+utopic run -m /path/to/diffusiongemma.gguf -p "Answer with one word: 2+2?" -n 16 --eb-steps 48
+```
+
 Run the OpenAI-compatible local server:
 
 ```sh
@@ -94,6 +100,12 @@ The package manager owns the user-facing setup path:
 The published wheel stays pure Python and does not fetch or compile native code
 during `pip install`. Users should not need to clone dependency repositories or
 run build-system commands directly for normal setup.
+
+Use the package-managed binary produced by `utopic setup` for user-facing runs.
+On the 2026-06-21 GB10 smoke, `/home/adavya/.cache/utopic-current/bin/utopic`
+successfully generated from the installed Dream Q4, LLaDA Q4, DiffusionGemma
+BF16, and DiffusionGemma Q4 GGUFs. The repo-local native build loaded the same
+files, but was stale for DiffusionGemma prompt wrapping.
 
 ## Development
 
