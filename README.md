@@ -13,6 +13,15 @@ pip install git+https://github.com/adavyas/utopic-package-manager.git
 utopic setup
 ```
 
+On Linux distributions that enforce PEP 668, install the launcher in an isolated
+environment instead of the system Python:
+
+```sh
+python3 -m venv ~/.venvs/utopic
+~/.venvs/utopic/bin/pip install git+https://github.com/adavyas/utopic-package-manager.git
+~/.venvs/utopic/bin/utopic setup
+```
+
 `utopic setup` builds from package-managed native sources and installs the
 runtime binaries under `~/.cache/utopic/bin`.
 
@@ -20,6 +29,13 @@ On NVIDIA hosts, build the CUDA backend:
 
 ```sh
 utopic setup --backend cuda
+```
+
+GB10/DGX Spark hosts should use CUDA 13's compiler if the default `nvcc` points
+at CUDA 12.x:
+
+```sh
+CUDACXX=/usr/local/cuda-13.0/bin/nvcc utopic setup --backend cuda
 ```
 
 The CUDA setup path detects `nvcc` and the local GPU architecture when possible.

@@ -113,16 +113,25 @@ def _apply_llama_patch(llama_dir: Path, *, dry_run: bool) -> None:
     _run(["git", "apply", patch], cwd=llama_dir, dry_run=dry_run)
 
 
-def _find_cuda_compiler() -> Optional[Path]:
+def _cuda_compiler_candidates(cuda_architectures: Optional[str] = None) -> list[Path]:
+    candidates: list[Path] = []
+
+    def append(path: Path) -> None:
+        if path not in candidates:
+            candidates.append(path)
+
     configured = os.environ.get("CUDACXX")
     if configured:
-        path = Path(configured).expanduser()
-        if path.exists():
-            return path
+        append(Path(configured).expanduser())
+
+    arch_parts = (cuda_architectures or "").replace(",", ";").split(";")
+    if any(part.strip().startswith("12") for part in arch_parts):
+        append(Path("/usr/local/cuda-13.0/bin/nvcc"))
+        append(Path("/usr/local/cuda-13/bin/nvcc"))
 
     found = shutil.which("nvcc")
     if found:
-        return Path(found)
+        append(Path(found))
 
     for candidate in (
         Path("/usr/local/cuda/bin/nvcc"),
@@ -132,6 +141,12 @@ def _find_cuda_compiler() -> Optional[Path]:
         Path("/usr/local/cuda-12.1/bin/nvcc"),
         Path("/usr/local/cuda-12.0/bin/nvcc"),
     ):
+        append(candidate)
+    return candidates
+
+
+def _find_cuda_compiler(cuda_architectures: Optional[str] = None) -> Optional[Path]:
+    for candidate in _cuda_compiler_candidates(cuda_architectures):
         if candidate.exists():
             return candidate
     return None
@@ -177,11 +192,11 @@ def _build_llama(
     command = ["cmake", "-B", llama_dir / "build", "-S", llama_dir, *LLAMA_CMAKE_FLAGS]
     if backend == "cuda":
         command.append("-DGGML_CUDA=ON")
-        cuda_compiler = _find_cuda_compiler()
-        if cuda_compiler:
-            command.append(f"-DCMAKE_CUDA_COMPILER={cuda_compiler}")
         if cuda_architectures is None:
             cuda_architectures = _detect_cuda_architectures()
+        cuda_compiler = _find_cuda_compiler(cuda_architectures)
+        if cuda_compiler:
+            command.append(f"-DCMAKE_CUDA_COMPILER={cuda_compiler}")
         if cuda_architectures:
             command.append(f"-DCMAKE_CUDA_ARCHITECTURES={cuda_architectures}")
     _run(command, dry_run=dry_run)

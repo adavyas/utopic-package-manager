@@ -212,6 +212,14 @@ class InstallerTests(unittest.TestCase):
         with mock.patch("subprocess.run", return_value=completed):
             self.assertEqual(installer._detect_cuda_architectures(), "89;90")
 
+    def test_cuda_121_prefers_cuda_13_compiler_candidate(self):
+        candidates = installer._cuda_compiler_candidates("121")
+
+        self.assertLess(
+            candidates.index(Path("/usr/local/cuda-13.0/bin/nvcc")),
+            candidates.index(Path("/usr/local/cuda/bin/nvcc")),
+        )
+
     def test_jobs_limits_native_and_llama_build_parallelism(self):
         with tempfile.TemporaryDirectory() as tmp:
             with mock.patch.dict(os.environ, {"UTOPIC_HOME": tmp}, clear=True):
@@ -280,6 +288,8 @@ class PackagingTests(unittest.TestCase):
         text = (ROOT / "README.md").read_text(encoding="utf-8")
         self.assertIn("utopic setup", text)
         self.assertIn("package-managed", text)
+        self.assertIn("python3 -m venv", text)
+        self.assertIn("CUDACXX=/usr/local/cuda-13.0/bin/nvcc", text)
         self.assertNotIn("utopic setup --llama-dir", text)
         self.assertNotIn("UTOPIC_LLAMACPP_DIR", text)
 
