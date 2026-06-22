@@ -496,6 +496,8 @@ def _run(argv: Sequence[str]) -> int:
             _validate_run_value_flags(args)
             _validate_model_argument_count(args, _PROMPT_VALUE_FLAGS)
             _ensure_setup(setup_enabled)
+            if not setup_enabled:
+                _native.binary_path("utopic")
             _native.main("utopic", _resolve_prompt_model_args(args))
             return 0
 

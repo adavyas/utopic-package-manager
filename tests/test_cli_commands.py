@@ -913,6 +913,25 @@ def test_cli_run_no_setup_checks_server_binary_before_default_model_download(mon
     assert "utopic run: native binary missing" in captured.err
 
 
+def test_cli_run_prompt_no_setup_checks_binary_before_default_model_download(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "_ensure_setup", lambda enabled=True, binary_name="utopic": None)
+    monkeypatch.setattr(
+        cli.models,
+        "ensure_model",
+        lambda value=None: pytest.fail("should not download a model when the native binary is missing"),
+    )
+    monkeypatch.setattr(
+        cli._native,
+        "binary_path",
+        lambda name: (_ for _ in ()).throw(RuntimeError("native binary missing")),
+    )
+
+    assert cli.main(["run", "--no-setup", "-p", "hi"]) == 1
+
+    captured = capsys.readouterr()
+    assert "utopic run: native binary missing" in captured.err
+
+
 def test_cli_run_prompt_reports_missing_binary_without_traceback(monkeypatch, capsys):
     monkeypatch.setattr(cli, "_ensure_setup", lambda enabled=True, binary_name="utopic": None)
     monkeypatch.setattr(
