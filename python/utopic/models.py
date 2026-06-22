@@ -75,13 +75,31 @@ def _load_catalog() -> list[ModelEntry]:
         raise RuntimeError(f"Failed to read model catalog {path}: {exc}") from exc
     if not isinstance(data, list):
         raise RuntimeError(f"Model catalog {path} must contain a JSON list")
-    catalog: list[ModelEntry] = []
-    for index, item in enumerate(data):
-        try:
-            catalog.append(ModelEntry(**item))
-        except TypeError as exc:
-            raise RuntimeError(f"Invalid model catalog entry {index}: {exc}") from exc
-    return catalog
+    if not data:
+        raise RuntimeError("Utopic model catalog is empty")
+    return [_validate_catalog_entry(item, index) for index, item in enumerate(data)]
+
+
+def _validate_catalog_entry(item: object, index: int) -> ModelEntry:
+    if not isinstance(item, dict):
+        raise RuntimeError(f"Invalid model catalog entry {index}: expected a JSON object")
+
+    for field in ("id", "name", "family", "filename", "url", "size", "description"):
+        if not isinstance(item.get(field), str):
+            raise RuntimeError(f"Invalid model catalog entry {index}: {field} must be a string")
+    if not isinstance(item.get("recommended"), bool):
+        raise RuntimeError(f"Invalid model catalog entry {index}: recommended must be a boolean")
+
+    return ModelEntry(
+        id=item["id"],
+        name=item["name"],
+        family=item["family"],
+        filename=item["filename"],
+        url=item["url"],
+        size=item["size"],
+        recommended=item["recommended"],
+        description=item["description"],
+    )
 
 
 def list_models() -> list[ModelEntry]:

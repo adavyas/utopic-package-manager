@@ -778,6 +778,58 @@ def test_model_list_reports_incomplete_catalog_entry(monkeypatch, tmp_path, caps
     assert "Traceback" not in captured.err
 
 
+def test_model_list_reports_empty_catalog(monkeypatch, tmp_path, capsys):
+    catalog = tmp_path / "models.json"
+    catalog.write_text("[]", encoding="utf-8")
+    monkeypatch.setenv("UTOPIC_MODELS_CATALOG", str(catalog))
+
+    assert models.main(["list"]) == 1
+
+    captured = capsys.readouterr()
+    assert "utopic models: Utopic model catalog is empty" in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_model_list_reports_non_object_catalog_entry(monkeypatch, tmp_path, capsys):
+    catalog = tmp_path / "models.json"
+    catalog.write_text("[null]", encoding="utf-8")
+    monkeypatch.setenv("UTOPIC_MODELS_CATALOG", str(catalog))
+
+    assert models.main(["list"]) == 1
+
+    captured = capsys.readouterr()
+    assert "utopic models: Invalid model catalog entry 0: expected a JSON object" in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_model_list_reports_wrong_catalog_field_type(monkeypatch, tmp_path, capsys):
+    catalog = tmp_path / "models.json"
+    catalog.write_text(
+        """
+[
+  {
+    "id": 42,
+    "name": "Wrong Type",
+    "family": "test",
+    "filename": "wrong-type.gguf",
+    "url": "https://example.invalid/wrong-type.gguf",
+    "size": "1 B",
+    "recommended": true,
+    "description": "Wrong field type"
+  }
+]
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("UTOPIC_MODELS_CATALOG", str(catalog))
+
+    assert models.main(["list"]) == 1
+
+    captured = capsys.readouterr()
+    assert "utopic models: Invalid model catalog entry 0: id must be a string" in captured.err
+    assert "Traceback" not in captured.err
+
+
 def test_model_resolve_treats_gguf_value_as_local_path():
     resolved = models.resolve_model("/tmp/example.gguf")
 
