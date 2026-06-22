@@ -772,6 +772,38 @@ def test_model_pull_reuses_existing_download(monkeypatch, tmp_path):
     assert models.pull_model("example") == model_file
 
 
+def test_model_pull_rejects_catalog_filename_outside_models_dir(monkeypatch, tmp_path):
+    catalog = tmp_path / "models.json"
+    models_dir = tmp_path / "models"
+    catalog.write_text(
+        """
+[
+  {
+    "id": "escape",
+    "name": "Escape",
+    "family": "test",
+    "filename": "../escape.gguf",
+    "url": "https://example.invalid/escape.gguf",
+    "size": "1 B",
+    "recommended": true,
+    "description": "Unsafe test model"
+  }
+]
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("UTOPIC_MODELS_CATALOG", str(catalog))
+    monkeypatch.setenv("UTOPIC_MODELS_DIR", str(models_dir))
+    monkeypatch.setattr(models, "_copy_stream_with_progress", lambda url, destination: pytest.fail("should not download"))
+
+    with pytest.raises(RuntimeError, match="unsafe model filename"):
+        models.pull_model("escape")
+
+    assert not (tmp_path / "escape.gguf").exists()
+    assert not (models_dir / "escape.gguf").exists()
+    assert not (models_dir / "escape.gguf.partial").exists()
+
+
 def test_model_pull_redownloads_zero_byte_cached_model(monkeypatch, tmp_path):
     catalog = tmp_path / "models.json"
     model_file = tmp_path / "models" / "example.gguf"

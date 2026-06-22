@@ -28,7 +28,20 @@ class ModelEntry:
 
     @property
     def path(self) -> Path:
-        return models_dir() / self.filename
+        return models_dir() / _safe_model_filename(self)
+
+
+def _safe_model_filename(entry: ModelEntry) -> str:
+    filename = entry.filename
+    if (
+        not filename
+        or filename in {".", ".."}
+        or "/" in filename
+        or "\\" in filename
+        or ":" in filename
+    ):
+        raise RuntimeError(f"unsafe model filename for '{entry.id}': {filename}")
+    return filename
 
 
 def models_dir() -> Path:

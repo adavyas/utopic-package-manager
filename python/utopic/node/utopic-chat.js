@@ -185,8 +185,19 @@ function chatCompletionsUrl(baseUrl) {
 function readCatalog() {
     return JSON.parse(fs.readFileSync(catalogPath(), "utf8"));
 }
+function safeModelFilename(entry) {
+    if (!entry.filename ||
+        entry.filename === "." ||
+        entry.filename === ".." ||
+        entry.filename.includes("/") ||
+        entry.filename.includes("\\") ||
+        entry.filename.includes(":")) {
+        throw new Error(`unsafe model filename for '${entry.id}': ${entry.filename}`);
+    }
+    return entry.filename;
+}
 function localModelPath(entry) {
-    return path.join(modelsDir(), entry.filename);
+    return path.join(modelsDir(), safeModelFilename(entry));
 }
 function isLikelyPath(value) {
     return value.includes("/") || value.includes("\\") || value.endsWith(".gguf");

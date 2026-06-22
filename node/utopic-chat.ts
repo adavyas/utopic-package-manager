@@ -200,8 +200,22 @@ function readCatalog(): ModelEntry[] {
   return JSON.parse(fs.readFileSync(catalogPath(), "utf8")) as ModelEntry[];
 }
 
+function safeModelFilename(entry: ModelEntry): string {
+  if (
+    !entry.filename ||
+    entry.filename === "." ||
+    entry.filename === ".." ||
+    entry.filename.includes("/") ||
+    entry.filename.includes("\\") ||
+    entry.filename.includes(":")
+  ) {
+    throw new Error(`unsafe model filename for '${entry.id}': ${entry.filename}`);
+  }
+  return entry.filename;
+}
+
 function localModelPath(entry: ModelEntry): string {
-  return path.join(modelsDir(), entry.filename);
+  return path.join(modelsDir(), safeModelFilename(entry));
 }
 
 function isLikelyPath(value: string): boolean {
