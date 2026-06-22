@@ -26,7 +26,7 @@ jobs:
           cache: npm
 
       - name: Install test and build dependencies
-        run: python -m pip install --upgrade build pytest
+        run: python -m pip install --upgrade build pytest twine
 
       - name: Install Node dependencies
         run: npm ci
@@ -39,6 +39,9 @@ jobs:
 
       - name: Build release distributions
         run: python -m build
+
+      - name: Check package metadata
+        run: python -m twine check dist/*
 
       - name: Audit release distributions
         run: |
@@ -99,7 +102,7 @@ jobs:
               sys.exit(1)
           PY
 
-      - name: Smoke test built wheel
+      - name: Smoke test built distributions
         run: |
           python - <<'PY'
           import os
@@ -110,41 +113,46 @@ jobs:
           from pathlib import Path
 
           wheel = next(Path("dist").glob("utopic-*.whl"))
+          sdist = next(Path("dist").glob("utopic-*.tar.gz"))
 
-          with tempfile.TemporaryDirectory() as tmp:
-              root = Path(tmp)
-              venv_dir = root / "venv"
-              home = root / "utopic-home"
-              venv.EnvBuilder(with_pip=True).create(venv_dir)
+          def smoke(artifact: Path) -> None:
+              with tempfile.TemporaryDirectory() as tmp:
+                  root = Path(tmp)
+                  venv_dir = root / "venv"
+                  home = root / "utopic-home"
+                  venv.EnvBuilder(with_pip=True).create(venv_dir)
 
-              python = venv_dir / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-              utopic = venv_dir / ("Scripts/utopic.exe" if os.name == "nt" else "bin/utopic")
+                  python = venv_dir / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+                  utopic = venv_dir / ("Scripts/utopic.exe" if os.name == "nt" else "bin/utopic")
 
-              subprocess.run([str(python), "-m", "pip", "install", str(wheel)], check=True)
+                  subprocess.run([str(python), "-m", "pip", "install", str(artifact)], check=True)
 
-              smoke_env = dict(os.environ, UTOPIC_HOME=str(home))
-              commands = [
-                  [str(utopic), "--help"],
-                  [str(utopic), "chat", "--help"],
-                  [str(utopic), "models", "list"],
-                  [str(utopic), "run", "--no-setup"],
-                  [str(utopic), "setup", "--dry-run"],
-              ]
+                  smoke_env = dict(os.environ, UTOPIC_HOME=str(home))
+                  commands = [
+                      [str(utopic), "--help"],
+                      [str(utopic), "chat", "--help"],
+                      [str(utopic), "models", "list"],
+                      [str(utopic), "run", "--no-setup"],
+                      [str(utopic), "setup", "--dry-run"],
+                  ]
 
-              for command in commands:
-                  completed = subprocess.run(
-                      command,
-                      env=smoke_env,
-                      text=True,
-                      stdout=subprocess.PIPE,
-                      stderr=subprocess.PIPE,
-                  )
-                  expected = 1 if command[-1] == "--no-setup" else 0
-                  if completed.returncode != expected:
-                      print(f"Command failed: {' '.join(command)}", file=sys.stderr)
-                      print(completed.stdout, file=sys.stderr)
-                      print(completed.stderr, file=sys.stderr)
-                      sys.exit(completed.returncode)
+                  for command in commands:
+                      completed = subprocess.run(
+                          command,
+                          env=smoke_env,
+                          text=True,
+                          stdout=subprocess.PIPE,
+                          stderr=subprocess.PIPE,
+                      )
+                      expected = 1 if command[-1] == "--no-setup" else 0
+                      if completed.returncode != expected:
+                          print(f"Command failed: {' '.join(command)}", file=sys.stderr)
+                          print(completed.stdout, file=sys.stderr)
+                          print(completed.stderr, file=sys.stderr)
+                          sys.exit(completed.returncode)
+
+          smoke(wheel)
+          smoke(sdist)
           PY
 
       - name: Upload distributions
