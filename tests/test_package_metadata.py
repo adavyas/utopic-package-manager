@@ -85,6 +85,28 @@ def test_readme_uses_release_build_commands():
     assert "python -m pip wheel . --no-deps -w dist/" not in readme
 
 
+def test_readme_documents_manual_release_validation_without_publishing():
+    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert "Manual `workflow_dispatch` runs validate release artifacts only." in readme
+    assert "Only a published GitHub Release can run the PyPI publish job." in readme
+
+
+def test_release_workflow_only_publishes_from_github_releases():
+    workflow = (REPO_ROOT / ".github" / "workflows" / "python-publish.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert "workflow_dispatch:" in workflow
+    assert "release:" in workflow
+    assert "types: [published]" in workflow
+    assert "pypi-publish:" in workflow
+    assert "if: github.event_name == 'release'" in workflow
+    assert "id-token: write" in workflow
+    assert "name: pypi" in workflow
+    assert "pypa/gh-action-pypi-publish@release/v1" in workflow
+
+
 def test_readme_distinguishes_server_mode_from_chat_mode():
     readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
 

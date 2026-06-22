@@ -260,3 +260,13 @@ Build the same release distributions that CI validates:
 python -m build
 python -m twine check dist/*
 ```
+
+The `Upload Python Package` GitHub Actions workflow has two modes. Manual `workflow_dispatch` runs validate release artifacts only.
+They run the Python compatibility matrix, build and audit the source
+distribution and wheel, smoke test installed artifacts, and upload the built
+distributions as workflow artifacts, but they do not publish to PyPI.
+
+Only a published GitHub Release can run the PyPI publish job. That job uses the
+protected `pypi` environment and PyPI trusted publishing, so do a manual
+workflow run first and inspect the uploaded artifacts before creating the
+GitHub Release.
