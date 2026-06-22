@@ -1,4 +1,5 @@
 import math
+import shlex
 import subprocess
 import sys
 import time
@@ -377,6 +378,12 @@ Examples:
     )
 
 
+def _format_command(command: object) -> str:
+    if isinstance(command, (list, tuple)):
+        return shlex.join(str(part) for part in command)
+    return str(command)
+
+
 def _run(argv: Sequence[str]) -> int:
     args = list(argv)
     if args and args[0] in ("-h", "--help"):
@@ -419,7 +426,17 @@ def main(argv: Optional[Sequence[str]] = None) -> Optional[int]:
     command = args[0]
     rest = args[1:]
     if command == "setup":
-        raise SystemExit(installer.setup(rest))
+        try:
+            return installer.setup(rest)
+        except subprocess.CalledProcessError as exc:
+            print(
+                f"utopic setup: command failed: {_format_command(exc.cmd)}",
+                file=sys.stderr,
+            )
+            return exc.returncode if isinstance(exc.returncode, int) and exc.returncode > 0 else 1
+        except RuntimeError as exc:
+            print(f"utopic setup: {exc}", file=sys.stderr)
+            return 1
     if command == "chat":
         raise SystemExit(chat.launch(rest))
     if command == "models":

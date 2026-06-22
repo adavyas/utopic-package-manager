@@ -1,3 +1,4 @@
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -439,6 +440,34 @@ def test_cli_ensure_setup_skips_current_native_cache(monkeypatch):
     cli._ensure_setup(True, "utopic_server")
 
     assert calls == []
+
+
+def test_cli_setup_reports_subprocess_failures_without_traceback(monkeypatch, capsys):
+    def fail_setup(argv):
+        raise subprocess.CalledProcessError(2, ["cmake", "-B", "/tmp/build"])
+
+    monkeypatch.setattr(cli.installer, "setup", fail_setup)
+
+    assert cli.main(["setup"]) == 2
+
+    captured = capsys.readouterr()
+    assert "utopic setup: command failed: cmake -B /tmp/build" in captured.err
+    assert "Traceback" not in captured.err
+    assert "CalledProcessError" not in captured.err
+
+
+def test_cli_setup_reports_runtime_failures_without_traceback(monkeypatch, capsys):
+    monkeypatch.setattr(
+        cli.installer,
+        "setup",
+        lambda argv: (_ for _ in ()).throw(RuntimeError("native source missing")),
+    )
+
+    assert cli.main(["setup"]) == 1
+
+    captured = capsys.readouterr()
+    assert "utopic setup: native source missing" in captured.err
+    assert "Traceback" not in captured.err
 
 
 def test_cli_run_without_prompt_starts_openai_server(monkeypatch):
