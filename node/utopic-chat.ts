@@ -283,7 +283,7 @@ function normalizeDownloadError(error: Error): Error {
 }
 
 function isLikelyPath(value: string): boolean {
-  return value.includes("/") || value.includes("\\") || value.endsWith(".gguf");
+  return value.includes("/") || value.includes("\\") || value.toLowerCase().endsWith(".gguf");
 }
 
 function ask(rl: readline.Interface, text: string): Promise<string> {

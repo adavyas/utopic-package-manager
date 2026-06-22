@@ -266,7 +266,7 @@ function normalizeDownloadError(error) {
     return error;
 }
 function isLikelyPath(value) {
-    return value.includes("/") || value.includes("\\") || value.endsWith(".gguf");
+    return value.includes("/") || value.includes("\\") || value.toLowerCase().endsWith(".gguf");
 }
 function ask(rl, text) {
     return new Promise((resolve) => rl.question(text, resolve));
