@@ -731,6 +731,53 @@ def test_model_catalog_resolves_hf_download_url():
     assert entry.url.startswith("https://huggingface.co/")
 
 
+def test_model_list_reports_invalid_catalog_json(monkeypatch, tmp_path, capsys):
+    catalog = tmp_path / "models.json"
+    catalog.write_text("{not-json", encoding="utf-8")
+    monkeypatch.setenv("UTOPIC_MODELS_CATALOG", str(catalog))
+
+    assert models.main(["list"]) == 1
+
+    captured = capsys.readouterr()
+    assert "utopic models: Failed to read model catalog" in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_model_list_reports_non_list_catalog(monkeypatch, tmp_path, capsys):
+    catalog = tmp_path / "models.json"
+    catalog.write_text('{"id": "not-a-list"}', encoding="utf-8")
+    monkeypatch.setenv("UTOPIC_MODELS_CATALOG", str(catalog))
+
+    assert models.main(["list"]) == 1
+
+    captured = capsys.readouterr()
+    assert "utopic models: Model catalog" in captured.err
+    assert "must contain a JSON list" in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_model_list_reports_incomplete_catalog_entry(monkeypatch, tmp_path, capsys):
+    catalog = tmp_path / "models.json"
+    catalog.write_text(
+        """
+[
+  {
+    "id": "missing-fields",
+    "name": "Missing Fields"
+  }
+]
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("UTOPIC_MODELS_CATALOG", str(catalog))
+
+    assert models.main(["list"]) == 1
+
+    captured = capsys.readouterr()
+    assert "utopic models: Invalid model catalog entry 0" in captured.err
+    assert "Traceback" not in captured.err
+
+
 def test_model_resolve_treats_gguf_value_as_local_path():
     resolved = models.resolve_model("/tmp/example.gguf")
 

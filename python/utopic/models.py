@@ -68,8 +68,20 @@ def catalog_path() -> Path:
 
 
 def _load_catalog() -> list[ModelEntry]:
-    data = json.loads(catalog_path().read_text(encoding="utf-8"))
-    return [ModelEntry(**item) for item in data]
+    path = catalog_path()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"Failed to read model catalog {path}: {exc}") from exc
+    if not isinstance(data, list):
+        raise RuntimeError(f"Model catalog {path} must contain a JSON list")
+    catalog: list[ModelEntry] = []
+    for index, item in enumerate(data):
+        try:
+            catalog.append(ModelEntry(**item))
+        except TypeError as exc:
+            raise RuntimeError(f"Invalid model catalog entry {index}: {exc}") from exc
+    return catalog
 
 
 def list_models() -> list[ModelEntry]:
