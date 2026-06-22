@@ -7,6 +7,7 @@ import subprocess
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Optional, Sequence
@@ -104,6 +105,22 @@ def _wants_version(argv: Sequence[str]) -> bool:
 
 def _uses_existing_server(argv: Sequence[str]) -> bool:
     return any(arg == "--server" or arg.startswith("--server=") for arg in argv)
+
+
+def _validate_server_url_arg(args: Sequence[str]) -> None:
+    server = _value_after(args, "--server", "")
+    if not server:
+        return
+    try:
+        parsed = urllib.parse.urlsplit(server)
+    except ValueError as exc:
+        raise RuntimeError("--server must be a URL") from exc
+    if parsed.scheme not in {"http", "https"}:
+        if parsed.scheme:
+            raise RuntimeError("--server must use http:// or https://")
+        raise RuntimeError("--server must be a URL")
+    if not parsed.netloc:
+        raise RuntimeError("--server must be a URL")
 
 
 def _looks_like_negative_number(value: str) -> bool:
@@ -513,6 +530,7 @@ def launch(argv: Optional[Sequence[str]] = None) -> int:
 
     try:
         _validate_value_args(args)
+        _validate_server_url_arg(args)
         if shutil.which("node") is None:
             if _wants_setup(args) and not installer.native_installation_is_current(("utopic_server",)):
                 try:

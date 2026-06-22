@@ -186,6 +186,30 @@ def test_chat_launch_uses_python_fallback_for_existing_server_when_node_is_missi
     assert setup_calls == []
 
 
+@pytest.mark.parametrize(
+    ("server", "message"),
+    [
+        ("127.0.0.1:8910", "--server must be a URL"),
+        ("ftp://127.0.0.1:8910", "--server must use http:// or https://"),
+    ],
+)
+def test_chat_launch_python_fallback_rejects_invalid_server_urls_before_fallback(
+    monkeypatch, capsys, server, message
+):
+    monkeypatch.setattr(chat.shutil, "which", lambda name: None)
+    monkeypatch.setattr(chat.installer, "setup", lambda argv: pytest.fail("should not run setup"))
+    monkeypatch.setattr(
+        chat,
+        "_python_fallback_launch",
+        lambda args: pytest.fail("should not launch Python fallback"),
+    )
+
+    assert chat.launch(["--server", server]) == 1
+
+    captured = capsys.readouterr()
+    assert f"utopic chat: {message}" in captured.err
+
+
 def test_chat_launch_python_fallback_runs_setup_for_local_server_when_node_is_missing(monkeypatch, tmp_path):
     setup_calls = []
     fallback_calls = []
