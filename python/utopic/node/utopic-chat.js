@@ -200,6 +200,8 @@ function download(url, destination) {
     if (fs.existsSync(partial))
         fs.unlinkSync(partial);
     return new Promise((resolve, reject) => {
+        const parsed = new URL(url);
+        const client = parsed.protocol === "https:" ? https : parsed.protocol === "http:" ? http : null;
         let settled = false;
         const removePartial = () => {
             if (fs.existsSync(partial))
@@ -218,10 +220,15 @@ function download(url, destination) {
             settled = true;
             resolve(value);
         };
-        const request = https.get(url, (response) => {
+        if (!client) {
+            fail(new Error(`unsupported download protocol: ${parsed.protocol}`));
+            return;
+        }
+        const request = client.get(parsed, (response) => {
             if (response.statusCode && response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
                 response.resume();
-                download(response.headers.location, destination).then(succeed, fail);
+                const nextUrl = new URL(response.headers.location, parsed).toString();
+                download(nextUrl, destination).then(succeed, fail);
                 return;
             }
             if (response.statusCode !== 200) {

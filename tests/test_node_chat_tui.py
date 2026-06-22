@@ -69,6 +69,29 @@ class BrokenDownloadServer(BaseHTTPRequestHandler):
         return
 
 
+class ModelDownloadServer(BaseHTTPRequestHandler):
+    body = b"fake gguf over http"
+
+    def do_GET(self):
+        if self.path == "/redirect.gguf":
+            self.send_response(302)
+            self.send_header("location", "/model.gguf")
+            self.end_headers()
+            return
+        if self.path != "/model.gguf":
+            self.send_response(404)
+            self.end_headers()
+            return
+        self.send_response(200)
+        self.send_header("content-type", "application/octet-stream")
+        self.send_header("content-length", str(len(self.body)))
+        self.end_headers()
+        self.wfile.write(self.body)
+
+    def log_message(self, *_args):
+        return
+
+
 @pytest.fixture()
 def fake_openai_server():
     FakeOpenAIServer.requests = []
@@ -270,6 +293,190 @@ def test_bundled_chat_removes_partial_model_after_download_failure(tmp_path):
     assert completed.returncode == 1
     assert not (models_dir / "broken.gguf.partial").exists()
     assert not (models_dir / "broken.gguf").exists()
+
+
+def reserve_local_port():
+    try:
+        port_server = ThreadingHTTPServer(("127.0.0.1", 0), BaseHTTPRequestHandler)
+    except PermissionError as exc:
+        pytest.skip(f"localhost bind is unavailable in this environment: {exc}")
+    port = port_server.server_port
+    port_server.server_close()
+    return port
+
+
+def write_fake_chat_server(node, bin_dir):
+    fake_server = bin_dir / "utopic_server"
+    fake_server.write_text(
+        f"""#!{node}
+const http = require("node:http");
+
+function argValue(name, fallback) {{
+  const index = process.argv.indexOf(name);
+  return index >= 0 && index + 1 < process.argv.length ? process.argv[index + 1] : fallback;
+}}
+
+const host = argValue("--host", "127.0.0.1");
+const port = Number(argValue("--port", "8910"));
+const server = http.createServer((req, res) => {{
+  if (req.method === "GET" && req.url === "/health") {{
+    res.writeHead(200, {{ "content-type": "application/json" }});
+    res.end(JSON.stringify({{ status: "ok" }}));
+    return;
+  }}
+  if (req.method === "POST" && req.url === "/v1/chat/completions") {{
+    req.resume();
+    res.writeHead(200, {{ "content-type": "application/json" }});
+    res.end(JSON.stringify({{ choices: [{{ message: {{ role: "assistant", content: "downloaded model works" }} }}] }}));
+    return;
+  }}
+  res.writeHead(404);
+  res.end();
+}});
+
+server.listen(port, host);
+process.on("SIGTERM", () => server.close(() => process.exit(0)));
+""",
+        encoding="utf-8",
+    )
+    fake_server.chmod(0o755)
+
+
+def write_catalog(catalog, model_id, filename, url):
+    catalog.write_text(
+        json.dumps(
+            [
+                {
+                    "id": model_id,
+                    "name": model_id.replace("-", " ").title(),
+                    "family": "test",
+                    "filename": filename,
+                    "url": url,
+                    "size": "19 B",
+                    "recommended": True,
+                    "description": "Test download",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_bundled_chat_downloads_http_model_catalog_entries(tmp_path):
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not installed")
+
+    try:
+        download_server = ThreadingHTTPServer(("127.0.0.1", 0), ModelDownloadServer)
+    except PermissionError as exc:
+        pytest.skip(f"localhost bind is unavailable in this environment: {exc}")
+    download_thread = threading.Thread(target=download_server.serve_forever, daemon=True)
+    download_thread.start()
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    write_fake_chat_server(node, bin_dir)
+    port = reserve_local_port()
+
+    models_dir = tmp_path / "models"
+    catalog = tmp_path / "models.json"
+    write_catalog(
+        catalog,
+        "http-model",
+        "http-model.gguf",
+        f"http://127.0.0.1:{download_server.server_port}/model.gguf",
+    )
+
+    try:
+        completed = subprocess.run(
+            [
+                node,
+                str(CHAT_SCRIPT),
+                "http-model",
+                "--host",
+                "127.0.0.1",
+                "--port",
+                str(port),
+            ],
+            input="/exit\n",
+            capture_output=True,
+            text=True,
+            timeout=15,
+            env={
+                **os.environ,
+                "UTOPIC_BIN_DIR": str(bin_dir),
+                "UTOPIC_MODELS_CATALOG": str(catalog),
+                "UTOPIC_MODELS_DIR": str(models_dir),
+            },
+        )
+    finally:
+        download_server.shutdown()
+        download_server.server_close()
+        download_thread.join(timeout=5)
+
+    assert completed.returncode == 0, completed.stderr
+    assert "downloaded model works" not in completed.stdout
+    assert (models_dir / "http-model.gguf").read_bytes() == ModelDownloadServer.body
+    assert not (models_dir / "http-model.gguf.partial").exists()
+
+
+def test_bundled_chat_follows_relative_model_download_redirects(tmp_path):
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not installed")
+
+    try:
+        download_server = ThreadingHTTPServer(("127.0.0.1", 0), ModelDownloadServer)
+    except PermissionError as exc:
+        pytest.skip(f"localhost bind is unavailable in this environment: {exc}")
+    download_thread = threading.Thread(target=download_server.serve_forever, daemon=True)
+    download_thread.start()
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    write_fake_chat_server(node, bin_dir)
+    port = reserve_local_port()
+
+    models_dir = tmp_path / "models"
+    catalog = tmp_path / "models.json"
+    write_catalog(
+        catalog,
+        "redirect-model",
+        "redirect-model.gguf",
+        f"http://127.0.0.1:{download_server.server_port}/redirect.gguf",
+    )
+
+    try:
+        completed = subprocess.run(
+            [
+                node,
+                str(CHAT_SCRIPT),
+                "redirect-model",
+                "--host",
+                "127.0.0.1",
+                "--port",
+                str(port),
+            ],
+            input="/exit\n",
+            capture_output=True,
+            text=True,
+            timeout=15,
+            env={
+                **os.environ,
+                "UTOPIC_BIN_DIR": str(bin_dir),
+                "UTOPIC_MODELS_CATALOG": str(catalog),
+                "UTOPIC_MODELS_DIR": str(models_dir),
+            },
+        )
+    finally:
+        download_server.shutdown()
+        download_server.server_close()
+        download_thread.join(timeout=5)
+
+    assert completed.returncode == 0, completed.stderr
+    assert (models_dir / "redirect-model.gguf").read_bytes() == ModelDownloadServer.body
+    assert not (models_dir / "redirect-model.gguf.partial").exists()
 
 
 def test_bundled_chat_waits_for_started_server_to_exit(tmp_path):
