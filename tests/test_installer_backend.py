@@ -170,6 +170,27 @@ def test_cuda_build_clears_stale_cmake_cuda_toolkit_cache(monkeypatch, tmp_path)
     assert "-UFIND_PACKAGE_MESSAGE_DETAILS_CUDAToolkit" in configure
 
 
+def test_cuda_build_clears_stale_legacy_cuda_library_cache(monkeypatch, tmp_path):
+    commands = []
+    monkeypatch.setattr(
+        installer,
+        "_find_cuda_compiler",
+        lambda cuda_architectures=None: Path("/usr/local/cuda-13.0/bin/nvcc"),
+    )
+    monkeypatch.setattr(installer, "_run", lambda command, **kwargs: commands.append(command))
+
+    installer._build_llama(
+        tmp_path,
+        backend="cuda",
+        cuda_architectures="121",
+        jobs=None,
+        dry_run=True,
+    )
+
+    configure = commands[0]
+    assert "-UCUDA_*" in configure
+
+
 def test_cuda_build_adds_toolkit_library_dirs_to_build_rpath(monkeypatch, tmp_path):
     commands = []
     monkeypatch.setattr(

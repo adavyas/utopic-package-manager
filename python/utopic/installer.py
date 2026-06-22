@@ -564,6 +564,7 @@ def _build_llama(
             command.extend(
                 [
                     "-UCUDAToolkit_*",
+                    "-UCUDA_*",
                     "-U_cmake_CUDAToolkit_*",
                     "-UFIND_PACKAGE_MESSAGE_DETAILS_CUDAToolkit",
                 ]
