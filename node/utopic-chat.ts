@@ -91,6 +91,16 @@ function parseArgs(argv: string[]): ChatOptions {
     if (!Number.isFinite(parsed)) throw new Error(`${flag} must be a number`);
     return parsed;
   };
+  const positiveIntegerValue = (flag: string, value: string): number => {
+    const parsed = numberValue(flag, value);
+    if (!Number.isInteger(parsed) || parsed < 1) throw new Error(`${flag} must be a positive integer`);
+    return parsed;
+  };
+  const nonNegativeNumberValue = (flag: string, value: string): number => {
+    const parsed = numberValue(flag, value);
+    if (parsed < 0) throw new Error(`${flag} must be a non-negative number`);
+    return parsed;
+  };
   const integerString = (flag: string, value: string, min: number, max: number | null, label: string): string => {
     const parsed = Number(value);
     if (!Number.isInteger(parsed) || parsed < min || (max !== null && parsed > max)) {
@@ -117,10 +127,10 @@ function parseArgs(argv: string[]): ChatOptions {
     else if (arg === "-ngl") options.ngl = integerString("-ngl", next("-ngl", true), 0, null, "a non-negative integer");
     else if (arg === "--ctx-size") options.ctxSize = integerString("--ctx-size", next("--ctx-size", true), 1, null, "a positive integer");
     else if (arg.startsWith("--ctx-size=")) options.ctxSize = integerString("--ctx-size", requiredValue("--ctx-size", valueAfterEquals(arg, "--ctx-size"), true), 1, null, "a positive integer");
-    else if (arg === "--max-tokens") options.maxTokens = numberValue("--max-tokens", next("--max-tokens", true));
-    else if (arg.startsWith("--max-tokens=")) options.maxTokens = numberValue("--max-tokens", requiredValue("--max-tokens", valueAfterEquals(arg, "--max-tokens"), true));
-    else if (arg === "--temperature") options.temperature = numberValue("--temperature", next("--temperature", true));
-    else if (arg.startsWith("--temperature=")) options.temperature = numberValue("--temperature", requiredValue("--temperature", valueAfterEquals(arg, "--temperature"), true));
+    else if (arg === "--max-tokens") options.maxTokens = positiveIntegerValue("--max-tokens", next("--max-tokens", true));
+    else if (arg.startsWith("--max-tokens=")) options.maxTokens = positiveIntegerValue("--max-tokens", requiredValue("--max-tokens", valueAfterEquals(arg, "--max-tokens"), true));
+    else if (arg === "--temperature") options.temperature = nonNegativeNumberValue("--temperature", next("--temperature", true));
+    else if (arg.startsWith("--temperature=")) options.temperature = nonNegativeNumberValue("--temperature", requiredValue("--temperature", valueAfterEquals(arg, "--temperature"), true));
     else if (arg === "--no-setup") continue;
     else if (arg.startsWith("-")) throw new Error(`unknown option: ${arg}`);
     else positional.push(arg);

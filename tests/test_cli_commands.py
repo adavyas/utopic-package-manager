@@ -223,6 +223,28 @@ def test_chat_launch_rejects_option_like_model_values_before_setup(monkeypatch, 
     assert "utopic chat: expected a value after -m/--model" in captured.err
 
 
+@pytest.mark.parametrize(
+    ("args", "message"),
+    [
+        (["--max-tokens=0"], "--max-tokens must be a positive integer"),
+        (["--max-tokens=-5"], "--max-tokens must be a positive integer"),
+        (["--max-tokens", "-5"], "--max-tokens must be a positive integer"),
+        (["--max-tokens=1.5"], "--max-tokens must be a positive integer"),
+        (["--temperature=-1"], "--temperature must be a non-negative number"),
+        (["--temperature", "-1"], "--temperature must be a non-negative number"),
+    ],
+)
+def test_chat_launch_rejects_invalid_sampling_values_before_setup(monkeypatch, capsys, args, message):
+    monkeypatch.setattr(chat.shutil, "which", lambda name: "/usr/bin/node" if name == "node" else None)
+    monkeypatch.setattr(chat.installer, "setup", lambda argv: pytest.fail("should not run setup"))
+    monkeypatch.setattr(chat.subprocess, "run", lambda command, env, check: pytest.fail("should not launch node"))
+
+    assert chat.launch(args) == 1
+
+    captured = capsys.readouterr()
+    assert f"utopic chat: {message}" in captured.err
+
+
 def test_cli_ensure_setup_rebuilds_stale_native_cache(monkeypatch):
     calls = []
 

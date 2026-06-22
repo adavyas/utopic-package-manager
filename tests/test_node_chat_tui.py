@@ -282,6 +282,37 @@ def test_bundled_chat_rejects_invalid_numeric_flags(fake_openai_server, flag, va
 @pytest.mark.parametrize(
     ("args", "message"),
     [
+        (["--max-tokens=0"], "--max-tokens must be a positive integer"),
+        (["--max-tokens=-5"], "--max-tokens must be a positive integer"),
+        (["--max-tokens", "-5"], "--max-tokens must be a positive integer"),
+        (["--max-tokens=1.5"], "--max-tokens must be a positive integer"),
+        (["--temperature=-1"], "--temperature must be a non-negative number"),
+        (["--temperature", "-1"], "--temperature must be a non-negative number"),
+        (["--temperature=-0.1"], "--temperature must be a non-negative number"),
+    ],
+)
+def test_bundled_chat_rejects_out_of_range_sampling_flags(fake_openai_server, args, message):
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not installed")
+    base_url, requests, _paths = fake_openai_server
+
+    completed = subprocess.run(
+        [node, str(CHAT_SCRIPT), "--server", base_url, *args],
+        input="hi\n/exit\n",
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+
+    assert completed.returncode == 1
+    assert f"utopic chat: {message}" in completed.stderr
+    assert requests == []
+
+
+@pytest.mark.parametrize(
+    ("args", "message"),
+    [
         (["--port=abc"], "--port must be an integer from 1 to 65535"),
         (["--port=0"], "--port must be an integer from 1 to 65535"),
         (["--port=65536"], "--port must be an integer from 1 to 65535"),

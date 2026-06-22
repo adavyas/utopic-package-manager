@@ -31,6 +31,15 @@ LONG_VALUE_FLAGS = {
     "--temperature": "--temperature",
 }
 NUMERIC_VALUE_FLAGS = {"--port", "-ngl", "--ctx-size", "--max-tokens", "--temperature"}
+INTEGER_VALUE_RULES = {
+    "--port": (1, 65535, "an integer from 1 to 65535"),
+    "-ngl": (0, None, "a non-negative integer"),
+    "--ctx-size": (1, None, "a positive integer"),
+    "--max-tokens": (1, None, "a positive integer"),
+}
+NUMBER_VALUE_RULES = {
+    "--temperature": (0.0, None, "a non-negative number"),
+}
 
 
 CHAT_HELP = """usage: utopic chat [model-alias|/path/to/model.gguf] [options]
@@ -87,6 +96,25 @@ def _looks_like_negative_number(value: str) -> bool:
     return len(value) > 1 and value[0] == "-" and value[1].isdigit()
 
 
+def _validate_numeric_value(flag: str, value: str) -> None:
+    if flag in INTEGER_VALUE_RULES:
+        minimum, maximum, label = INTEGER_VALUE_RULES[flag]
+        try:
+            parsed = int(value)
+        except ValueError as exc:
+            raise RuntimeError(f"{flag} must be {label}") from exc
+        if parsed < minimum or (maximum is not None and parsed > maximum):
+            raise RuntimeError(f"{flag} must be {label}")
+    if flag in NUMBER_VALUE_RULES:
+        minimum, maximum, label = NUMBER_VALUE_RULES[flag]
+        try:
+            parsed = float(value)
+        except ValueError as exc:
+            raise RuntimeError(f"{flag} must be {label}") from exc
+        if parsed < minimum or (maximum is not None and parsed > maximum):
+            raise RuntimeError(f"{flag} must be {label}")
+
+
 def _validate_value_args(argv: Sequence[str]) -> None:
     for index, arg in enumerate(argv):
         if arg in VALUE_FLAGS:
@@ -100,13 +128,19 @@ def _validate_value_args(argv: Sequence[str]) -> None:
                 and not (allow_negative and _looks_like_negative_number(value))
             ):
                 raise RuntimeError(f"expected a value after {label}")
+            _validate_numeric_value(arg, value)
 
         for flag, label in LONG_VALUE_FLAGS.items():
             if not arg.startswith(f"{flag}="):
                 continue
             value = arg.split("=", 1)[1]
-            if value == "" or value.startswith("-"):
+            allow_negative = flag in NUMERIC_VALUE_FLAGS
+            if value == "" or (
+                value.startswith("-")
+                and not (allow_negative and _looks_like_negative_number(value))
+            ):
                 raise RuntimeError(f"expected a value after {label}")
+            _validate_numeric_value(flag, value)
 
 
 def _node_command(argv: Sequence[str]) -> list[str]:

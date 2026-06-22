@@ -64,6 +64,18 @@ function parseArgs(argv) {
             throw new Error(`${flag} must be a number`);
         return parsed;
     };
+    const positiveIntegerValue = (flag, value) => {
+        const parsed = numberValue(flag, value);
+        if (!Number.isInteger(parsed) || parsed < 1)
+            throw new Error(`${flag} must be a positive integer`);
+        return parsed;
+    };
+    const nonNegativeNumberValue = (flag, value) => {
+        const parsed = numberValue(flag, value);
+        if (parsed < 0)
+            throw new Error(`${flag} must be a non-negative number`);
+        return parsed;
+    };
     const integerString = (flag, value, min, max, label) => {
         const parsed = Number(value);
         if (!Number.isInteger(parsed) || parsed < min || (max !== null && parsed > max)) {
@@ -104,13 +116,13 @@ function parseArgs(argv) {
         else if (arg.startsWith("--ctx-size="))
             options.ctxSize = integerString("--ctx-size", requiredValue("--ctx-size", valueAfterEquals(arg, "--ctx-size"), true), 1, null, "a positive integer");
         else if (arg === "--max-tokens")
-            options.maxTokens = numberValue("--max-tokens", next("--max-tokens", true));
+            options.maxTokens = positiveIntegerValue("--max-tokens", next("--max-tokens", true));
         else if (arg.startsWith("--max-tokens="))
-            options.maxTokens = numberValue("--max-tokens", requiredValue("--max-tokens", valueAfterEquals(arg, "--max-tokens"), true));
+            options.maxTokens = positiveIntegerValue("--max-tokens", requiredValue("--max-tokens", valueAfterEquals(arg, "--max-tokens"), true));
         else if (arg === "--temperature")
-            options.temperature = numberValue("--temperature", next("--temperature", true));
+            options.temperature = nonNegativeNumberValue("--temperature", next("--temperature", true));
         else if (arg.startsWith("--temperature="))
-            options.temperature = numberValue("--temperature", requiredValue("--temperature", valueAfterEquals(arg, "--temperature"), true));
+            options.temperature = nonNegativeNumberValue("--temperature", requiredValue("--temperature", valueAfterEquals(arg, "--temperature"), true));
         else if (arg === "--no-setup")
             continue;
         else if (arg.startsWith("-"))
