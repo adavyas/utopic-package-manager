@@ -397,9 +397,6 @@ def native_installation_is_current(binary_names: Sequence[str] = BIN_NAMES) -> b
     cuda_architectures = os.environ.get("UTOPIC_CUDA_ARCHITECTURES")
     if requested_backend != "auto" and metadata.get("backend") != requested_backend:
         return False
-    if requested_backend == "cuda" and cuda_architectures:
-        if metadata.get("cuda_architectures") != cuda_architectures:
-            return False
 
     metadata_backend = metadata.get("backend")
     if not isinstance(metadata_backend, str):
@@ -407,6 +404,9 @@ def native_installation_is_current(binary_names: Sequence[str] = BIN_NAMES) -> b
     metadata_cuda_architectures = metadata.get("cuda_architectures")
     if metadata_cuda_architectures is not None and not isinstance(metadata_cuda_architectures, str):
         return False
+    if metadata_backend == "cuda" and cuda_architectures:
+        if metadata_cuda_architectures != cuda_architectures:
+            return False
 
     expected = _install_metadata(
         BackendDecision(

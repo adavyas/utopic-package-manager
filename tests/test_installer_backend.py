@@ -149,6 +149,31 @@ def test_native_installation_is_not_current_when_explicit_backend_changes(monkey
     assert installer.native_installation_is_current(("utopic_server",)) is False
 
 
+def test_native_installation_is_not_current_when_cuda_architecture_override_changes(monkeypatch, tmp_path):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "utopic_server").write_text("binary", encoding="utf-8")
+    old_decision = installer.BackendDecision(
+        backend="cuda",
+        reason="old",
+        device="CUDA arch 89",
+        cuda_architectures="89",
+    )
+
+    monkeypatch.setenv("UTOPIC_CUDA_ARCHITECTURES", "120")
+    monkeypatch.setattr(installer, "bin_dir", lambda: bin_dir)
+    monkeypatch.setattr(installer, "default_llama_dir", lambda: tmp_path / "src" / "llama.cpp")
+    monkeypatch.setattr(installer, "default_native_dir", lambda: tmp_path / "site" / "utopic" / "native")
+    installer._write_install_metadata(
+        old_decision,
+        requested_backend="auto",
+        llama_dir=installer.default_llama_dir(),
+        native_dir=installer.default_native_dir(),
+    )
+
+    assert installer.native_installation_is_current(("utopic_server",)) is False
+
+
 def test_native_installation_is_current_when_metadata_matches(monkeypatch, tmp_path):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
