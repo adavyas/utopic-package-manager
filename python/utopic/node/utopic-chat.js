@@ -7,7 +7,7 @@ const os = require("node:os");
 const path = require("node:path");
 const readline = require("node:readline");
 const node_child_process_1 = require("node:child_process");
-const VERSION = "0.1.4";
+const VERSION = "0.1.5";
 function printHelp() {
     console.log(`usage: utopic chat [model-alias|/path/to/model.gguf] [options]
 

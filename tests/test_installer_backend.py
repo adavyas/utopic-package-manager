@@ -1,3 +1,4 @@
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -62,6 +63,78 @@ def test_metal_backend_adds_explicit_cmake_flags(monkeypatch, tmp_path):
     configure = commands[0]
     assert "-DGGML_METAL=ON" in configure
     assert "-DGGML_CUDA=OFF" in configure
+
+
+def test_cuda_build_disables_graphs_for_gb10_architecture(monkeypatch, tmp_path):
+    commands = []
+    monkeypatch.setattr(installer, "_find_cuda_compiler", lambda cuda_architectures=None: None)
+    monkeypatch.setattr(installer, "_run", lambda command, **kwargs: commands.append(command))
+
+    installer._build_llama(
+        tmp_path,
+        backend="cuda",
+        cuda_architectures="121",
+        jobs=None,
+        dry_run=True,
+    )
+
+    configure = commands[0]
+    assert "-DGGML_CUDA=ON" in configure
+    assert "-DCMAKE_CUDA_ARCHITECTURES=121" in configure
+    assert "-DGGML_CUDA_GRAPHS=OFF" in configure
+
+
+def test_cuda_build_keeps_graphs_for_non_gb10_architecture(monkeypatch, tmp_path):
+    commands = []
+    monkeypatch.setattr(installer, "_find_cuda_compiler", lambda cuda_architectures=None: None)
+    monkeypatch.setattr(installer, "_run", lambda command, **kwargs: commands.append(command))
+
+    installer._build_llama(
+        tmp_path,
+        backend="cuda",
+        cuda_architectures="89",
+        jobs=None,
+        dry_run=True,
+    )
+
+    configure = commands[0]
+    assert "-DGGML_CUDA_GRAPHS=ON" in configure
+
+
+def test_cuda_build_resets_cached_cuda_matmul_force_options(monkeypatch, tmp_path):
+    commands = []
+    monkeypatch.setattr(installer, "_find_cuda_compiler", lambda cuda_architectures=None: None)
+    monkeypatch.setattr(installer, "_run", lambda command, **kwargs: commands.append(command))
+
+    installer._build_llama(
+        tmp_path,
+        backend="cuda",
+        cuda_architectures="121",
+        jobs=None,
+        dry_run=True,
+    )
+
+    configure = commands[0]
+    assert "-DGGML_CUDA_FORCE_CUBLAS=OFF" in configure
+    assert "-DGGML_CUDA_FORCE_MMQ=OFF" in configure
+
+
+def test_cuda_graphs_environment_override_wins_over_gb10_default(monkeypatch, tmp_path):
+    commands = []
+    monkeypatch.setenv("UTOPIC_CUDA_GRAPHS", "ON")
+    monkeypatch.setattr(installer, "_find_cuda_compiler", lambda cuda_architectures=None: None)
+    monkeypatch.setattr(installer, "_run", lambda command, **kwargs: commands.append(command))
+
+    installer._build_llama(
+        tmp_path,
+        backend="cuda",
+        cuda_architectures="121",
+        jobs=None,
+        dry_run=True,
+    )
+
+    configure = commands[0]
+    assert "-DGGML_CUDA_GRAPHS=ON" in configure
 
 
 def test_managed_source_checkout_recovers_non_git_cache(monkeypatch, tmp_path):
@@ -157,6 +230,36 @@ def test_managed_source_checkout_recovers_file_at_cache_path(monkeypatch, tmp_pa
     assert commands[0] == ["git", "clone", "https://example.test/llama.cpp.git", dest]
     assert commands[1] == ["git", "checkout", "main"]
     assert commands[2] == ["git", "reset", "--hard", "main"]
+
+
+def test_managed_source_checkout_repairs_wrong_origin_url(monkeypatch, tmp_path):
+    dest = tmp_path / "src" / "llama.cpp"
+    dest.mkdir(parents=True)
+    subprocess.run(["git", "init"], cwd=dest, check=True, capture_output=True, text=True)
+    subprocess.run(
+        ["git", "remote", "add", "origin", "https://wrong.example/llama.cpp.git"],
+        cwd=dest,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    commands = []
+
+    monkeypatch.setattr(installer, "_run", lambda command, **kwargs: commands.append(command))
+
+    installer._clone_or_checkout(
+        "https://example.test/llama.cpp.git",
+        "refs/pull/24423/head",
+        dest,
+        dry_run=False,
+        reset=True,
+    )
+
+    assert commands[0] == ["git", "remote", "set-url", "origin", "https://example.test/llama.cpp.git"]
+    assert commands[1] == ["git", "fetch", "--all", "--tags"]
+    assert commands[2] == ["git", "fetch", "origin", "refs/pull/24423/head"]
+    assert commands[3] == ["git", "checkout", "FETCH_HEAD"]
+    assert commands[4] == ["git", "reset", "--hard", "FETCH_HEAD"]
 
 
 def test_build_utopic_clears_stale_cmake_cache_when_source_changes(monkeypatch, tmp_path):
@@ -350,6 +453,32 @@ def test_native_installation_is_not_current_when_cuda_architecture_override_chan
     assert installer.native_installation_is_current(("utopic_server",)) is False
 
 
+def test_native_installation_is_not_current_when_cuda_graphs_override_changes(monkeypatch, tmp_path):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _write_executable(bin_dir / "utopic_server")
+    old_decision = installer.BackendDecision(
+        backend="cuda",
+        reason="old",
+        device="CUDA arch 121",
+        cuda_architectures="121",
+        cuda_graphs="OFF",
+    )
+
+    monkeypatch.setenv("UTOPIC_CUDA_GRAPHS", "ON")
+    monkeypatch.setattr(installer, "bin_dir", lambda: bin_dir)
+    monkeypatch.setattr(installer, "default_llama_dir", lambda: tmp_path / "src" / "llama.cpp")
+    monkeypatch.setattr(installer, "default_native_dir", lambda: tmp_path / "site" / "utopic" / "native")
+    installer._write_install_metadata(
+        old_decision,
+        requested_backend="auto",
+        llama_dir=installer.default_llama_dir(),
+        native_dir=installer.default_native_dir(),
+    )
+
+    assert installer.native_installation_is_current(("utopic_server",)) is False
+
+
 def test_native_installation_is_current_when_metadata_matches(monkeypatch, tmp_path):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -515,6 +644,17 @@ def test_setup_rejects_invalid_jobs_environment_cleanly(monkeypatch, capsys):
 
     assert exc_info.value.code == 2
     assert "UTOPIC_BUILD_JOBS must be a positive integer" in capsys.readouterr().err
+
+
+def test_setup_rejects_invalid_cuda_graphs_environment_cleanly(monkeypatch, capsys):
+    monkeypatch.setenv("UTOPIC_CUDA_GRAPHS", "sometimes")
+    monkeypatch.setattr(installer, "_detect_cuda_architectures", lambda: "121")
+
+    with pytest.raises(SystemExit) as exc_info:
+        installer.setup(["--dry-run", "--backend", "cuda"])
+
+    assert exc_info.value.code == 2
+    assert "UTOPIC_CUDA_GRAPHS must be one of" in capsys.readouterr().err
 
 
 def test_setup_force_clears_stale_build_cache_before_rebuild(monkeypatch, tmp_path):

@@ -31,7 +31,7 @@ uv tool upgrade utopic
 ```
 
 If you previously installed an exact pinned version such as
-`uv tool install utopic==0.1.4`, uv keeps that pin during upgrades. Reinstall
+`uv tool install utopic==0.1.5`, uv keeps that pin during upgrades. Reinstall
 the tool without the pin:
 
 ```sh
@@ -103,6 +103,13 @@ constrained hosts, limit build parallelism:
 utopic setup --backend cuda --jobs 2
 ```
 
+On GB10/DGX Spark, setup disables ggml CUDA graphs by default. To override this
+for diagnosis:
+
+```sh
+UTOPIC_CUDA_GRAPHS=ON utopic setup --backend cuda --force
+```
+
 If a Mac cannot initialize Metal, or you want a portable CPU-only build:
 
 ```sh
@@ -124,22 +131,26 @@ GGUF path or a curated model alias. The current curated aliases are:
 |---|---|---|---|
 | `dream-7b-q4` | Dream 7B Instruct Q4_K_M | Q4_K_M | Recommended first local chat model. |
 | `llada-8b-q4` | LLaDA 8B Instruct Q4_K_M | Q4_K_M | Discrete diffusion instruct model. |
-| `diffusiongemma-26b-q4` | DiffusionGemma 26B A4B Instruct Q4_K_M | Q4_K_M | Larger CUDA/high-memory model. |
-| `diffusiongemma-26b-bf16` | DiffusionGemma 26B A4B Instruct BF16 | BF16 | Large-memory CUDA model. |
 
-The runtime support is broader than the curated download list. Utopic loads GGUF
-models by architecture family:
+The runtime code is broader than the curated download list. Utopic has native
+paths for GGUF models by architecture family:
 
 | Family | Path | Supported weight classes |
 |---|---|---|
-| LLaDA | masked | BF16, FP8, F16, F32, Q*/IQ* GGUF weights |
-| Dream | masked | BF16, FP8, F16, F32, Q*/IQ* GGUF weights |
-| DiffusionGemma | canvas / entropy-bound | BF16, FP8, F16, F32, Q*/IQ* GGUF weights |
+| LLaDA | masked | GGUF tensor types the linked llama.cpp build can load |
+| Dream | masked | GGUF tensor types the linked llama.cpp build can load |
+| DiffusionGemma | canvas / entropy-bound | Experimental GGUF path |
 
-FP8 file names are accepted through common GGUF markers such as `FP8`,
+DiffusionGemma GGUF paths are still experimental in this package. GB10 CUDA
+currently fails inside ggml CUDA SOFT_MAX for the tested Q4_K_M and BF16 GGUF
+files, so DiffusionGemma is not exposed as a one-command curated download until
+that backend path is fixed and revalidated.
+
+FP8 file names are recognized through common GGUF markers such as `FP8`,
 `F8_E4M3`, `F8_E5M2`, `E4M3`, and `E5M2`. Quantized GGUF weights include common
 `Q8_0`, `Q6_K`, `Q5_*`, `Q4_*`, `Q3_*`, `Q2_K`, `IQ*`, and `NVFP4` markers,
-subject to what the package-managed llama.cpp build can load.
+subject to what the package-managed llama.cpp build can actually load on the
+target backend.
 
 ## Commands
 

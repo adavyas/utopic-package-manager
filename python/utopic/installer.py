@@ -20,10 +20,11 @@ LLAMA_REPO = "https://github.com/ggml-org/llama.cpp.git"
 LLAMA_REF = "refs/pull/24423/head"
 BIN_NAMES = ("utopic", "utopic_server", "utopic_mcp", "utopic_acp")
 INSTALL_METADATA_NAME = "install.json"
-INSTALL_METADATA_SCHEMA_VERSION = 1
+INSTALL_METADATA_SCHEMA_VERSION = 2
 INSTALL_METADATA_MATCH_KEYS = (
     "schema_version",
     "package_version",
+    "cuda_graphs",
     "llama_repo",
     "llama_ref",
     "native_repo",
@@ -54,6 +55,7 @@ class BackendDecision:
     reason: str
     device: str
     cuda_architectures: Optional[str] = None
+    cuda_graphs: Optional[str] = None
 
 
 def _positive_int(value: str) -> int:
@@ -135,6 +137,21 @@ def _run(
     )
 
 
+def _git_origin_url(dest: Path) -> Optional[str]:
+    try:
+        completed = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            cwd=str(dest),
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    origin = completed.stdout.strip()
+    return origin or None
+
+
 def _clone_or_checkout(repo: str, ref: str, dest: Path, *, dry_run: bool, reset: bool = False) -> None:
     dest_exists = dest.exists()
     if dest.exists() and not (dest / ".git").exists():
@@ -147,6 +164,14 @@ def _clone_or_checkout(repo: str, ref: str, dest: Path, *, dry_run: bool, reset:
         dest_exists = False
 
     if dest_exists:
+        origin = _git_origin_url(dest)
+        if origin != repo:
+            if origin is None:
+                print(f"+ add source origin {repo}")
+                _run(["git", "remote", "add", "origin", repo], cwd=dest, dry_run=dry_run)
+            else:
+                print(f"+ update source origin {origin} -> {repo}")
+                _run(["git", "remote", "set-url", "origin", repo], cwd=dest, dry_run=dry_run)
         _run(["git", "fetch", "--all", "--tags"], cwd=dest, dry_run=dry_run)
     else:
         if not dry_run:
@@ -222,6 +247,29 @@ def _detect_cuda_architectures() -> Optional[str]:
         if arch and arch not in arches:
             arches.append(arch)
     return ";".join(arches) if arches else None
+
+
+def _normalize_cmake_bool(value: str) -> str:
+    normalized = value.strip().lower()
+    if normalized in {"1", "on", "true", "yes"}:
+        return "ON"
+    if normalized in {"0", "off", "false", "no"}:
+        return "OFF"
+    raise ValueError("UTOPIC_CUDA_GRAPHS must be one of ON, OFF, 1, 0, true, or false")
+
+
+def _cuda_architectures_include_gb10(cuda_architectures: Optional[str]) -> bool:
+    parts = (cuda_architectures or "").replace(",", ";").split(";")
+    return any(part.strip().lower().startswith("121") for part in parts)
+
+
+def _cuda_graphs_setting(cuda_architectures: Optional[str]) -> str:
+    configured = os.environ.get("UTOPIC_CUDA_GRAPHS")
+    if configured:
+        return _normalize_cmake_bool(configured)
+    if _cuda_architectures_include_gb10(cuda_architectures):
+        return "OFF"
+    return "ON"
 
 
 def _detect_metal_device() -> Optional[str]:
@@ -302,6 +350,7 @@ def _resolve_backend(requested_backend: str, cuda_architectures: Optional[str]) 
                 reason="NVIDIA CUDA compiler available",
                 device=device,
                 cuda_architectures=detected_cuda_architectures,
+                cuda_graphs=_cuda_graphs_setting(detected_cuda_architectures),
             )
 
         return BackendDecision(
@@ -322,6 +371,7 @@ def _resolve_backend(requested_backend: str, cuda_architectures: Optional[str]) 
             reason="Requested by --backend cuda",
             device=device,
             cuda_architectures=detected_cuda_architectures,
+            cuda_graphs=_cuda_graphs_setting(detected_cuda_architectures),
         )
 
     if requested_backend == "metal":
@@ -345,6 +395,8 @@ def _print_backend_decision(decision: BackendDecision, requested_backend: str) -
     print(f"Reason: {decision.reason}")
     if decision.cuda_architectures:
         print(f"CUDA architectures: {decision.cuda_architectures}")
+    if decision.cuda_graphs:
+        print(f"CUDA graphs: {decision.cuda_graphs}")
 
 
 def _install_metadata(
@@ -354,12 +406,16 @@ def _install_metadata(
     llama_dir: Path,
     native_dir: Path,
 ) -> dict[str, object]:
+    cuda_graphs = decision.cuda_graphs
+    if decision.backend == "cuda" and cuda_graphs is None:
+        cuda_graphs = _cuda_graphs_setting(decision.cuda_architectures)
     return {
         "schema_version": INSTALL_METADATA_SCHEMA_VERSION,
         "package_version": __version__,
         "requested_backend": requested_backend,
         "backend": decision.backend,
         "cuda_architectures": decision.cuda_architectures,
+        "cuda_graphs": cuda_graphs,
         "llama_repo": os.environ.get("UTOPIC_LLAMA_REPO", LLAMA_REPO),
         "llama_ref": os.environ.get("UTOPIC_LLAMA_REF", LLAMA_REF),
         "native_repo": os.environ.get("UTOPIC_NATIVE_REPO", UTOPIC_NATIVE_REPO),
@@ -423,6 +479,9 @@ def native_installation_is_current(binary_names: Sequence[str] = BIN_NAMES) -> b
     metadata_cuda_architectures = metadata.get("cuda_architectures")
     if metadata_cuda_architectures is not None and not isinstance(metadata_cuda_architectures, str):
         return False
+    metadata_cuda_graphs = metadata.get("cuda_graphs")
+    if metadata_cuda_graphs is not None and not isinstance(metadata_cuda_graphs, str):
+        return False
 
     if requested_backend != "auto" or metadata_backend == "cpu":
         current_decision = _resolve_backend(requested_backend, cuda_architectures)
@@ -436,6 +495,13 @@ def native_installation_is_current(binary_names: Sequence[str] = BIN_NAMES) -> b
     if metadata_backend == "cuda" and cuda_architectures:
         if metadata_cuda_architectures != cuda_architectures:
             return False
+    if metadata_backend == "cuda":
+        try:
+            expected_cuda_graphs = _cuda_graphs_setting(metadata_cuda_architectures)
+        except ValueError:
+            return False
+        if metadata_cuda_graphs != expected_cuda_graphs:
+            return False
 
     expected = _install_metadata(
         BackendDecision(
@@ -443,6 +509,7 @@ def native_installation_is_current(binary_names: Sequence[str] = BIN_NAMES) -> b
             reason="installed metadata",
             device="installed metadata",
             cuda_architectures=metadata_cuda_architectures,
+            cuda_graphs=metadata_cuda_graphs,
         ),
         requested_backend=str(metadata.get("requested_backend", "auto")),
         llama_dir=default_llama_dir(),
@@ -465,6 +532,7 @@ def _build_llama(
     cuda_architectures: Optional[str],
     jobs: Optional[int],
     dry_run: bool,
+    cuda_graphs: Optional[str] = None,
 ) -> None:
     command = ["cmake", "-B", llama_dir / "build", "-S", llama_dir, *LLAMA_CMAKE_FLAGS]
     if backend == "cpu":
@@ -478,6 +546,8 @@ def _build_llama(
             command.append(f"-DCMAKE_CUDA_COMPILER={cuda_compiler}")
         if cuda_architectures:
             command.append(f"-DCMAKE_CUDA_ARCHITECTURES={cuda_architectures}")
+        command.append(f"-DGGML_CUDA_GRAPHS={cuda_graphs or _cuda_graphs_setting(cuda_architectures)}")
+        command.extend(["-DGGML_CUDA_FORCE_CUBLAS=OFF", "-DGGML_CUDA_FORCE_MMQ=OFF"])
     elif backend == "metal":
         command.extend(["-DGGML_METAL=ON", "-DGGML_CUDA=OFF"])
     _run(command, dry_run=dry_run)
@@ -612,7 +682,10 @@ def setup(argv: Optional[Sequence[str]] = None) -> int:
 
     dry_run = bool(args.dry_run)
     requested_backend = "cuda" if args.cuda else args.backend
-    backend_decision = _resolve_backend(requested_backend, args.cuda_architectures)
+    try:
+        backend_decision = _resolve_backend(requested_backend, args.cuda_architectures)
+    except ValueError as exc:
+        parser.error(str(exc))
     _print_backend_decision(backend_decision, requested_backend)
     llama_dir = Path(args.llama_dir).expanduser() if args.llama_dir else default_llama_dir()
     native_dir = Path(args.native_dir).expanduser() if args.native_dir else default_native_dir()
@@ -644,6 +717,7 @@ def setup(argv: Optional[Sequence[str]] = None) -> int:
             cuda_architectures=backend_decision.cuda_architectures,
             jobs=args.jobs,
             dry_run=dry_run,
+            cuda_graphs=backend_decision.cuda_graphs,
         )
 
     if args.native_dir or os.environ.get("UTOPIC_NATIVE_DIR"):

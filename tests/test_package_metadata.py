@@ -130,7 +130,10 @@ def test_readme_documents_supported_models_without_prohibited_mentions():
     for entry in catalog:
         assert entry["id"] in readme
         assert entry["name"] in readme
-    assert "BF16, FP8, F16, F32, Q*/IQ* GGUF weights" in readme
+    assert all(entry["family"] != "diffusiongemma" for entry in catalog)
+    assert "DiffusionGemma GGUF paths are still experimental" in readme
+    assert "GB10 CUDA" in readme
+    assert "ggml CUDA SOFT_MAX" in readme
     assert "LLaDA2.0" not in readme
     assert "LLaDA 2.0" not in readme
 
