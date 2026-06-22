@@ -214,6 +214,25 @@ def test_cli_run_server_reports_missing_binary_without_traceback(monkeypatch, ca
     assert "utopic run: native binary missing" in captured.err
 
 
+def test_cli_run_no_setup_checks_server_binary_before_default_model_download(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "_ensure_setup", lambda enabled=True, binary_name="utopic": None)
+    monkeypatch.setattr(
+        cli.models,
+        "ensure_model",
+        lambda value=None: pytest.fail("should not download a model when the server binary is missing"),
+    )
+    monkeypatch.setattr(
+        cli._native,
+        "binary_path",
+        lambda name: (_ for _ in ()).throw(RuntimeError("native binary missing")),
+    )
+
+    assert cli.main(["run", "--no-setup"]) == 1
+
+    captured = capsys.readouterr()
+    assert "utopic run: native binary missing" in captured.err
+
+
 def test_cli_run_prompt_reports_missing_binary_without_traceback(monkeypatch, capsys):
     monkeypatch.setattr(cli, "_ensure_setup", lambda enabled=True, binary_name="utopic": None)
     monkeypatch.setattr(
@@ -282,6 +301,36 @@ def test_cli_run_server_reaps_process_after_health_timeout(monkeypatch, tmp_path
 
     assert cli._run_server("/models/dream.gguf", [], "127.0.0.1", "8910") == 143
     assert events == ["terminate", ("wait", 5)]
+
+
+def test_cli_run_server_prints_openai_url_after_health(monkeypatch, tmp_path, capsys):
+    events = []
+
+    class HealthyProcess:
+        returncode = 0
+
+        def poll(self):
+            events.append("poll")
+            return None
+
+        def wait(self):
+            events.append("wait")
+            return self.returncode
+
+    process = HealthyProcess()
+    monkeypatch.setattr(cli._native, "binary_path", lambda name: tmp_path / name)
+    monkeypatch.setattr(cli.subprocess, "Popen", lambda argv: events.append(("popen", argv)) or process)
+    monkeypatch.setattr(cli, "_wait_for_health", lambda process, health_url: events.append(("health", health_url)))
+
+    assert cli._run_server("/models/dream.gguf", ["--port", "8999"], "0.0.0.0", "8999") == 0
+
+    captured = capsys.readouterr()
+    assert "OpenAI-compatible URL: http://127.0.0.1:8999/v1/chat/completions" in captured.out
+    assert events == [
+        ("popen", [str(tmp_path / "utopic_server"), "-m", "/models/dream.gguf", "--port", "8999"]),
+        ("health", "http://127.0.0.1:8999/health"),
+        "wait",
+    ]
 
 
 def test_model_catalog_resolves_hf_download_url():

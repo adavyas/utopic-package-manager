@@ -199,6 +199,7 @@ def _run(argv: Sequence[str]) -> int:
 
         model_arg, server_args = _extract_model(args)
         _ensure_setup(setup_enabled, "utopic_server")
+        _native.binary_path("utopic_server")
         model_path = models.ensure_model(model_arg)
         host = _value_after(server_args, "--host", "127.0.0.1")
         port = _value_after(server_args, "--port", "8910")
