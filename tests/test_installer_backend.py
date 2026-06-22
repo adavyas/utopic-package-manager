@@ -212,6 +212,26 @@ def test_cuda_graphs_environment_override_wins_over_gb10_default(monkeypatch, tm
     assert "-DGGML_CUDA_GRAPHS=ON" in configure
 
 
+def test_install_binaries_ad_hoc_signs_macos_executables(monkeypatch, tmp_path):
+    build_dir = tmp_path / "build"
+    build_dir.mkdir()
+    for name in installer.BIN_NAMES:
+        _write_executable(build_dir / name)
+    dest_dir = tmp_path / "bin"
+    commands = []
+
+    monkeypatch.setattr(installer, "bin_dir", lambda: dest_dir)
+    monkeypatch.setattr(installer.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(installer, "_run", lambda command, **kwargs: commands.append(command))
+
+    installer._install_binaries(build_dir)
+
+    assert commands == [
+        ["codesign", "--force", "--sign", "-", dest_dir / name]
+        for name in installer.BIN_NAMES
+    ]
+
+
 def test_managed_source_checkout_recovers_non_git_cache(monkeypatch, tmp_path):
     dest = tmp_path / "src" / "llama.cpp"
     dest.mkdir(parents=True)

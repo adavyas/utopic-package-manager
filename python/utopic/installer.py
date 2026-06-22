@@ -667,6 +667,8 @@ def _install_binaries(build_dir: Path) -> None:
         dest = dest_dir / src.name
         shutil.copy2(src, dest)
         dest.chmod(0o755)
+        if platform.system() == "Darwin":
+            _run(["codesign", "--force", "--sign", "-", dest])
 
 
 def setup(argv: Optional[Sequence[str]] = None) -> int:

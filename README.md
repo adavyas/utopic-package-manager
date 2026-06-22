@@ -27,7 +27,7 @@ python -m utopic chat
 For a reproducible install of this release:
 
 ```sh
-uv tool install utopic==0.1.6
+uv tool install utopic==0.1.7
 ```
 
 If you already installed an older Utopic package:
