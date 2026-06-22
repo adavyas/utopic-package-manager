@@ -195,6 +195,13 @@ The server endpoint is:
 http://127.0.0.1:8910/v1/chat/completions
 ```
 
+`utopic run` is the server process, not an interactive prompt. To chat with a
+server that is already running:
+
+```sh
+utopic chat --server http://127.0.0.1:8910
+```
+
 Run a one-shot prompt:
 
 ```sh

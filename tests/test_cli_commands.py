@@ -384,6 +384,7 @@ def test_cli_run_help_after_no_setup_does_not_run_setup_or_native(monkeypatch, c
 
     captured = capsys.readouterr()
     assert "usage: utopic run" in captured.out
+    assert "utopic chat --server http://127.0.0.1:8910" in captured.out
     assert captured.err == ""
 
 
@@ -1026,6 +1027,7 @@ def test_cli_run_server_prints_openai_url_after_health(monkeypatch, tmp_path, ca
 
     captured = capsys.readouterr()
     assert "OpenAI-compatible URL: http://127.0.0.1:8999/v1/chat/completions" in captured.out
+    assert "Chat with this server: utopic chat --server http://127.0.0.1:8999" in captured.out
     assert events == [
         ("popen", [str(tmp_path / "utopic_server"), "-m", "/models/dream.gguf", "--port", "8999"]),
         ("health", "http://127.0.0.1:8999/health"),

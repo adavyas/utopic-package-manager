@@ -85,6 +85,13 @@ def test_readme_uses_release_build_commands():
     assert "python -m pip wheel . --no-deps -w dist/" not in readme
 
 
+def test_readme_distinguishes_server_mode_from_chat_mode():
+    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert "`utopic run` is the server process, not an interactive prompt." in readme
+    assert "utopic chat --server http://127.0.0.1:8910" in readme
+
+
 def test_readme_documents_supported_models_without_prohibited_mentions():
     readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
     catalog_path = REPO_ROOT / "python" / "utopic" / "models.json"

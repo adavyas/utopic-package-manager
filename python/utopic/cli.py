@@ -374,6 +374,10 @@ def _server_url(host: str, port: str) -> str:
     return f"http://{_client_host(host)}:{port}/v1/chat/completions"
 
 
+def _server_base_url(host: str, port: str) -> str:
+    return f"http://{_client_host(host)}:{port}"
+
+
 def _server_health_url(host: str, port: str) -> str:
     return f"http://{_client_host(host)}:{port}/health"
 
@@ -404,6 +408,7 @@ def _run_server(model_path: str, server_args: Sequence[str], host: str, port: st
     try:
         _wait_for_health(process, _server_health_url(host, port))
         print(f"OpenAI-compatible URL: {_server_url(host, port)}", flush=True)
+        print(f"Chat with this server: utopic chat --server {_server_base_url(host, port)}", flush=True)
         return process.wait()
     except KeyboardInterrupt:
         process.terminate()
@@ -455,6 +460,7 @@ def _print_run_help() -> None:
 
 Without -p/--prompt, `utopic run` starts `utopic-server` and prints the local
 OpenAI-compatible URL. With -p/--prompt, it keeps the native one-shot behavior.
+To chat with a running server, use `utopic chat --server http://127.0.0.1:8910`.
 
 Server options:
   -m, --model VALUE     Model alias or GGUF path. Defaults to the recommended model.
@@ -466,6 +472,7 @@ Server options:
 
 Examples:
   utopic run dream-7b-q4
+  utopic chat --server http://127.0.0.1:8910
   utopic run -m /path/to/model.gguf --port 8910 -ngl 99
   utopic run -m /path/to/model.gguf -p "Hello" -n 128
 """
