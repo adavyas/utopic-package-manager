@@ -324,8 +324,13 @@ def _server_base_url(args: Sequence[str]) -> Optional[str]:
     if not server:
         return None
     parsed = urllib.parse.urlsplit(server)
-    if parsed.path.rstrip("/") == "/v1/chat/completions":
-        parsed = parsed._replace(path="", query="", fragment="")
+    path = parsed.path.rstrip("/")
+    if path.endswith("/v1/chat/completions"):
+        parsed = parsed._replace(
+            path=path[: -len("/v1/chat/completions")] or "",
+            query="",
+            fragment="",
+        )
     return urllib.parse.urlunsplit(parsed).rstrip("/")
 
 

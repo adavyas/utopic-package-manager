@@ -353,6 +353,47 @@ def test_python_chat_fallback_accepts_openai_v1_server_base_url(
     ]
 
 
+@pytest.mark.parametrize("server_path", ["/proxy", "/proxy/v1/chat/completions"])
+def test_python_chat_fallback_preserves_prefixed_openai_server_url(
+    monkeypatch, capsys, server_path
+):
+    PrefixOpenAIServer.requests = []
+    PrefixOpenAIServer.paths = []
+    PrefixOpenAIServer.health_paths = []
+    try:
+        server = ThreadingHTTPServer(("127.0.0.1", 0), PrefixOpenAIServer)
+    except PermissionError as exc:
+        pytest.skip(f"localhost bind is unavailable in this environment: {exc}")
+
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        server_url = f"http://127.0.0.1:{server.server_port}{server_path}"
+        expected_base_url = f"http://127.0.0.1:{server.server_port}/proxy"
+        lines = iter(["hello", "/exit"])
+
+        monkeypatch.setattr("builtins.input", lambda _prompt="": next(lines))
+
+        assert chat._python_fallback_launch(["--server", server_url]) == 0
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+    captured = capsys.readouterr()
+    assert f"OpenAI-compatible URL: {expected_base_url}/v1/chat/completions" in captured.out
+    assert "assistant> hello from prefixed utopic" in captured.out
+    assert PrefixOpenAIServer.paths == ["/proxy/v1/chat/completions"]
+    assert PrefixOpenAIServer.requests == [
+        {
+            "model": "utopic",
+            "messages": [{"role": "user", "content": "hello"}],
+            "max_tokens": 512,
+            "temperature": 0,
+        }
+    ]
+
+
 def test_bundled_chat_accepts_openai_compatible_server_url(fake_openai_server):
     node = shutil.which("node")
     if node is None:
