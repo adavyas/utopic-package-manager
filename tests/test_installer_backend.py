@@ -475,6 +475,20 @@ def test_setup_force_clears_stale_build_cache_before_rebuild(monkeypatch, tmp_pa
     assert observed == [("llama", False, False), ("utopic", False, False)]
 
 
+def test_remove_path_unlinks_symlinked_directory_without_touching_target(tmp_path):
+    target = tmp_path / "real-cache"
+    target.mkdir()
+    target_marker = target / "keep.txt"
+    target_marker.write_text("keep", encoding="utf-8")
+    link = tmp_path / "cache-link"
+    link.symlink_to(target, target_is_directory=True)
+
+    installer._remove_path(link, dry_run=False)
+
+    assert not link.exists()
+    assert target_marker.read_text(encoding="utf-8") == "keep"
+
+
 def test_setup_help_describes_force_clean_rebuild(capsys):
     with pytest.raises(SystemExit) as exc_info:
         installer.setup(["--help"])

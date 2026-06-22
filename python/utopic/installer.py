@@ -527,7 +527,7 @@ def _remove_path(path: Path, *, dry_run: bool) -> None:
     print(f"+ remove {path}")
     if dry_run:
         return
-    if path.is_dir():
+    if path.is_dir() and not path.is_symlink():
         shutil.rmtree(path)
     else:
         path.unlink()
