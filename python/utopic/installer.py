@@ -1,4 +1,5 @@
 import argparse
+import json
 import os
 import platform
 import shutil
@@ -8,6 +9,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping, Optional, Sequence
 
+from . import __version__
+
 
 PACKAGE_DIR = Path(__file__).resolve().parent
 PACKAGED_NATIVE_DIR = PACKAGE_DIR / "native"
@@ -16,6 +19,22 @@ UTOPIC_NATIVE_REF = "92ca14f12fe45f78d605511bc4e7e21c3ed9bebd"
 LLAMA_REPO = "https://github.com/ggml-org/llama.cpp.git"
 LLAMA_REF = "refs/pull/24423/head"
 BIN_NAMES = ("utopic", "utopic_server", "utopic_mcp", "utopic_acp")
+INSTALL_METADATA_NAME = "install.json"
+INSTALL_METADATA_SCHEMA_VERSION = 1
+INSTALL_METADATA_MATCH_KEYS = (
+    "schema_version",
+    "package_version",
+    "backend",
+    "cuda_architectures",
+    "llama_repo",
+    "llama_ref",
+    "native_repo",
+    "native_ref",
+    "llama_dir",
+    "native_dir",
+    "system",
+    "machine",
+)
 REQUIRED_LLAMA_SYMBOLS = (
     "llama_diffusion_set_sc",
     "llama_diffusion_device_sample",
@@ -66,6 +85,10 @@ def bin_dir() -> Path:
     if configured:
         return Path(configured).expanduser()
     return cache_root() / "bin"
+
+
+def install_metadata_path() -> Path:
+    return bin_dir() / INSTALL_METADATA_NAME
 
 
 def default_native_dir() -> Path:
@@ -305,6 +328,85 @@ def _print_backend_decision(decision: BackendDecision, requested_backend: str) -
         print(f"CUDA architectures: {decision.cuda_architectures}")
 
 
+def _install_metadata(
+    decision: BackendDecision,
+    *,
+    requested_backend: str,
+    llama_dir: Path,
+    native_dir: Path,
+) -> dict[str, object]:
+    return {
+        "schema_version": INSTALL_METADATA_SCHEMA_VERSION,
+        "package_version": __version__,
+        "requested_backend": requested_backend,
+        "backend": decision.backend,
+        "cuda_architectures": decision.cuda_architectures,
+        "llama_repo": os.environ.get("UTOPIC_LLAMA_REPO", LLAMA_REPO),
+        "llama_ref": os.environ.get("UTOPIC_LLAMA_REF", LLAMA_REF),
+        "native_repo": os.environ.get("UTOPIC_NATIVE_REPO", UTOPIC_NATIVE_REPO),
+        "native_ref": os.environ.get("UTOPIC_NATIVE_REF", UTOPIC_NATIVE_REF),
+        "llama_dir": str(_normalize_path(llama_dir)),
+        "native_dir": str(_normalize_path(native_dir)),
+        "system": platform.system(),
+        "machine": platform.machine(),
+    }
+
+
+def _read_install_metadata() -> Optional[dict[str, object]]:
+    path = install_metadata_path()
+    if not path.exists():
+        return None
+    try:
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return loaded if isinstance(loaded, dict) else None
+
+
+def _write_install_metadata(
+    decision: BackendDecision,
+    *,
+    requested_backend: str,
+    llama_dir: Path,
+    native_dir: Path,
+) -> None:
+    path = install_metadata_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = _install_metadata(
+        decision,
+        requested_backend=requested_backend,
+        llama_dir=llama_dir,
+        native_dir=native_dir,
+    )
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _binary_suffix() -> str:
+    return ".exe" if os.name == "nt" else ""
+
+
+def native_installation_is_current(binary_names: Sequence[str] = BIN_NAMES) -> bool:
+    suffix = _binary_suffix()
+    for name in binary_names:
+        if not (bin_dir() / f"{name}{suffix}").exists():
+            return False
+
+    metadata = _read_install_metadata()
+    if metadata is None:
+        return False
+
+    requested_backend = os.environ.get("UTOPIC_BACKEND", "auto")
+    cuda_architectures = os.environ.get("UTOPIC_CUDA_ARCHITECTURES")
+    decision = _resolve_backend(requested_backend, cuda_architectures)
+    expected = _install_metadata(
+        decision,
+        requested_backend=requested_backend,
+        llama_dir=default_llama_dir(),
+        native_dir=default_native_dir(),
+    )
+    return all(metadata.get(key) == expected.get(key) for key in INSTALL_METADATA_MATCH_KEYS)
+
+
 def _build_command(build_dir: Path, *, jobs: Optional[int]) -> list[object]:
     command: list[object] = ["cmake", "--build", build_dir, "-j"]
     if jobs is not None:
@@ -500,5 +602,11 @@ def setup(argv: Optional[Sequence[str]] = None) -> int:
         return 0
 
     _install_binaries(native_build_dir)
+    _write_install_metadata(
+        backend_decision,
+        requested_backend=requested_backend,
+        llama_dir=llama_dir,
+        native_dir=native_dir,
+    )
     print(f"Installed Utopic native binaries to {bin_dir()}")
     return 0

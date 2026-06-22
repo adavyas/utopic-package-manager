@@ -84,3 +84,135 @@ def test_build_utopic_clears_stale_cmake_cache_when_source_changes(monkeypatch, 
 
     assert not stale_marker.exists()
     assert commands[0][:5] == ["cmake", "-B", build_dir, "-S", new_source]
+
+
+def test_native_installation_is_not_current_without_metadata(monkeypatch, tmp_path):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "utopic_server").write_text("binary", encoding="utf-8")
+
+    monkeypatch.setattr(installer, "bin_dir", lambda: bin_dir)
+
+    assert installer.native_installation_is_current(("utopic_server",)) is False
+
+
+def test_native_installation_is_not_current_when_backend_changes(monkeypatch, tmp_path):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "utopic_server").write_text("binary", encoding="utf-8")
+    old_decision = installer.BackendDecision(
+        backend="metal",
+        reason="old",
+        device="Apple M4 Pro",
+    )
+    new_decision = installer.BackendDecision(
+        backend="cpu",
+        reason="new",
+        device="CPU",
+    )
+
+    monkeypatch.setattr(installer, "bin_dir", lambda: bin_dir)
+    monkeypatch.setattr(installer, "default_llama_dir", lambda: tmp_path / "src" / "llama.cpp")
+    monkeypatch.setattr(installer, "default_native_dir", lambda: tmp_path / "site" / "utopic" / "native")
+    installer._write_install_metadata(
+        old_decision,
+        requested_backend="auto",
+        llama_dir=installer.default_llama_dir(),
+        native_dir=installer.default_native_dir(),
+    )
+    monkeypatch.setattr(installer, "_resolve_backend", lambda requested, arch: new_decision)
+
+    assert installer.native_installation_is_current(("utopic_server",)) is False
+
+
+def test_native_installation_is_current_when_metadata_matches(monkeypatch, tmp_path):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "utopic_server").write_text("binary", encoding="utf-8")
+    decision = installer.BackendDecision(
+        backend="cpu",
+        reason="No usable Metal device or CUDA compiler found",
+        device="CPU",
+    )
+
+    monkeypatch.setattr(installer, "bin_dir", lambda: bin_dir)
+    monkeypatch.setattr(installer, "default_llama_dir", lambda: tmp_path / "src" / "llama.cpp")
+    monkeypatch.setattr(installer, "default_native_dir", lambda: tmp_path / "site" / "utopic" / "native")
+    monkeypatch.setattr(installer, "_resolve_backend", lambda requested, arch: decision)
+    installer._write_install_metadata(
+        decision,
+        requested_backend="auto",
+        llama_dir=installer.default_llama_dir(),
+        native_dir=installer.default_native_dir(),
+    )
+
+    assert installer.native_installation_is_current(("utopic_server",)) is True
+
+
+def test_native_installation_accepts_different_request_that_resolves_to_same_backend(monkeypatch, tmp_path):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "utopic_server").write_text("binary", encoding="utf-8")
+    decision = installer.BackendDecision(
+        backend="cpu",
+        reason="No usable Metal device or CUDA compiler found",
+        device="CPU",
+    )
+
+    monkeypatch.setattr(installer, "bin_dir", lambda: bin_dir)
+    monkeypatch.setattr(installer, "default_llama_dir", lambda: tmp_path / "src" / "llama.cpp")
+    monkeypatch.setattr(installer, "default_native_dir", lambda: tmp_path / "site" / "utopic" / "native")
+    monkeypatch.setattr(installer, "_resolve_backend", lambda requested, arch: decision)
+    installer._write_install_metadata(
+        decision,
+        requested_backend="cpu",
+        llama_dir=installer.default_llama_dir(),
+        native_dir=installer.default_native_dir(),
+    )
+
+    assert installer.native_installation_is_current(("utopic_server",)) is True
+
+
+def test_setup_writes_install_metadata_after_success(monkeypatch, tmp_path):
+    bin_dir = tmp_path / "bin"
+    build_dir = tmp_path / "build" / "utopic"
+    llama_dir = tmp_path / "src" / "llama.cpp"
+    native_dir = tmp_path / "site" / "utopic" / "native"
+    decision = installer.BackendDecision(
+        backend="cpu",
+        reason="Requested by --backend cpu",
+        device="CPU",
+    )
+
+    monkeypatch.setattr(installer, "bin_dir", lambda: bin_dir)
+    monkeypatch.setattr(installer, "_resolve_backend", lambda requested, arch: decision)
+    monkeypatch.setattr(installer, "_print_backend_decision", lambda decision, requested: None)
+    monkeypatch.setattr(installer, "_verify_llama_apis", lambda llama_dir: None)
+    monkeypatch.setattr(installer, "_build_llama", lambda *args, **kwargs: None)
+    monkeypatch.setattr(installer, "_build_utopic", lambda *args, **kwargs: build_dir)
+
+    def install_binaries(build_dir_arg):
+        assert build_dir_arg == build_dir
+        bin_dir.mkdir(parents=True)
+        for name in installer.BIN_NAMES:
+            (bin_dir / name).write_text("binary", encoding="utf-8")
+
+    monkeypatch.setattr(installer, "_install_binaries", install_binaries)
+
+    assert installer.setup(
+        [
+            "--backend",
+            "cpu",
+            "--llama-dir",
+            str(llama_dir),
+            "--native-dir",
+            str(native_dir),
+        ]
+    ) == 0
+
+    metadata = installer._read_install_metadata()
+    assert metadata is not None
+    assert metadata["backend"] == "cpu"
+    assert metadata["requested_backend"] == "cpu"
+    assert metadata["llama_dir"] == str(installer._normalize_path(llama_dir))
+    assert metadata["native_dir"] == str(installer._normalize_path(native_dir))

@@ -38,12 +38,35 @@ def test_chat_launch_skips_setup_when_server_binary_exists(monkeypatch, tmp_path
     monkeypatch.setattr(chat.shutil, "which", lambda name: "/usr/bin/node" if name == "node" else None)
     monkeypatch.setattr(chat.installer, "bin_dir", lambda: bin_dir)
     monkeypatch.setattr(chat.installer, "cache_root", lambda: tmp_path / "cache")
+    monkeypatch.setattr(chat.installer, "native_installation_is_current", lambda binary_names: True)
     monkeypatch.setattr(chat.installer, "setup", lambda argv: setup_calls.append(list(argv)) or 0)
     monkeypatch.setattr(chat.subprocess, "run", lambda command, env, check: None)
 
     assert chat.launch(["dream-7b-q4"]) == 0
 
     assert setup_calls == []
+
+
+def test_chat_launch_runs_setup_when_server_cache_is_stale(monkeypatch, tmp_path):
+    script = tmp_path / "utopic-chat.js"
+    script.write_text("console.log('chat')\n", encoding="utf-8")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "utopic_server").write_text("binary", encoding="utf-8")
+    captured = {}
+
+    monkeypatch.setattr(chat, "_chat_script", lambda: script)
+    monkeypatch.setattr(chat.shutil, "which", lambda name: "/usr/bin/node" if name == "node" else None)
+    monkeypatch.setattr(chat.installer, "bin_dir", lambda: bin_dir)
+    monkeypatch.setattr(chat.installer, "cache_root", lambda: tmp_path / "cache")
+    monkeypatch.setattr(chat.installer, "native_installation_is_current", lambda binary_names: False)
+    monkeypatch.setattr(chat.installer, "setup", lambda argv: captured.setdefault("setup", list(argv)) or 0)
+    monkeypatch.setattr(chat.subprocess, "run", lambda command, env, check: captured.update(command=command))
+
+    assert chat.launch(["dream-7b-q4"]) == 0
+
+    assert captured["setup"] == []
+    assert captured["command"] == ["/usr/bin/node", str(script), "dream-7b-q4"]
 
 
 def test_chat_launch_skips_setup_for_existing_server(monkeypatch, tmp_path):
@@ -109,6 +132,28 @@ def test_cli_run_with_prompt_delegates_to_native_one_shot(monkeypatch):
         ("setup", True, "utopic"),
         ("utopic", ["-m", "model.gguf", "-p", "hello", "-n", "8"]),
     ]
+
+
+def test_cli_ensure_setup_rebuilds_stale_native_cache(monkeypatch):
+    calls = []
+
+    monkeypatch.setattr(cli.installer, "native_installation_is_current", lambda binary_names: False)
+    monkeypatch.setattr(cli.installer, "setup", lambda argv: calls.append(list(argv)) or 0)
+
+    cli._ensure_setup(True, "utopic_server")
+
+    assert calls == [[]]
+
+
+def test_cli_ensure_setup_skips_current_native_cache(monkeypatch):
+    calls = []
+
+    monkeypatch.setattr(cli.installer, "native_installation_is_current", lambda binary_names: True)
+    monkeypatch.setattr(cli.installer, "setup", lambda argv: calls.append(list(argv)) or 0)
+
+    cli._ensure_setup(True, "utopic_server")
+
+    assert calls == []
 
 
 def test_cli_run_without_prompt_starts_openai_server(monkeypatch):

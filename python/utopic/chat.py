@@ -42,14 +42,6 @@ Examples:
 """
 
 
-def _binary_suffix() -> str:
-    return ".exe" if os.name == "nt" else ""
-
-
-def _server_binary() -> Path:
-    return installer.bin_dir() / f"utopic_server{_binary_suffix()}"
-
-
 def _chat_script() -> Path:
     return NODE_CHAT_SCRIPT
 
@@ -90,7 +82,7 @@ def launch(argv: Optional[Sequence[str]] = None) -> int:
 
     try:
         command = _node_command(args)
-        if _wants_setup(args) and not _server_binary().exists():
+        if _wants_setup(args) and not installer.native_installation_is_current(("utopic_server",)):
             code = installer.setup([])
             if code != 0:
                 return code

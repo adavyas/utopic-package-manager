@@ -1,4 +1,3 @@
-import os
 import subprocess
 import sys
 import time
@@ -12,16 +11,8 @@ from . import _native, chat, installer, models
 _RUN_VALUE_FLAGS = {"--host", "--port", "-ngl", "--ctx-size"}
 
 
-def _binary_suffix() -> str:
-    return ".exe" if os.name == "nt" else ""
-
-
-def _native_binary_exists(name: str) -> bool:
-    return (installer.bin_dir() / f"{name}{_binary_suffix()}").exists()
-
-
 def _ensure_setup(enabled: bool = True, binary_name: str = "utopic") -> None:
-    if enabled and not _native_binary_exists(binary_name):
+    if enabled and not installer.native_installation_is_current((binary_name,)):
         code = installer.setup([])
         if code != 0:
             raise SystemExit(code)
