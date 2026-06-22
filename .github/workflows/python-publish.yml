@@ -154,6 +154,33 @@ jobs:
                           print(completed.stderr, file=sys.stderr)
                           sys.exit(completed.returncode)
 
+                  bad_jobs_env = dict(smoke_env, UTOPIC_BUILD_JOBS="fast")
+                  completed = subprocess.run(
+                      [str(utopic), "setup", "--dry-run"],
+                      env=bad_jobs_env,
+                      text=True,
+                      stdout=subprocess.PIPE,
+                      stderr=subprocess.PIPE,
+                  )
+                  if completed.returncode != 2 or "UTOPIC_BUILD_JOBS must be a positive integer" not in completed.stderr:
+                      print("Invalid UTOPIC_BUILD_JOBS did not fail cleanly", file=sys.stderr)
+                      print(completed.stdout, file=sys.stderr)
+                      print(completed.stderr, file=sys.stderr)
+                      sys.exit(completed.returncode or 1)
+
+                  completed = subprocess.run(
+                      [str(utopic), "setup", "--dry-run", "--jobs", "2"],
+                      env=bad_jobs_env,
+                      text=True,
+                      stdout=subprocess.PIPE,
+                      stderr=subprocess.PIPE,
+                  )
+                  if completed.returncode != 0:
+                      print("--jobs did not override invalid UTOPIC_BUILD_JOBS", file=sys.stderr)
+                      print(completed.stdout, file=sys.stderr)
+                      print(completed.stderr, file=sys.stderr)
+                      sys.exit(completed.returncode)
+
           smoke(wheel)
           smoke(sdist)
           PY
