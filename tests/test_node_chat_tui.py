@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from utopic import __version__
+from utopic import __version__, chat
 
 
 CHAT_SCRIPT = Path(__file__).resolve().parents[1] / "python" / "utopic" / "node" / "utopic-chat.js"
@@ -229,6 +229,33 @@ def test_bundled_chat_posts_messages_to_openai_compatible_server(fake_openai_ser
             "messages": [{"role": "user", "content": "hi"}],
             "max_tokens": 512,
             "temperature": 0,
+        }
+    ]
+
+
+def test_python_chat_fallback_posts_messages_to_openai_compatible_server(
+    fake_openai_server, monkeypatch, capsys
+):
+    base_url, requests, paths = fake_openai_server
+    lines = iter(["hello", "/exit"])
+
+    monkeypatch.setattr("builtins.input", lambda _prompt="": next(lines))
+
+    assert chat._python_chat_loop(
+        base_url,
+        ["--max-tokens", "7", "--temperature", "0.2"],
+    ) == 0
+
+    captured = capsys.readouterr()
+    assert "utopic chat: Node.js was not found; using the built-in Python chat fallback." in captured.out
+    assert "assistant> hello from fake utopic" in captured.out
+    assert paths == ["/v1/chat/completions"]
+    assert requests == [
+        {
+            "model": "utopic",
+            "messages": [{"role": "user", "content": "hello"}],
+            "max_tokens": 7,
+            "temperature": 0.2,
         }
     ]
 

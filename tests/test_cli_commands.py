@@ -133,7 +133,7 @@ def test_chat_launch_skips_setup_for_existing_server(monkeypatch, tmp_path):
     ]
 
 
-def test_chat_help_does_not_run_setup(monkeypatch, tmp_path):
+def test_chat_help_does_not_run_setup(monkeypatch, tmp_path, capsys):
     script = tmp_path / "utopic-chat.js"
     script.write_text("console.log('help')\n", encoding="utf-8")
     setup_calls = []
@@ -147,6 +147,9 @@ def test_chat_help_does_not_run_setup(monkeypatch, tmp_path):
 
     assert chat.launch(["--help"]) == 0
 
+    captured = capsys.readouterr()
+    assert "Uses the bundled TypeScript/Node TUI when Node.js 18+ is available" in captured.out
+    assert "falls back to a minimal built-in Python chat loop" in captured.out
     assert setup_calls == []
 
 
@@ -165,14 +168,115 @@ def test_chat_version_does_not_require_node_or_setup(monkeypatch, capsys):
     assert setup_calls == []
 
 
-def test_chat_launch_reports_missing_node_before_setup(monkeypatch):
+def test_chat_launch_uses_python_fallback_for_existing_server_when_node_is_missing(monkeypatch):
     setup_calls = []
+    fallback_calls = []
 
     monkeypatch.setattr(chat.shutil, "which", lambda name: None)
     monkeypatch.setattr(chat.installer, "setup", lambda argv: setup_calls.append(list(argv)) or 0)
+    monkeypatch.setattr(
+        chat,
+        "_python_fallback_launch",
+        lambda args: fallback_calls.append(list(args)) or 0,
+    )
 
-    assert chat.launch(["dream-7b-q4"]) == 1
+    assert chat.launch(["--server", "http://127.0.0.1:8910"]) == 0
+
+    assert fallback_calls == [["--server", "http://127.0.0.1:8910"]]
     assert setup_calls == []
+
+
+def test_chat_launch_python_fallback_runs_setup_for_local_server_when_node_is_missing(monkeypatch, tmp_path):
+    setup_calls = []
+    fallback_calls = []
+
+    monkeypatch.setattr(chat.shutil, "which", lambda name: None)
+    monkeypatch.setattr(chat.installer, "native_installation_is_current", lambda binary_names: False)
+    monkeypatch.setattr(chat.installer, "setup", lambda argv: setup_calls.append(list(argv)) or 0)
+    monkeypatch.setattr(
+        chat,
+        "_python_fallback_launch",
+        lambda args: fallback_calls.append(list(args)) or 0,
+    )
+
+    assert chat.launch(["dream-7b-q4", "--port", "8999"]) == 0
+
+    assert setup_calls == [[]]
+    assert fallback_calls == [["dream-7b-q4", "--port", "8999"]]
+
+
+def test_chat_python_fallback_starts_local_server_and_cleans_up(monkeypatch, tmp_path):
+    commands = []
+    health_calls = []
+    bin_dir = tmp_path / "bin"
+    log_dir = tmp_path / "cache" / "logs"
+    process_state = {"terminated": False, "waited": False}
+    server_binary = bin_dir / ("utopic_server.exe" if chat.sys.platform == "win32" else "utopic_server")
+    bin_dir.mkdir()
+    server_binary.write_text("#!/bin/sh\n", encoding="utf-8")
+    server_binary.chmod(0o755)
+
+    class FakeProcess:
+        def poll(self):
+            return None
+
+        def terminate(self):
+            process_state["terminated"] = True
+
+        def wait(self, timeout=None):
+            process_state["waited"] = True
+
+    def fake_popen(command, stdout, stderr):
+        commands.append((list(command), stdout.name, stderr))
+        return FakeProcess()
+
+    monkeypatch.setattr(chat.models, "ensure_model", lambda model: tmp_path / "models" / f"{model}.gguf")
+    monkeypatch.setattr(chat.installer, "bin_dir", lambda: bin_dir)
+    monkeypatch.setattr(chat.installer, "cache_root", lambda: tmp_path / "cache")
+    monkeypatch.setattr(chat.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(
+        chat,
+        "_wait_for_health",
+        lambda process, health_url, log_path: health_calls.append((health_url, log_path)),
+    )
+    monkeypatch.setattr(chat, "_python_chat_loop", lambda base_url, args: 0)
+
+    assert chat._python_fallback_launch(
+        ["dream-7b-q4", "--port", "8999", "--max-tokens", "7", "-ngl", "99"]
+    ) == 0
+
+    assert commands == [
+        (
+            [
+                str(server_binary),
+                "-m",
+                str(tmp_path / "models" / "dream-7b-q4.gguf"),
+                "--port",
+                "8999",
+                "-ngl",
+                "99",
+            ],
+            str(log_dir / "utopic-chat-server.log"),
+            chat.subprocess.STDOUT,
+        )
+    ]
+    assert health_calls == [
+        ("http://127.0.0.1:8999/health", log_dir / "utopic-chat-server.log")
+    ]
+    assert process_state == {"terminated": True, "waited": True}
+
+
+def test_chat_python_fallback_checks_server_binary_before_model_resolution(monkeypatch, tmp_path):
+    model_calls = []
+
+    monkeypatch.setattr(chat.installer, "bin_dir", lambda: tmp_path / "missing-bin")
+    monkeypatch.setattr(chat.installer, "cache_root", lambda: tmp_path / "cache")
+    monkeypatch.setattr(chat.models, "ensure_model", lambda model: model_calls.append(model) or tmp_path / "model.gguf")
+
+    with pytest.raises(RuntimeError, match="Utopic native binaries are missing"):
+        chat._python_fallback_launch(["remote-model"])
+
+    assert model_calls == []
 
 
 def test_chat_launch_reports_unsupported_node_version_before_setup(monkeypatch, tmp_path, capsys):

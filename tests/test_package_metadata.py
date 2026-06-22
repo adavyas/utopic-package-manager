@@ -139,6 +139,14 @@ def test_readme_distinguishes_server_mode_from_chat_mode():
     assert "utopic chat --server http://127.0.0.1:8910" in readme
 
 
+def test_readme_documents_chat_tui_and_node_free_fallback():
+    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert "When Node.js 18 or newer is on `PATH`, `utopic chat` uses the bundled TypeScript/Node TUI." in readme
+    assert "If Node is missing, `utopic chat` falls back to a minimal built-in Python chat loop" in readme
+    assert "install Node.js 18 or newer for the richer TUI." in readme
+
+
 def test_readme_documents_supported_models_without_prohibited_mentions():
     readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
     catalog_path = REPO_ROOT / "python" / "utopic" / "models.json"

@@ -1,9 +1,13 @@
+import json
 import math
 import os
 import shlex
 import shutil
 import subprocess
 import sys
+import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Optional, Sequence
 
@@ -49,6 +53,8 @@ MIN_NODE_MAJOR = 18
 CHAT_HELP = """usage: utopic chat [model-alias|/path/to/model.gguf] [options]
 
 Start an Ollama-style terminal chat backed by the local Utopic server.
+Uses the bundled TypeScript/Node TUI when Node.js 18+ is available; otherwise
+falls back to a minimal built-in Python chat loop.
 
 Options:
   -m, --model VALUE     Model alias or GGUF path.
@@ -226,6 +232,241 @@ def _format_command(command: object) -> str:
     return str(command)
 
 
+def _value_after(args: Sequence[str], flag: str, default: str) -> str:
+    for index, arg in enumerate(args):
+        if arg == flag and index + 1 < len(args):
+            return args[index + 1]
+        if arg.startswith(flag + "="):
+            return arg.split("=", 1)[1]
+    return default
+
+
+def _model_arg(args: Sequence[str]) -> Optional[str]:
+    index = 0
+    while index < len(args):
+        arg = args[index]
+        if arg in ("-m", "--model"):
+            return args[index + 1] if index + 1 < len(args) else None
+        if arg.startswith("--model="):
+            return arg.split("=", 1)[1]
+        if arg in VALUE_FLAGS:
+            index += 2
+            continue
+        if any(arg.startswith(flag + "=") for flag in LONG_VALUE_FLAGS):
+            index += 1
+            continue
+        if not arg.startswith("-"):
+            return arg
+        index += 1
+    return None
+
+
+def _server_base_url(args: Sequence[str]) -> Optional[str]:
+    server = _value_after(args, "--server", "")
+    if not server:
+        return None
+    if server.rstrip("/").endswith("/v1/chat/completions"):
+        return server.rstrip("/")[: -len("/v1/chat/completions")]
+    return server.rstrip("/")
+
+
+def _chat_completions_url(base_url: str) -> str:
+    if base_url.rstrip("/").endswith("/v1/chat/completions"):
+        return base_url.rstrip("/")
+    return f"{base_url.rstrip('/')}/v1/chat/completions"
+
+
+def _server_health_url(base_url: str) -> str:
+    return f"{base_url.rstrip('/')}/health"
+
+
+def _server_binary() -> Path:
+    name = "utopic_server.exe" if sys.platform == "win32" else "utopic_server"
+    binary = installer.bin_dir() / name
+    if not binary.is_file() or not os.access(binary, os.X_OK):
+        raise RuntimeError("Utopic native binaries are missing. Run `utopic setup`, then retry.")
+    return binary
+
+
+def _local_server_base(args: Sequence[str]) -> str:
+    host = _value_after(args, "--host", "127.0.0.1")
+    port = _value_after(args, "--port", "8910")
+    client_host = "127.0.0.1" if host in {"0.0.0.0", "::", ""} else host
+    return f"http://{client_host}:{port}"
+
+
+def _server_args(args: Sequence[str]) -> list[str]:
+    server_args: list[str] = []
+    index = 0
+    while index < len(args):
+        arg = args[index]
+        if arg in ("-m", "--model", "--server", "--max-tokens", "--temperature"):
+            index += 2
+            continue
+        if (
+            arg.startswith("--model=")
+            or arg.startswith("--server=")
+            or arg.startswith("--max-tokens=")
+            or arg.startswith("--temperature=")
+        ):
+            index += 1
+            continue
+        if arg in {"--host", "--port", "-ngl", "--ctx-size"}:
+            server_args.extend([arg, args[index + 1]])
+            index += 2
+            continue
+        if any(arg.startswith(flag + "=") for flag in ("--host", "--port", "--ctx-size")):
+            flag, value = arg.split("=", 1)
+            server_args.extend([flag, value])
+            index += 1
+            continue
+        if arg == "--no-setup":
+            index += 1
+            continue
+        if not arg.startswith("-"):
+            index += 1
+            continue
+        server_args.append(arg)
+        index += 1
+    return server_args
+
+
+def _wait_for_health(process: subprocess.Popen, health_url: str, log_path: Path, timeout_s: float = 120.0) -> None:
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        code = process.poll()
+        if code is not None:
+            detail = f"signal {-code}" if code < 0 else f"code {code}"
+            raise RuntimeError(
+                f"utopic-server exited before it became healthy ({detail}); see {log_path}"
+            )
+        try:
+            with urllib.request.urlopen(health_url, timeout=1.0) as response:
+                if 200 <= response.status < 300:
+                    return
+        except (OSError, urllib.error.URLError):
+            pass
+        time.sleep(0.3)
+    raise RuntimeError(f"timed out waiting for {health_url}; see {log_path}")
+
+
+def _request_chat_completion(
+    base_url: str,
+    messages: list[dict[str, str]],
+    *,
+    max_tokens: int,
+    temperature: float,
+) -> str:
+    payload = json.dumps(
+        {
+            "model": "utopic",
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+        }
+    ).encode("utf-8")
+    request = urllib.request.Request(
+        _chat_completions_url(base_url),
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=300.0) as response:
+        body = json.loads(response.read().decode("utf-8"))
+    try:
+        content = body["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError) as exc:
+        raise RuntimeError("server returned an invalid chat completion response") from exc
+    if not isinstance(content, str):
+        raise RuntimeError("server returned a non-text chat completion response")
+    return content
+
+
+def _python_chat_loop(base_url: str, args: Sequence[str]) -> int:
+    max_tokens = int(_value_after(args, "--max-tokens", "512"))
+    temperature = float(_value_after(args, "--temperature", "0"))
+    messages: list[dict[str, str]] = []
+
+    print("utopic chat: Node.js was not found; using the built-in Python chat fallback.")
+    print(f"OpenAI-compatible URL: {_chat_completions_url(base_url)}")
+    print("Type /help for commands, /exit to quit.")
+
+    while True:
+        try:
+            prompt = input("user> ")
+        except EOFError:
+            print()
+            return 0
+        text = prompt.strip()
+        if not text:
+            continue
+        if text in {"/exit", "/quit"}:
+            return 0
+        if text == "/help":
+            print("/help, /clear, /system TEXT, /exit")
+            continue
+        if text == "/clear":
+            messages.clear()
+            print("conversation cleared")
+            continue
+        if text.startswith("/system "):
+            system_text = text.removeprefix("/system ").strip()
+            messages = [message for message in messages if message["role"] != "system"]
+            if system_text:
+                messages.insert(0, {"role": "system", "content": system_text})
+            print("system prompt updated")
+            continue
+
+        messages.append({"role": "user", "content": prompt})
+        try:
+            answer = _request_chat_completion(
+                base_url,
+                messages,
+                max_tokens=max_tokens,
+                temperature=temperature,
+            )
+        except (OSError, urllib.error.URLError, RuntimeError, json.JSONDecodeError) as exc:
+            print(f"utopic chat: request failed: {exc}", file=sys.stderr)
+            return 1
+        messages.append({"role": "assistant", "content": answer})
+        print(f"assistant> {answer}")
+
+
+def _python_fallback_launch(argv: Sequence[str]) -> int:
+    args = list(argv)
+    existing_server = _server_base_url(args)
+    if existing_server:
+        return _python_chat_loop(existing_server, args)
+
+    server_binary = _server_binary()
+    model_path = models.ensure_model(_model_arg(args))
+    base_url = _local_server_base(args)
+    log_dir = installer.cache_root() / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = log_dir / "utopic-chat-server.log"
+    command = [
+        str(server_binary),
+        "-m",
+        str(model_path),
+        *_server_args(args),
+    ]
+    print(f"Starting Utopic server: {base_url}")
+    print(f"Server log: {log_path}")
+    with log_path.open("w", encoding="utf-8") as log:
+        process = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT)
+    try:
+        _wait_for_health(process, _server_health_url(base_url), log_path)
+        return _python_chat_loop(base_url, args)
+    finally:
+        if process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
+
+
 def launch(argv: Optional[Sequence[str]] = None) -> int:
     args = list(argv) if argv is not None else sys.argv[1:]
     if _wants_help(args):
@@ -237,6 +478,19 @@ def launch(argv: Optional[Sequence[str]] = None) -> int:
 
     try:
         _validate_value_args(args)
+        if shutil.which("node") is None:
+            if _wants_setup(args) and not installer.native_installation_is_current(("utopic_server",)):
+                try:
+                    code = installer.setup([])
+                except subprocess.CalledProcessError as exc:
+                    print(
+                        f"utopic chat: setup command failed: {_format_command(exc.cmd)}",
+                        file=sys.stderr,
+                    )
+                    return exc.returncode if isinstance(exc.returncode, int) and exc.returncode > 0 else 1
+                if code != 0:
+                    return code
+            return _python_fallback_launch(args)
         command = _node_command(args)
         if _wants_setup(args) and not installer.native_installation_is_current(("utopic_server",)):
             try:
