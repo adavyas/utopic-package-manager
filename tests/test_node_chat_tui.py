@@ -93,6 +93,19 @@ class ModelDownloadServer(BaseHTTPRequestHandler):
         return
 
 
+class RedirectLoopDownloadServer(BaseHTTPRequestHandler):
+    requests = 0
+
+    def do_GET(self):
+        self.__class__.requests += 1
+        self.send_response(302)
+        self.send_header("location", "/loop.gguf")
+        self.end_headers()
+
+    def log_message(self, *_args):
+        return
+
+
 class EmptyDownloadServer(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -956,6 +969,52 @@ def test_bundled_chat_follows_relative_model_download_redirects(tmp_path):
     assert completed.returncode == 0, completed.stderr
     assert (models_dir / "redirect-model.gguf").read_bytes() == ModelDownloadServer.body
     assert not (models_dir / "redirect-model.gguf.partial").exists()
+
+
+def test_bundled_chat_rejects_model_download_redirect_loops(tmp_path):
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not installed")
+
+    RedirectLoopDownloadServer.requests = 0
+    try:
+        download_server = ThreadingHTTPServer(("127.0.0.1", 0), RedirectLoopDownloadServer)
+    except PermissionError as exc:
+        pytest.skip(f"localhost bind is unavailable in this environment: {exc}")
+    download_thread = threading.Thread(target=download_server.serve_forever, daemon=True)
+    download_thread.start()
+
+    models_dir = tmp_path / "models"
+    catalog = tmp_path / "models.json"
+    write_catalog(
+        catalog,
+        "loop-model",
+        "loop-model.gguf",
+        f"http://127.0.0.1:{download_server.server_port}/loop.gguf",
+    )
+
+    try:
+        completed = subprocess.run(
+            [node, str(CHAT_SCRIPT), "loop-model"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            env={
+                **os.environ,
+                "UTOPIC_MODELS_CATALOG": str(catalog),
+                "UTOPIC_MODELS_DIR": str(models_dir),
+            },
+        )
+    finally:
+        download_server.shutdown()
+        download_server.server_close()
+        download_thread.join(timeout=5)
+
+    assert completed.returncode == 1
+    assert "utopic chat: too many model download redirects" in completed.stderr
+    assert RedirectLoopDownloadServer.requests == 11
+    assert not (models_dir / "loop-model.gguf").exists()
+    assert not (models_dir / "loop-model.gguf.partial").exists()
 
 
 def test_bundled_chat_waits_for_started_server_to_exit(tmp_path):

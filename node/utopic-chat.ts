@@ -314,7 +314,7 @@ async function resolveModel(value: string | null): Promise<string> {
   return download(entry.url, destination);
 }
 
-function download(url: string, destination: string): Promise<string> {
+function download(url: string, destination: string, redirectsRemaining = 10): Promise<string> {
   fs.mkdirSync(path.dirname(destination), { recursive: true });
   const partial = `${destination}.partial`;
   if (fs.existsSync(partial)) fs.unlinkSync(partial);
@@ -345,8 +345,12 @@ function download(url: string, destination: string): Promise<string> {
     const request = client.get(parsed, (response: http.IncomingMessage) => {
       if (response.statusCode && response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
         response.resume();
+        if (redirectsRemaining <= 0) {
+          fail(new Error("too many model download redirects"));
+          return;
+        }
         const nextUrl = new URL(response.headers.location, parsed).toString();
-        download(nextUrl, destination).then(succeed, fail);
+        download(nextUrl, destination, redirectsRemaining - 1).then(succeed, fail);
         return;
       }
       if (response.statusCode !== 200) {
