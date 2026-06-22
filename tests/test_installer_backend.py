@@ -96,11 +96,11 @@ def test_native_installation_is_not_current_without_metadata(monkeypatch, tmp_pa
     assert installer.native_installation_is_current(("utopic_server",)) is False
 
 
-def test_native_installation_is_not_current_when_backend_changes(monkeypatch, tmp_path):
+def test_native_installation_is_current_when_auto_probe_changes(monkeypatch, tmp_path):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     (bin_dir / "utopic_server").write_text("binary", encoding="utf-8")
-    old_decision = installer.BackendDecision(
+    installed_decision = installer.BackendDecision(
         backend="metal",
         reason="old",
         device="Apple M4 Pro",
@@ -115,12 +115,36 @@ def test_native_installation_is_not_current_when_backend_changes(monkeypatch, tm
     monkeypatch.setattr(installer, "default_llama_dir", lambda: tmp_path / "src" / "llama.cpp")
     monkeypatch.setattr(installer, "default_native_dir", lambda: tmp_path / "site" / "utopic" / "native")
     installer._write_install_metadata(
-        old_decision,
+        installed_decision,
         requested_backend="auto",
         llama_dir=installer.default_llama_dir(),
         native_dir=installer.default_native_dir(),
     )
     monkeypatch.setattr(installer, "_resolve_backend", lambda requested, arch: new_decision)
+
+    assert installer.native_installation_is_current(("utopic_server",)) is True
+
+
+def test_native_installation_is_not_current_when_explicit_backend_changes(monkeypatch, tmp_path):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "utopic_server").write_text("binary", encoding="utf-8")
+    old_decision = installer.BackendDecision(
+        backend="metal",
+        reason="old",
+        device="Apple M4 Pro",
+    )
+
+    monkeypatch.setenv("UTOPIC_BACKEND", "cpu")
+    monkeypatch.setattr(installer, "bin_dir", lambda: bin_dir)
+    monkeypatch.setattr(installer, "default_llama_dir", lambda: tmp_path / "src" / "llama.cpp")
+    monkeypatch.setattr(installer, "default_native_dir", lambda: tmp_path / "site" / "utopic" / "native")
+    installer._write_install_metadata(
+        old_decision,
+        requested_backend="auto",
+        llama_dir=installer.default_llama_dir(),
+        native_dir=installer.default_native_dir(),
+    )
 
     assert installer.native_installation_is_current(("utopic_server",)) is False
 

@@ -24,8 +24,6 @@ INSTALL_METADATA_SCHEMA_VERSION = 1
 INSTALL_METADATA_MATCH_KEYS = (
     "schema_version",
     "package_version",
-    "backend",
-    "cuda_architectures",
     "llama_repo",
     "llama_ref",
     "native_repo",
@@ -397,10 +395,27 @@ def native_installation_is_current(binary_names: Sequence[str] = BIN_NAMES) -> b
 
     requested_backend = os.environ.get("UTOPIC_BACKEND", "auto")
     cuda_architectures = os.environ.get("UTOPIC_CUDA_ARCHITECTURES")
-    decision = _resolve_backend(requested_backend, cuda_architectures)
+    if requested_backend != "auto" and metadata.get("backend") != requested_backend:
+        return False
+    if requested_backend == "cuda" and cuda_architectures:
+        if metadata.get("cuda_architectures") != cuda_architectures:
+            return False
+
+    metadata_backend = metadata.get("backend")
+    if not isinstance(metadata_backend, str):
+        return False
+    metadata_cuda_architectures = metadata.get("cuda_architectures")
+    if metadata_cuda_architectures is not None and not isinstance(metadata_cuda_architectures, str):
+        return False
+
     expected = _install_metadata(
-        decision,
-        requested_backend=requested_backend,
+        BackendDecision(
+            backend=metadata_backend,
+            reason="installed metadata",
+            device="installed metadata",
+            cuda_architectures=metadata_cuda_architectures,
+        ),
+        requested_backend=str(metadata.get("requested_backend", "auto")),
         llama_dir=default_llama_dir(),
         native_dir=default_native_dir(),
     )
