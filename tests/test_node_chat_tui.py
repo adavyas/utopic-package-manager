@@ -620,6 +620,76 @@ def write_catalog(catalog, model_id, filename, url):
     )
 
 
+def test_bundled_chat_reports_invalid_catalog_json(tmp_path):
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not installed")
+
+    catalog = tmp_path / "models.json"
+    catalog.write_text("{not-json", encoding="utf-8")
+
+    completed = subprocess.run(
+        [node, str(CHAT_SCRIPT)],
+        capture_output=True,
+        text=True,
+        timeout=15,
+        env={**os.environ, "UTOPIC_MODELS_CATALOG": str(catalog)},
+    )
+
+    assert completed.returncode == 1
+    assert "utopic chat: Failed to read model catalog" in completed.stderr
+
+
+def test_bundled_chat_reports_empty_catalog(tmp_path):
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not installed")
+
+    catalog = tmp_path / "models.json"
+    catalog.write_text("[]", encoding="utf-8")
+
+    completed = subprocess.run(
+        [node, str(CHAT_SCRIPT)],
+        capture_output=True,
+        text=True,
+        timeout=15,
+        env={**os.environ, "UTOPIC_MODELS_CATALOG": str(catalog)},
+    )
+
+    assert completed.returncode == 1
+    assert "utopic chat: Utopic model catalog is empty" in completed.stderr
+
+
+def test_bundled_chat_reports_incomplete_catalog_entry(tmp_path):
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not installed")
+
+    catalog = tmp_path / "models.json"
+    catalog.write_text(
+        json.dumps(
+            [
+                {
+                    "id": "missing-fields",
+                    "name": "Missing Fields",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    completed = subprocess.run(
+        [node, str(CHAT_SCRIPT), "missing-fields"],
+        capture_output=True,
+        text=True,
+        timeout=15,
+        env={**os.environ, "UTOPIC_MODELS_CATALOG": str(catalog)},
+    )
+
+    assert completed.returncode == 1
+    assert "utopic chat: Invalid model catalog entry 0" in completed.stderr
+
+
 def test_bundled_chat_downloads_http_model_catalog_entries(tmp_path):
     node = shutil.which("node")
     if node is None:

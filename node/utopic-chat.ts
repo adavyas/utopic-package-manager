@@ -197,7 +197,32 @@ function chatCompletionsUrl(baseUrl: string): string {
 }
 
 function readCatalog(): ModelEntry[] {
-  return JSON.parse(fs.readFileSync(catalogPath(), "utf8")) as ModelEntry[];
+  const file = catalogPath();
+  let data: unknown;
+  try {
+    data = JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch (error) {
+    throw new Error(`Failed to read model catalog ${file}: ${(error as Error).message}`);
+  }
+  if (!Array.isArray(data)) throw new Error(`Model catalog ${file} must contain a JSON list`);
+  if (data.length === 0) throw new Error("Utopic model catalog is empty");
+  return data.map((item, index) => validateCatalogEntry(item, index));
+}
+
+function validateCatalogEntry(item: unknown, index: number): ModelEntry {
+  if (item === null || typeof item !== "object" || Array.isArray(item)) {
+    throw new Error(`Invalid model catalog entry ${index}: expected a JSON object`);
+  }
+  const entry = item as Partial<ModelEntry>;
+  for (const field of ["id", "name", "family", "filename", "url", "size", "description"] as const) {
+    if (typeof entry[field] !== "string") {
+      throw new Error(`Invalid model catalog entry ${index}: ${field} must be a string`);
+    }
+  }
+  if (typeof entry.recommended !== "boolean") {
+    throw new Error(`Invalid model catalog entry ${index}: recommended must be a boolean`);
+  }
+  return entry as ModelEntry;
 }
 
 function safeModelFilename(entry: ModelEntry): string {
