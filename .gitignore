@@ -1,7 +1,8 @@
-/.venv/
-/build/
-/dist/
-/node_modules/
-/*.egg-info/
+.venv/
+build/
+dist/
+node_modules/
+.pytest_cache/
+*.egg-info/
 __pycache__/
 *.py[cod]

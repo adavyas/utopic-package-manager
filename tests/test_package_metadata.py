@@ -59,6 +59,17 @@ def test_chat_check_script_rejects_stale_bundled_javascript():
     assert "git diff --exit-code -- python/utopic/node/utopic-chat.js" in check_script
 
 
+def test_gitignore_covers_generated_release_artifacts():
+    gitignore = (REPO_ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
+
+    assert ".pytest_cache/" in gitignore
+    assert "*.egg-info/" in gitignore
+    assert "__pycache__/" in gitignore
+    assert "node_modules/" in gitignore
+    assert "dist/" in gitignore
+    assert "build/" in gitignore
+
+
 def test_readme_uses_release_build_commands():
     readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
 
