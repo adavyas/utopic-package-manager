@@ -187,7 +187,7 @@ def test_readme_documents_chat_tui_and_node_free_fallback():
     readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
 
     assert "When Node.js 18 or newer is on `PATH`, `utopic chat` uses the bundled TypeScript/Node TUI." in readme
-    assert "If Node is missing, `utopic chat` falls back to a minimal built-in Python chat loop" in readme
+    assert "If Node is missing or older than 18, `utopic chat` falls back to a minimal built-in Python chat loop" in readme
     assert "install Node.js 18 or newer for the richer TUI." in readme
 
 

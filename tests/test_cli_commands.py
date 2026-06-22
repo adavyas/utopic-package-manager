@@ -424,22 +424,32 @@ def test_chat_python_fallback_checks_server_binary_before_model_resolution(monke
     assert model_calls == []
 
 
-def test_chat_launch_reports_unsupported_node_version_before_setup(monkeypatch, tmp_path, capsys):
+def test_chat_launch_uses_python_fallback_when_node_is_too_old(monkeypatch, tmp_path):
     script = tmp_path / "utopic-chat.js"
     script.write_text("console.log('chat')\n", encoding="utf-8")
     setup_calls = []
+    fallback_calls = []
 
     monkeypatch.setattr(chat, "_chat_script", lambda: script)
     monkeypatch.setattr(chat.shutil, "which", lambda name: "/usr/bin/node" if name == "node" else None)
     monkeypatch.setattr(chat.subprocess, "check_output", lambda command, text, stderr: "v16.20.2\n")
     monkeypatch.setattr(chat.installer, "setup", lambda argv: setup_calls.append(list(argv)) or 0)
     monkeypatch.setattr(chat.subprocess, "run", lambda command, env, check: pytest.fail("should not launch node"))
+    monkeypatch.setattr(
+        chat,
+        "_python_fallback_launch",
+        lambda args, fallback_reason="": fallback_calls.append((list(args), fallback_reason)) or 0,
+    )
 
-    assert chat.launch(["dream-7b-q4"]) == 1
+    assert chat.launch(["--server", "http://127.0.0.1:8910"]) == 0
 
-    captured = capsys.readouterr()
-    assert "utopic chat: Node.js 18 or newer is required; found v16.20.2" in captured.err
     assert setup_calls == []
+    assert fallback_calls == [
+        (
+            ["--server", "http://127.0.0.1:8910"],
+            "Node.js 18 or newer is required; found v16.20.2",
+        )
+    ]
 
 
 def test_chat_launch_rejects_unknown_options_before_setup(monkeypatch, capsys):

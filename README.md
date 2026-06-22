@@ -50,7 +50,7 @@ pulls the selected GGUF into `~/.cache/utopic/models`, starts the local server,
 and drops you into an Ollama-style terminal chat.
 
 When Node.js 18 or newer is on `PATH`, `utopic chat` uses the bundled TypeScript/Node TUI.
-If Node is missing, `utopic chat` falls back to a minimal built-in Python chat loop so first run still works; install Node.js 18 or newer for the richer TUI.
+If Node is missing or older than 18, `utopic chat` falls back to a minimal built-in Python chat loop so first run still works; install Node.js 18 or newer for the richer TUI.
 The rest of the launchers do not require Node.
 
 If you want to run setup separately:

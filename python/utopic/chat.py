@@ -83,6 +83,10 @@ Examples:
 """
 
 
+class NodeUnavailable(RuntimeError):
+    pass
+
+
 def _chat_script() -> Path:
     return NODE_CHAT_SCRIPT
 
@@ -201,7 +205,7 @@ def _validate_value_args(argv: Sequence[str]) -> None:
 def _node_command(argv: Sequence[str]) -> list[str]:
     node = shutil.which("node")
     if node is None:
-        raise RuntimeError(
+        raise NodeUnavailable(
             "Node.js was not found on PATH. Install Node.js, then rerun `utopic chat`."
         )
     _ensure_node_version(node)
@@ -219,17 +223,17 @@ def _ensure_node_version(node: str) -> None:
             stderr=subprocess.STDOUT,
         ).strip()
     except (OSError, subprocess.CalledProcessError) as exc:
-        raise RuntimeError(
+        raise NodeUnavailable(
             "Could not determine Node.js version. Node.js 18 or newer is required for `utopic chat`."
         ) from exc
 
     major = _parse_node_major(output)
     if major is None:
-        raise RuntimeError(
+        raise NodeUnavailable(
             f"Could not determine Node.js version from {output!r}. Node.js 18 or newer is required for `utopic chat`."
         )
     if major < MIN_NODE_MAJOR:
-        raise RuntimeError(
+        raise NodeUnavailable(
             f"Node.js {MIN_NODE_MAJOR} or newer is required; found {output}"
         )
 
@@ -447,12 +451,16 @@ def _request_chat_completion(
     return content
 
 
-def _python_chat_loop(base_url: str, args: Sequence[str]) -> int:
+def _python_chat_loop(
+    base_url: str,
+    args: Sequence[str],
+    fallback_reason: str = "Node.js was not found",
+) -> int:
     max_tokens = int(_value_after(args, "--max-tokens", "512"))
     temperature = float(_value_after(args, "--temperature", "0"))
     messages: list[dict[str, str]] = []
 
-    print("utopic chat: Node.js was not found; using the built-in Python chat fallback.")
+    print(f"utopic chat: {fallback_reason}; using the built-in Python chat fallback.")
     print(f"OpenAI-compatible URL: {_chat_completions_url(base_url)}")
     print("Type /help for commands, /exit to quit.")
 
@@ -497,11 +505,20 @@ def _python_chat_loop(base_url: str, args: Sequence[str]) -> int:
         print(f"assistant> {answer}")
 
 
-def _python_fallback_launch(argv: Sequence[str]) -> int:
+def _python_fallback_launch(
+    argv: Sequence[str],
+    fallback_reason: str = "Node.js was not found",
+) -> int:
     args = list(argv)
+
+    def chat_loop(base_url: str) -> int:
+        if fallback_reason == "Node.js was not found":
+            return _python_chat_loop(base_url, args)
+        return _python_chat_loop(base_url, args, fallback_reason)
+
     existing_server = _server_base_url(args)
     if existing_server:
-        return _python_chat_loop(existing_server, args)
+        return chat_loop(existing_server)
 
     server_binary = _server_binary()
     model_path = models.ensure_model(_choose_model_arg(args))
@@ -521,7 +538,7 @@ def _python_fallback_launch(argv: Sequence[str]) -> int:
         process = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT)
     try:
         _wait_for_health(process, _server_health_url(base_url), log_path)
-        return _python_chat_loop(base_url, args)
+        return chat_loop(base_url)
     finally:
         if process.poll() is None:
             process.terminate()
@@ -557,7 +574,21 @@ def launch(argv: Optional[Sequence[str]] = None) -> int:
                 if code != 0:
                     return code
             return _python_fallback_launch(args)
-        command = _node_command(args)
+        try:
+            command = _node_command(args)
+        except NodeUnavailable as exc:
+            if _wants_setup(args) and not installer.native_installation_is_current(("utopic_server",)):
+                try:
+                    code = installer.setup([])
+                except subprocess.CalledProcessError as setup_exc:
+                    print(
+                        f"utopic chat: setup command failed: {_format_command(setup_exc.cmd)}",
+                        file=sys.stderr,
+                    )
+                    return setup_exc.returncode if isinstance(setup_exc.returncode, int) and setup_exc.returncode > 0 else 1
+                if code != 0:
+                    return code
+            return _python_fallback_launch(args, fallback_reason=str(exc))
         if _wants_setup(args) and not installer.native_installation_is_current(("utopic_server",)):
             try:
                 code = installer.setup([])
