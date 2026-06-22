@@ -206,6 +206,29 @@ def test_cli_run_allows_server_flags_before_positional_model(monkeypatch):
     ]
 
 
+@pytest.mark.parametrize("flag", ["--host", "--port", "-ngl", "--ctx-size"])
+def test_cli_run_rejects_missing_server_flag_values(monkeypatch, capsys, flag):
+    monkeypatch.setattr(cli, "_ensure_setup", lambda enabled=True, binary_name="utopic": None)
+    monkeypatch.setattr(cli.models, "ensure_model", lambda value=None: pytest.fail("should not resolve a model"))
+
+    assert cli.main(["run", flag]) == 1
+
+    captured = capsys.readouterr()
+    assert f"utopic run: expected a value after {flag}" in captured.err
+
+
+@pytest.mark.parametrize("arg", ["--host=", "--port=", "--ctx-size="])
+def test_cli_run_rejects_empty_equals_server_flag_values(monkeypatch, capsys, arg):
+    flag = arg[:-1]
+    monkeypatch.setattr(cli, "_ensure_setup", lambda enabled=True, binary_name="utopic": None)
+    monkeypatch.setattr(cli.models, "ensure_model", lambda value=None: pytest.fail("should not resolve a model"))
+
+    assert cli.main(["run", arg]) == 1
+
+    captured = capsys.readouterr()
+    assert f"utopic run: expected a value after {flag}" in captured.err
+
+
 def test_cli_run_normalizes_wildcard_host_for_client_url(monkeypatch):
     calls = []
 

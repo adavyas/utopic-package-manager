@@ -29,6 +29,15 @@ def _without_flag(args: Sequence[str], flag: str) -> list[str]:
     return [arg for arg in args if arg != flag]
 
 
+def _validate_run_value_flags(args: Sequence[str]) -> None:
+    for index, arg in enumerate(args):
+        if arg in _RUN_VALUE_FLAGS and (index + 1 >= len(args) or args[index + 1].startswith("-")):
+            raise RuntimeError(f"expected a value after {arg}")
+        for flag in _RUN_VALUE_FLAGS:
+            if flag.startswith("--") and arg == f"{flag}=":
+                raise RuntimeError(f"expected a value after {flag}")
+
+
 def _extract_model(args: Sequence[str]) -> tuple[Optional[str], list[str]]:
     remaining = list(args)
     for index, arg in enumerate(remaining):
@@ -188,6 +197,7 @@ def _run(argv: Sequence[str]) -> int:
             _native.main("utopic", args)
             return 0
 
+        _validate_run_value_flags(args)
         model_arg, server_args = _extract_model(args)
         _ensure_setup(setup_enabled, "utopic_server")
         _native.binary_path("utopic_server")
