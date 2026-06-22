@@ -293,16 +293,50 @@ def _extract_model(args: Sequence[str]) -> tuple[Optional[str], list[str]]:
 
 
 def _resolve_prompt_model_args(args: Sequence[str]) -> list[str]:
-    resolved = list(args)
+    resolved = _normalize_prompt_native_args(args)
     for index, arg in enumerate(resolved):
-        if arg in ("-m", "--model"):
+        if arg == "-m":
             resolved[index + 1] = str(models.ensure_model(resolved[index + 1]))
-            return resolved
-        if arg.startswith("--model="):
-            resolved[index] = f"--model={models.ensure_model(arg.split('=', 1)[1])}"
             return resolved
     model_arg, remaining = _extract_prompt_positional_model(resolved)
     return ["-m", str(models.ensure_model(model_arg)), *remaining]
+
+
+def _normalize_prompt_native_args(args: Sequence[str]) -> list[str]:
+    resolved = []
+    index = 0
+    while index < len(args):
+        arg = args[index]
+        if arg in ("-m", "--model"):
+            resolved.extend(["-m", args[index + 1]])
+            index += 2
+            continue
+        if arg.startswith("--model="):
+            resolved.extend(["-m", arg.split("=", 1)[1]])
+            index += 1
+            continue
+        if arg in ("-p", "--prompt"):
+            resolved.extend(["-p", args[index + 1]])
+            index += 2
+            continue
+        if arg.startswith("--prompt="):
+            resolved.extend(["-p", arg.split("=", 1)[1]])
+            index += 1
+            continue
+        if arg in _PROMPT_VALUE_FLAGS:
+            resolved.extend([arg, args[index + 1]])
+            index += 2
+            continue
+        expanded = False
+        for flag in _PROMPT_VALUE_FLAGS:
+            if flag.startswith("--") and arg.startswith(flag + "="):
+                resolved.extend([flag, arg.split("=", 1)[1]])
+                expanded = True
+                break
+        if not expanded:
+            resolved.append(arg)
+        index += 1
+    return resolved
 
 
 def _extract_prompt_positional_model(args: Sequence[str]) -> tuple[Optional[str], list[str]]:

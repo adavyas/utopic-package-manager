@@ -417,6 +417,38 @@ def test_cli_run_with_prompt_resolves_model_alias(monkeypatch):
     ]
 
 
+def test_cli_run_with_prompt_normalizes_long_model_and_prompt_flags(monkeypatch):
+    calls = []
+
+    monkeypatch.setattr(cli, "_ensure_setup", lambda enabled=True, binary_name="utopic": calls.append(("setup", enabled, binary_name)))
+    monkeypatch.setattr(cli.models, "ensure_model", lambda value=None: calls.append(("model", value)) or Path("/models/dream.gguf"))
+    monkeypatch.setattr(cli._native, "main", lambda name, argv: calls.append((name, list(argv))))
+
+    cli.main(["run", "--model", "dream-7b-q4", "--prompt", "hello", "-n", "8"])
+
+    assert calls == [
+        ("setup", True, "utopic"),
+        ("model", "dream-7b-q4"),
+        ("utopic", ["-m", "/models/dream.gguf", "-p", "hello", "-n", "8"]),
+    ]
+
+
+def test_cli_run_with_prompt_normalizes_equals_form_native_flags(monkeypatch):
+    calls = []
+
+    monkeypatch.setattr(cli, "_ensure_setup", lambda enabled=True, binary_name="utopic": calls.append(("setup", enabled, binary_name)))
+    monkeypatch.setattr(cli.models, "ensure_model", lambda value=None: calls.append(("model", value)) or Path("/models/dream.gguf"))
+    monkeypatch.setattr(cli._native, "main", lambda name, argv: calls.append((name, list(argv))))
+
+    cli.main(["run", "--model=dream-7b-q4", "--prompt=hello", "--temp=0.1", "--seed=7"])
+
+    assert calls == [
+        ("setup", True, "utopic"),
+        ("model", "dream-7b-q4"),
+        ("utopic", ["-m", "/models/dream.gguf", "-p", "hello", "--temp", "0.1", "--seed", "7"]),
+    ]
+
+
 def test_cli_run_with_prompt_resolves_positional_model_alias(monkeypatch):
     calls = []
 
