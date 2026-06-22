@@ -15,7 +15,14 @@ utopic chat
 
 Use `uv tool install` for the global `utopic` command. `uv pip install utopic`
 installs into the current Python environment instead; use that only inside an
-activated project or virtual environment.
+activated project or virtual environment. If you installed into an environment
+and the `utopic` script is not on your shell `PATH`, run the same CLI as a
+module:
+
+```sh
+python -m utopic --help
+python -m utopic chat
+```
 
 If you already installed an older Utopic package:
 

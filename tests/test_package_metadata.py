@@ -51,6 +51,13 @@ def test_release_version_literals_match_package_version():
     assert f'project_version = "{__version__}"' in identity
 
 
+def test_python_module_entrypoint_is_shipped():
+    module_entrypoint = REPO_ROOT / "python" / "utopic" / "__main__.py"
+
+    assert module_entrypoint.exists()
+    assert "from .cli import main" in module_entrypoint.read_text(encoding="utf-8")
+
+
 def test_readme_pinned_install_example_matches_package_version():
     readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
 
@@ -133,6 +140,8 @@ def test_release_workflow_smokes_installed_prompt_flag_normalization():
         encoding="utf-8"
     )
 
+    assert '[str(python), "-m", "utopic", "--help"]' in workflow
+    assert '[str(python), "-m", "utopic", "--version"]' in workflow
     assert "import textwrap" in workflow
     assert "prompt_probe = textwrap.dedent" in workflow
     assert '"--model=dream-7b-q4"' in workflow

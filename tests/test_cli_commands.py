@@ -1,9 +1,14 @@
+import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
 from utopic import chat, cli, models
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.fixture(autouse=True)
@@ -256,6 +261,23 @@ def test_cli_version_does_not_run_setup_or_native(monkeypatch, capsys):
     captured = capsys.readouterr()
     assert captured.out == f"utopic {cli.__version__}\n"
     assert captured.err == ""
+
+
+def test_python_module_entrypoint_matches_console_script():
+    env = {**os.environ, "PYTHONPATH": str(REPO_ROOT / "python")}
+
+    completed = subprocess.run(
+        [sys.executable, "-m", "utopic", "--version"],
+        cwd=REPO_ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout == f"utopic {cli.__version__}\n"
+    assert completed.stderr == ""
 
 
 def test_cli_rejects_unknown_command_before_setup(monkeypatch, capsys):
