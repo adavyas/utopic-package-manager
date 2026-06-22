@@ -1,4 +1,5 @@
 import json
+import os
 import shutil
 import subprocess
 import threading
@@ -141,3 +142,89 @@ def test_bundled_chat_accepts_openai_compatible_server_url(fake_openai_server):
             "temperature": 0,
         }
     ]
+
+
+def test_bundled_chat_waits_for_started_server_to_exit(tmp_path):
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not installed")
+
+    model = tmp_path / "model.gguf"
+    model.write_text("fake model", encoding="utf-8")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    state_file = tmp_path / "server-state.jsonl"
+    fake_server = bin_dir / "utopic_server"
+    fake_server.write_text(
+        f"""#!{node}
+const fs = require("node:fs");
+const http = require("node:http");
+
+function argValue(name, fallback) {{
+  const index = process.argv.indexOf(name);
+  return index >= 0 && index + 1 < process.argv.length ? process.argv[index + 1] : fallback;
+}}
+
+const host = argValue("--host", "127.0.0.1");
+const port = Number(argValue("--port", "8910"));
+const stateFile = {json.dumps(str(state_file))};
+function write(event) {{
+  fs.appendFileSync(stateFile, JSON.stringify({{ event, pid: process.pid }}) + "\\n");
+}}
+
+const server = http.createServer((req, res) => {{
+  if (req.method === "GET" && req.url === "/health") {{
+    res.writeHead(200, {{ "content-type": "application/json" }});
+    res.end(JSON.stringify({{ status: "ok" }}));
+    return;
+  }}
+  if (req.method === "POST" && req.url === "/v1/chat/completions") {{
+    req.resume();
+    res.writeHead(200, {{ "content-type": "application/json" }});
+    res.end(JSON.stringify({{ choices: [{{ message: {{ role: "assistant", content: "fake answer" }} }}] }}));
+    return;
+  }}
+  res.writeHead(404);
+  res.end();
+}});
+
+server.listen(port, host, () => write("listening"));
+process.on("SIGTERM", () => {{
+  write("term");
+  setTimeout(() => {{
+    write("exit");
+    server.close(() => process.exit(0));
+  }}, 400);
+}});
+""",
+        encoding="utf-8",
+    )
+    fake_server.chmod(0o755)
+    try:
+        port_server = ThreadingHTTPServer(("127.0.0.1", 0), BaseHTTPRequestHandler)
+        port = port_server.server_port
+    finally:
+        port_server.server_close()
+
+    completed = subprocess.run(
+        [
+            node,
+            str(CHAT_SCRIPT),
+            "--model",
+            str(model),
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(port),
+        ],
+        input="/exit\n",
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=15,
+        env={**os.environ, "UTOPIC_BIN_DIR": str(bin_dir)},
+    )
+
+    assert "OpenAI-compatible URL:" in completed.stdout
+    events = [json.loads(line)["event"] for line in state_file.read_text(encoding="utf-8").splitlines()]
+    assert events == ["listening", "term", "exit"]

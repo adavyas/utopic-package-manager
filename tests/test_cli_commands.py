@@ -199,6 +199,35 @@ def test_cli_run_without_arguments_uses_default_model_and_starts_server(monkeypa
     ]
 
 
+def test_cli_run_server_reports_missing_binary_without_traceback(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "_ensure_setup", lambda enabled=True, binary_name="utopic": None)
+    monkeypatch.setattr(cli.models, "ensure_model", lambda value=None: Path("/models/default.gguf"))
+    monkeypatch.setattr(
+        cli._native,
+        "binary_path",
+        lambda name: (_ for _ in ()).throw(RuntimeError("native binary missing")),
+    )
+
+    assert cli.main(["run", "--no-setup"]) == 1
+
+    captured = capsys.readouterr()
+    assert "utopic run: native binary missing" in captured.err
+
+
+def test_cli_run_prompt_reports_missing_binary_without_traceback(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "_ensure_setup", lambda enabled=True, binary_name="utopic": None)
+    monkeypatch.setattr(
+        cli._native,
+        "main",
+        lambda name, argv: (_ for _ in ()).throw(RuntimeError("native binary missing")),
+    )
+
+    assert cli.main(["run", "--no-setup", "-m", "/models/default.gguf", "-p", "hi"]) == 1
+
+    captured = capsys.readouterr()
+    assert "utopic run: native binary missing" in captured.err
+
+
 def test_cli_wait_for_health_reports_early_server_exit(monkeypatch):
     class ExitedProcess:
         def poll(self):

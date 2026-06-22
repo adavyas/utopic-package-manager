@@ -191,17 +191,21 @@ def _run(argv: Sequence[str]) -> int:
     setup_enabled = "--no-setup" not in args
     args = _without_flag(args, "--no-setup")
 
-    if _has_prompt(args):
-        _ensure_setup(setup_enabled)
-        _native.main("utopic", args)
-        return 0
+    try:
+        if _has_prompt(args):
+            _ensure_setup(setup_enabled)
+            _native.main("utopic", args)
+            return 0
 
-    model_arg, server_args = _extract_model(args)
-    _ensure_setup(setup_enabled, "utopic_server")
-    model_path = models.ensure_model(model_arg)
-    host = _value_after(server_args, "--host", "127.0.0.1")
-    port = _value_after(server_args, "--port", "8910")
-    return _run_server(str(model_path), server_args, host, port)
+        model_arg, server_args = _extract_model(args)
+        _ensure_setup(setup_enabled, "utopic_server")
+        model_path = models.ensure_model(model_arg)
+        host = _value_after(server_args, "--host", "127.0.0.1")
+        port = _value_after(server_args, "--port", "8910")
+        return _run_server(str(model_path), server_args, host, port)
+    except RuntimeError as exc:
+        print(f"utopic run: {exc}", file=sys.stderr)
+        return 1
 
 
 def main(argv: Optional[Sequence[str]] = None) -> Optional[int]:
