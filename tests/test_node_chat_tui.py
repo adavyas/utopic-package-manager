@@ -209,6 +209,37 @@ def test_bundled_chat_rejects_invalid_numeric_flags(fake_openai_server, flag, va
     assert requests == []
 
 
+@pytest.mark.parametrize(
+    ("args", "message"),
+    [
+        (["--port=abc"], "--port must be an integer from 1 to 65535"),
+        (["--port=0"], "--port must be an integer from 1 to 65535"),
+        (["--port=65536"], "--port must be an integer from 1 to 65535"),
+        (["-ngl", "-1"], "-ngl must be a non-negative integer"),
+        (["-ngl", "1.5"], "-ngl must be a non-negative integer"),
+        (["--ctx-size=0"], "--ctx-size must be a positive integer"),
+        (["--ctx-size=4.5"], "--ctx-size must be a positive integer"),
+    ],
+)
+def test_bundled_chat_rejects_invalid_startup_numeric_flags(fake_openai_server, args, message):
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not installed")
+    base_url, requests, _paths = fake_openai_server
+
+    completed = subprocess.run(
+        [node, str(CHAT_SCRIPT), "--server", base_url, *args],
+        input="hi\n/exit\n",
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+
+    assert completed.returncode == 1
+    assert f"utopic chat: {message}" in completed.stderr
+    assert requests == []
+
+
 def test_bundled_chat_removes_partial_model_after_download_failure(tmp_path):
     node = shutil.which("node")
     if node is None:

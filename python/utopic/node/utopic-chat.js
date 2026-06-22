@@ -57,6 +57,13 @@ function parseArgs(argv) {
             throw new Error(`${flag} must be a number`);
         return parsed;
     };
+    const integerString = (flag, value, min, max, label) => {
+        const parsed = Number(value);
+        if (!Number.isInteger(parsed) || parsed < min || (max !== null && parsed > max)) {
+            throw new Error(`${flag} must be ${label}`);
+        }
+        return value;
+    };
     for (let i = 0; i < argv.length; i += 1) {
         const arg = argv[i];
         const next = () => {
@@ -80,15 +87,15 @@ function parseArgs(argv) {
         else if (arg.startsWith("--host="))
             options.host = valueAfterEquals(arg, "--host");
         else if (arg === "--port")
-            options.port = next();
+            options.port = integerString("--port", next(), 1, 65535, "an integer from 1 to 65535");
         else if (arg.startsWith("--port="))
-            options.port = valueAfterEquals(arg, "--port");
+            options.port = integerString("--port", valueAfterEquals(arg, "--port"), 1, 65535, "an integer from 1 to 65535");
         else if (arg === "-ngl")
-            options.ngl = next();
+            options.ngl = integerString("-ngl", next(), 0, null, "a non-negative integer");
         else if (arg === "--ctx-size")
-            options.ctxSize = next();
+            options.ctxSize = integerString("--ctx-size", next(), 1, null, "a positive integer");
         else if (arg.startsWith("--ctx-size="))
-            options.ctxSize = valueAfterEquals(arg, "--ctx-size");
+            options.ctxSize = integerString("--ctx-size", valueAfterEquals(arg, "--ctx-size"), 1, null, "a positive integer");
         else if (arg === "--max-tokens")
             options.maxTokens = numberValue("--max-tokens", next());
         else if (arg.startsWith("--max-tokens="))
