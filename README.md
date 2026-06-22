@@ -160,9 +160,9 @@ paths for GGUF models by architecture family:
 
 DiffusionGemma is not exposed as a one-command curated download yet because the
 public GGUF files are large and still best treated as local model paths. The
-package CUDA setup path has been validated on GB10/DGX Spark with
-DiffusionGemma Q4_K_M and BF16 GGUF files. The previous GB10 SOFT_MAX failure
-was caused by a CUDA compiler/toolkit mismatch during setup.
+package CUDA setup path has been validated on GB10/DGX Spark with a local
+DiffusionGemma Q4_K_M GGUF. The previous GB10 SOFT_MAX failure was caused by a
+CUDA compiler/toolkit mismatch during setup.
 
 FP8 file names are recognized through common GGUF markers such as `FP8`,
 `F8_E4M3`, `F8_E5M2`, `E4M3`, and `E5M2`. Quantized GGUF weights include common

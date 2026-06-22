@@ -18,5 +18,5 @@ the target backend.
 
 DiffusionGemma is not listed in the curated Python model catalog yet because
 the public GGUF files are large and still best handled as local paths. GB10/DGX
-Spark validation passes for local Q4_K_M and BF16 DiffusionGemma GGUF files
-when setup uses a matched CUDA compiler and toolkit.
+Spark validation passes for a local Q4_K_M DiffusionGemma GGUF when setup uses
+a matched CUDA compiler and toolkit.
