@@ -1,4 +1,5 @@
 import ast
+import json
 import re
 from pathlib import Path
 
@@ -48,3 +49,11 @@ def test_release_version_literals_match_package_version():
     assert re.search(rf'const VERSION = "{re.escape(__version__)}";', chat_ts)
     assert re.search(rf'const VERSION = "{re.escape(__version__)}";', chat_js)
     assert f'project_version = "{__version__}"' in identity
+
+
+def test_chat_check_script_rejects_stale_bundled_javascript():
+    package_json = json.loads((REPO_ROOT / "package.json").read_text(encoding="utf-8"))
+    check_script = package_json["scripts"]["check:chat"]
+
+    assert "npm run build:chat" in check_script
+    assert "git diff --exit-code -- python/utopic/node/utopic-chat.js" in check_script
