@@ -590,6 +590,40 @@ def test_model_pull_reuses_existing_download(monkeypatch, tmp_path):
     assert models.pull_model("example") == model_file
 
 
+def test_model_pull_redownloads_zero_byte_cached_model(monkeypatch, tmp_path):
+    catalog = tmp_path / "models.json"
+    model_file = tmp_path / "models" / "example.gguf"
+    model_file.parent.mkdir()
+    model_file.write_bytes(b"")
+    catalog.write_text(
+        """
+[
+  {
+    "id": "example",
+    "name": "Example",
+    "family": "test",
+    "filename": "example.gguf",
+    "url": "https://example.invalid/example.gguf",
+    "size": "1 B",
+    "recommended": true,
+    "description": "Test model"
+  }
+]
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("UTOPIC_MODELS_CATALOG", str(catalog))
+    monkeypatch.setenv("UTOPIC_MODELS_DIR", str(model_file.parent))
+
+    def download(_url, destination):
+        destination.write_bytes(b"model")
+
+    monkeypatch.setattr(models, "_copy_stream_with_progress", download)
+
+    assert models.pull_model("example") == model_file
+    assert model_file.read_bytes() == b"model"
+
+
 def test_model_stream_download_rejects_truncated_content_length(monkeypatch, tmp_path):
     class TruncatedResponse:
         headers = {"content-length": "16"}

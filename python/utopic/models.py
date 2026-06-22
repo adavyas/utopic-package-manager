@@ -98,7 +98,7 @@ def pull_model(model_id: str, *, force: bool = False) -> Path:
         raise RuntimeError(f"Unknown Utopic model '{model_id}'. Known models: {known}")
 
     destination = entry.path
-    if destination.exists() and not force:
+    if destination.exists() and destination.stat().st_size > 0 and not force:
         return destination
 
     destination.parent.mkdir(parents=True, exist_ok=True)
