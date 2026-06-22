@@ -386,3 +386,72 @@ def test_setup_rejects_invalid_jobs_environment_cleanly(monkeypatch, capsys):
 
     assert exc_info.value.code == 2
     assert "UTOPIC_BUILD_JOBS must be a positive integer" in capsys.readouterr().err
+
+
+def test_setup_force_clears_stale_build_cache_before_rebuild(monkeypatch, tmp_path):
+    bin_dir = tmp_path / "bin"
+    build_root = tmp_path / "build"
+    stale_build_file = build_root / "utopic" / "stale-object.o"
+    stale_llama_file = build_root / "llama.cpp" / "stale-object.o"
+    llama_dir = tmp_path / "src" / "llama.cpp"
+    native_dir = tmp_path / "site" / "utopic" / "native"
+    decision = installer.BackendDecision(
+        backend="cpu",
+        reason="Requested by --backend cpu",
+        device="CPU",
+    )
+    observed = []
+
+    bin_dir.mkdir(parents=True)
+    (bin_dir / "utopic_server").write_text("stale binary", encoding="utf-8")
+    stale_build_file.parent.mkdir(parents=True)
+    stale_build_file.write_text("stale utopic build", encoding="utf-8")
+    stale_llama_file.parent.mkdir(parents=True)
+    stale_llama_file.write_text("stale llama build", encoding="utf-8")
+
+    monkeypatch.setattr(installer, "bin_dir", lambda: bin_dir)
+    monkeypatch.setattr(installer, "build_root", lambda: build_root)
+    monkeypatch.setattr(installer, "_resolve_backend", lambda requested, arch: decision)
+    monkeypatch.setattr(installer, "_print_backend_decision", lambda decision, requested: None)
+    monkeypatch.setattr(installer, "_verify_llama_apis", lambda llama_dir: None)
+    monkeypatch.setattr(
+        installer,
+        "_build_llama",
+        lambda *args, **kwargs: observed.append(
+            ("llama", stale_llama_file.exists(), stale_build_file.exists())
+        ),
+    )
+    monkeypatch.setattr(
+        installer,
+        "_build_utopic",
+        lambda *args, **kwargs: observed.append(
+            ("utopic", stale_llama_file.exists(), stale_build_file.exists())
+        )
+        or tmp_path / "build-output",
+    )
+    monkeypatch.setattr(installer, "_install_binaries", lambda build_dir: None)
+    monkeypatch.setattr(installer, "_write_install_metadata", lambda *args, **kwargs: None)
+
+    assert installer.setup(
+        [
+            "--force",
+            "--backend",
+            "cpu",
+            "--llama-dir",
+            str(llama_dir),
+            "--native-dir",
+            str(native_dir),
+        ]
+    ) == 0
+
+    assert observed == [("llama", False, False), ("utopic", False, False)]
+
+
+def test_setup_help_describes_force_clean_rebuild(capsys):
+    with pytest.raises(SystemExit) as exc_info:
+        installer.setup(["--help"])
+
+    assert exc_info.value.code == 0
+    help_text = capsys.readouterr().out
+    assert "Remove cached binaries and build directories" in help_text
+    assert "rebuilding." in help_text

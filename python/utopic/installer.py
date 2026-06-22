@@ -522,6 +522,16 @@ def _prepare_cmake_build_dir(build_dir: Path, source_dir: Path, *, dry_run: bool
         shutil.rmtree(build_dir)
 
 
+def _remove_path(path: Path, *, dry_run: bool) -> None:
+    print(f"+ remove {path}")
+    if dry_run:
+        return
+    if path.is_dir():
+        shutil.rmtree(path)
+    else:
+        path.unlink()
+
+
 def _build_utopic(native_dir: Path, llama_dir: Path, *, jobs: Optional[int], dry_run: bool) -> Path:
     out_dir = build_root() / "utopic"
     source_dir = _native_cmake_source(native_dir)
@@ -567,7 +577,11 @@ def setup(argv: Optional[Sequence[str]] = None) -> int:
         help="CUDA architecture list for the Utopic native build, for example 89 on RTX 4090 hosts.",
     )
     parser.add_argument("--dry-run", action="store_true", help="Print commands without running them.")
-    parser.add_argument("--force", action="store_true", help="Remove cached binaries before rebuilding.")
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Remove cached binaries and build directories before rebuilding.",
+    )
     parser.add_argument(
         "--jobs",
         type=_positive_int,
@@ -592,10 +606,10 @@ def setup(argv: Optional[Sequence[str]] = None) -> int:
     llama_dir = Path(args.llama_dir).expanduser() if args.llama_dir else default_llama_dir()
     native_dir = Path(args.native_dir).expanduser() if args.native_dir else default_native_dir()
 
-    if args.force and bin_dir().exists():
-        print(f"+ remove {bin_dir()}")
-        if not dry_run:
-            shutil.rmtree(bin_dir())
+    if args.force:
+        for cache_path in (bin_dir(), build_root()):
+            if cache_path.exists():
+                _remove_path(cache_path, dry_run=dry_run)
 
     if args.llama_dir or os.environ.get("UTOPIC_LLAMACPP_DIR"):
         print(f"Using maintainer-provided native dependency source at {llama_dir}")

@@ -37,6 +37,12 @@ If you want to run setup separately:
 utopic setup
 ```
 
+If a local build cache gets wedged after an interrupted or older setup run:
+
+```sh
+utopic setup --force
+```
+
 `utopic setup` detects the best local backend and builds the matching native
 runtime:
 
