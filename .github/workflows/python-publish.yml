@@ -1,8 +1,10 @@
-# This workflow uploads the Python package to PyPI when a release is created.
+# This workflow validates release artifacts manually and uploads them to PyPI
+# only when a GitHub release is published.
 
 name: Upload Python Package
 
 on:
+  workflow_dispatch:
   release:
     types: [published]
 
@@ -162,6 +164,7 @@ jobs:
           path: dist/
 
   pypi-publish:
+    if: github.event_name == 'release'
     runs-on: ubuntu-latest
     needs:
       - release-build
