@@ -150,8 +150,15 @@ function clientHost(host: string): string {
   return host === "0.0.0.0" || host === "::" || host === "" ? "127.0.0.1" : host;
 }
 
+function httpClientForUrl(parsed: URL, label: string): typeof http | typeof https {
+  if (parsed.protocol === "https:") return https;
+  if (parsed.protocol === "http:") return http;
+  throw new Error(`${label} must use http:// or https://`);
+}
+
 function normalizeServerBaseUrl(value: string): string {
   const parsed = new URL(value);
+  httpClientForUrl(parsed, "--server");
   if (parsed.pathname.replace(/\/+$/, "") === "/v1/chat/completions") {
     parsed.pathname = "/";
     parsed.search = "";
@@ -298,7 +305,7 @@ function download(url: string, destination: string): Promise<string> {
 function waitForHealth(baseUrl: string, timeoutMs: number, shouldStop?: () => boolean): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   const healthUrl = new URL("/health", baseUrl);
-  const client = healthUrl.protocol === "https:" ? https : http;
+  const client = httpClientForUrl(healthUrl, "--server");
   return new Promise((resolve, reject) => {
     const retry = (): void => {
       if (shouldStop?.()) return;
@@ -359,7 +366,7 @@ async function startServer(options: ChatOptions, modelPath: string): Promise<{ b
 
 function requestJson(url: string, body: unknown): Promise<any> {
   const parsed = new URL(url);
-  const client = parsed.protocol === "https:" ? https : http;
+  const client = httpClientForUrl(parsed, "request URL");
   const payload = JSON.stringify(body);
   return new Promise((resolve, reject) => {
     const req = client.request({

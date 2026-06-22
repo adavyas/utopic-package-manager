@@ -136,8 +136,16 @@ function serverLogPath() {
 function clientHost(host) {
     return host === "0.0.0.0" || host === "::" || host === "" ? "127.0.0.1" : host;
 }
+function httpClientForUrl(parsed, label) {
+    if (parsed.protocol === "https:")
+        return https;
+    if (parsed.protocol === "http:")
+        return http;
+    throw new Error(`${label} must use http:// or https://`);
+}
 function normalizeServerBaseUrl(value) {
     const parsed = new URL(value);
+    httpClientForUrl(parsed, "--server");
     if (parsed.pathname.replace(/\/+$/, "") === "/v1/chat/completions") {
         parsed.pathname = "/";
         parsed.search = "";
@@ -281,7 +289,7 @@ function download(url, destination) {
 function waitForHealth(baseUrl, timeoutMs, shouldStop) {
     const deadline = Date.now() + timeoutMs;
     const healthUrl = new URL("/health", baseUrl);
-    const client = healthUrl.protocol === "https:" ? https : http;
+    const client = httpClientForUrl(healthUrl, "--server");
     return new Promise((resolve, reject) => {
         const retry = () => {
             if (shouldStop?.())
@@ -347,7 +355,7 @@ async function startServer(options, modelPath) {
 }
 function requestJson(url, body) {
     const parsed = new URL(url);
-    const client = parsed.protocol === "https:" ? https : http;
+    const client = httpClientForUrl(parsed, "request URL");
     const payload = JSON.stringify(body);
     return new Promise((resolve, reject) => {
         const req = client.request({

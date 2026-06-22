@@ -183,6 +183,23 @@ def test_bundled_chat_accepts_openai_compatible_server_url(fake_openai_server):
     ]
 
 
+def test_bundled_chat_rejects_unsupported_server_protocol():
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not installed")
+
+    completed = subprocess.run(
+        [node, str(CHAT_SCRIPT), "--server", "ftp://127.0.0.1:8910"],
+        input="hi\n/exit\n",
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+
+    assert completed.returncode == 1
+    assert "utopic chat: --server must use http:// or https://" in completed.stderr
+
+
 @pytest.mark.parametrize(
     ("flag", "value"),
     [
