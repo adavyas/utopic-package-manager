@@ -1129,6 +1129,46 @@ def test_model_pull_reuses_existing_download(monkeypatch, tmp_path):
     assert models.pull_model("example") == model_file
 
 
+def test_model_pull_force_replaces_existing_file_without_move_overwrite(monkeypatch, tmp_path):
+    catalog = tmp_path / "models.json"
+    model_file = tmp_path / "models" / "example.gguf"
+    model_file.parent.mkdir()
+    model_file.write_bytes(b"old model")
+    catalog.write_text(
+        """
+[
+  {
+    "id": "example",
+    "name": "Example",
+    "family": "test",
+    "filename": "example.gguf",
+    "url": "https://example.invalid/example.gguf",
+    "size": "1 B",
+    "recommended": true,
+    "description": "Test model"
+  }
+]
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("UTOPIC_MODELS_CATALOG", str(catalog))
+    monkeypatch.setenv("UTOPIC_MODELS_DIR", str(model_file.parent))
+
+    def download(_url, destination):
+        destination.write_bytes(b"new model")
+
+    monkeypatch.setattr(models, "_copy_stream_with_progress", download)
+    monkeypatch.setattr(
+        models.shutil,
+        "move",
+        lambda _src, _dst: (_ for _ in ()).throw(FileExistsError("destination exists")),
+    )
+
+    assert models.pull_model("example", force=True) == model_file
+    assert model_file.read_bytes() == b"new model"
+    assert not (model_file.parent / "example.gguf.partial").exists()
+
+
 def test_model_pull_rejects_catalog_filename_outside_models_dir(monkeypatch, tmp_path):
     catalog = tmp_path / "models.json"
     models_dir = tmp_path / "models"

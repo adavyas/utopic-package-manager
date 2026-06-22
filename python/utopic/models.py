@@ -191,7 +191,7 @@ def pull_model(model_id: str, *, force: bool = False) -> Path:
         _copy_stream_with_progress(entry.url, tmp)
         if tmp.stat().st_size == 0:
             raise OSError("downloaded 0 bytes")
-        shutil.move(str(tmp), str(destination))
+        tmp.replace(destination)
     except Exception as exc:
         if tmp.exists():
             _remove_path(tmp)
