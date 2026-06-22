@@ -87,6 +87,33 @@ def test_managed_source_checkout_recovers_non_git_cache(monkeypatch, tmp_path):
     assert commands[2] == ["git", "reset", "--hard", "main"]
 
 
+def test_managed_source_checkout_recovers_symlinked_non_git_cache(monkeypatch, tmp_path):
+    target = tmp_path / "real-source"
+    target.mkdir()
+    target_marker = target / "keep.txt"
+    target_marker.write_text("keep", encoding="utf-8")
+    dest = tmp_path / "src" / "llama.cpp"
+    dest.parent.mkdir(parents=True)
+    dest.symlink_to(target, target_is_directory=True)
+    commands = []
+
+    monkeypatch.setattr(installer, "_run", lambda command, **kwargs: commands.append(command))
+
+    installer._clone_or_checkout(
+        "https://example.test/llama.cpp.git",
+        "main",
+        dest,
+        dry_run=False,
+        reset=True,
+    )
+
+    assert not dest.exists()
+    assert target_marker.read_text(encoding="utf-8") == "keep"
+    assert commands[0] == ["git", "clone", "https://example.test/llama.cpp.git", dest]
+    assert commands[1] == ["git", "checkout", "main"]
+    assert commands[2] == ["git", "reset", "--hard", "main"]
+
+
 def test_managed_source_checkout_dry_run_previews_reclone_for_non_git_cache(monkeypatch, tmp_path):
     dest = tmp_path / "src" / "llama.cpp"
     dest.mkdir(parents=True)

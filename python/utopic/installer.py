@@ -140,7 +140,7 @@ def _clone_or_checkout(repo: str, ref: str, dest: Path, *, dry_run: bool, reset:
     if dest.exists() and not (dest / ".git").exists():
         print(f"+ remove invalid source checkout {dest}")
         if not dry_run:
-            if dest.is_dir():
+            if dest.is_dir() and not dest.is_symlink():
                 shutil.rmtree(dest)
             else:
                 dest.unlink()
