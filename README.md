@@ -166,7 +166,8 @@ For DiffusionGemma-style canvas models, use the entropy-bound path:
 utopic run -m /path/to/diffusiongemma.gguf -p "Answer with one word: 2+2?" -n 16 --eb-steps 48
 ```
 
-Run the OpenAI-compatible local server:
+Low-level native launchers are also available after `utopic setup` has installed
+the cached binaries:
 
 ```sh
 utopic-server -m /path/to/model.gguf --host 127.0.0.1 --port 8910 -ngl 99
