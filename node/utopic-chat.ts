@@ -210,6 +210,10 @@ function normalizeServerBaseUrl(value: string): string {
     parsed.pathname = pathname.slice(0, -"/v1/chat/completions".length) || "/";
     parsed.search = "";
     parsed.hash = "";
+  } else if (pathname.endsWith("/v1")) {
+    parsed.pathname = pathname.slice(0, -"/v1".length) || "/";
+    parsed.search = "";
+    parsed.hash = "";
   }
   return parsed.toString().replace(/\/+$/, "");
 }

@@ -331,6 +331,12 @@ def _server_base_url(args: Sequence[str]) -> Optional[str]:
             query="",
             fragment="",
         )
+    elif path.endswith("/v1"):
+        parsed = parsed._replace(
+            path=path[: -len("/v1")] or "",
+            query="",
+            fragment="",
+        )
     return urllib.parse.urlunsplit(parsed).rstrip("/")
 
 

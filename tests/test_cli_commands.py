@@ -227,6 +227,13 @@ def test_chat_python_fallback_accepts_openai_v1_server_base_url():
     )
 
 
+def test_chat_python_fallback_normalizes_openai_v1_server_base_url():
+    assert (
+        chat._server_base_url(["--server", "http://127.0.0.1:8910/proxy/v1"])
+        == "http://127.0.0.1:8910/proxy"
+    )
+
+
 def test_chat_launch_python_fallback_runs_setup_for_local_server_when_node_is_missing(monkeypatch, tmp_path):
     setup_calls = []
     fallback_calls = []

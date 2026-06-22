@@ -422,6 +422,34 @@ def test_bundled_chat_accepts_openai_compatible_server_url(fake_openai_server):
     ]
 
 
+def test_bundled_chat_accepts_openai_v1_server_base_url(fake_openai_server):
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not installed")
+    base_url, requests, paths = fake_openai_server
+
+    completed = subprocess.run(
+        [node, str(CHAT_SCRIPT), "--server", f"{base_url}/v1"],
+        input="hi\n/exit\n",
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+
+    assert f"OpenAI-compatible URL: {base_url}/v1/chat/completions" in completed.stdout
+    assert "hello from fake utopic" in completed.stdout
+    assert paths == ["/v1/chat/completions"]
+    assert requests == [
+        {
+            "model": "utopic",
+            "messages": [{"role": "user", "content": "hi"}],
+            "max_tokens": 512,
+            "temperature": 0,
+        }
+    ]
+
+
 @pytest.mark.parametrize("server_path", ["/proxy", "/proxy/v1/chat/completions"])
 def test_bundled_chat_preserves_prefixed_openai_server_base_url(server_path):
     node = shutil.which("node")
