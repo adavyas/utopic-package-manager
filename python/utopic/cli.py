@@ -9,6 +9,23 @@ from . import _native, chat, installer, models
 
 
 _RUN_VALUE_FLAGS = {"--host", "--port", "-ngl", "--ctx-size"}
+_PROMPT_VALUE_FLAGS = _RUN_VALUE_FLAGS | {
+    "-p",
+    "--prompt",
+    "-n",
+    "--temp",
+    "--seed",
+    "--system",
+    "--tools",
+    "--schema",
+    "--confidence",
+    "--converge",
+    "--steps",
+    "--diffusion-block-length",
+    "--canvas",
+    "--eb-steps",
+    "--slot-len",
+}
 _RUN_NUMERIC_FLAGS = {
     "--port": (1, 65535, "an integer from 1 to 65535"),
     "-ngl": (0, None, "a non-negative integer"),
@@ -119,7 +136,26 @@ def _resolve_prompt_model_args(args: Sequence[str]) -> list[str]:
         if arg.startswith("--model="):
             resolved[index] = f"--model={models.ensure_model(arg.split('=', 1)[1])}"
             return resolved
-    return resolved
+    model_arg, remaining = _extract_prompt_positional_model(resolved)
+    return ["-m", str(models.ensure_model(model_arg)), *remaining]
+
+
+def _extract_prompt_positional_model(args: Sequence[str]) -> tuple[Optional[str], list[str]]:
+    remaining = list(args)
+    index = 0
+    while index < len(remaining):
+        arg = remaining[index]
+        if arg in _PROMPT_VALUE_FLAGS:
+            index += 2
+            continue
+        if any(arg.startswith(flag + "=") for flag in _PROMPT_VALUE_FLAGS if flag.startswith("--")):
+            index += 1
+            continue
+        if not arg.startswith("-"):
+            del remaining[index]
+            return arg, remaining
+        index += 1
+    return None, remaining
 
 
 def _value_after(args: Sequence[str], flag: str, default: str) -> str:
