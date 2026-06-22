@@ -202,3 +202,15 @@ def test_release_workflow_smokes_installed_prompt_flag_normalization():
     assert '"--model=dream-7b-q4"' in workflow
     assert '"--prompt=hello"' in workflow
     assert '["-m", "/models/dream.gguf", "-p", "hello"' in workflow
+
+
+def test_workflows_smoke_installed_doctor_command():
+    workflows = [
+        REPO_ROOT / ".github" / "workflows" / "ci.yml",
+        REPO_ROOT / ".github" / "workflows" / "python-publish.yml",
+    ]
+
+    for workflow_path in workflows:
+        workflow = workflow_path.read_text(encoding="utf-8")
+        assert '[str(utopic), "doctor", "--help"]' in workflow
+        assert '[str(utopic), "doctor", "--version"]' in workflow

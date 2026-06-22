@@ -231,6 +231,8 @@ jobs:
                       [str(python), "-m", "utopic", "--version"],
                       [str(utopic), "--help"],
                       [str(utopic), "--version"],
+                      [str(utopic), "doctor", "--help"],
+                      [str(utopic), "doctor", "--version"],
                       [str(utopic), "setup", "--version"],
                       [str(utopic), "chat", "--help"],
                       [str(utopic), "chat", "--version"],
