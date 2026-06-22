@@ -317,6 +317,7 @@ async function resolveModel(value) {
 function download(url, destination, redirectsRemaining = 10) {
     fs.mkdirSync(path.dirname(destination), { recursive: true });
     const partial = `${destination}.partial`;
+    const removeEmptyDestinationOnFailure = fs.existsSync(destination) && fs.statSync(destination).size === 0;
     if (fs.existsSync(partial))
         fs.unlinkSync(partial);
     return new Promise((resolve, reject) => {
@@ -327,11 +328,19 @@ function download(url, destination, redirectsRemaining = 10) {
             if (fs.existsSync(partial))
                 fs.unlinkSync(partial);
         };
+        const removeStaleDestination = () => {
+            if (removeEmptyDestinationOnFailure &&
+                fs.existsSync(destination) &&
+                fs.statSync(destination).size === 0) {
+                fs.unlinkSync(destination);
+            }
+        };
         const fail = (error) => {
             if (settled)
                 return;
             settled = true;
             removePartial();
+            removeStaleDestination();
             reject(error);
         };
         const succeed = (value) => {

@@ -990,6 +990,52 @@ def test_bundled_chat_redownloads_zero_byte_cached_model(tmp_path):
     assert not (models_dir / "http-model.gguf.partial").exists()
 
 
+def test_bundled_chat_removes_zero_byte_cached_model_after_redownload_failure(tmp_path):
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not installed")
+
+    try:
+        download_server = ThreadingHTTPServer(("127.0.0.1", 0), BrokenDownloadServer)
+    except PermissionError as exc:
+        pytest.skip(f"localhost bind is unavailable in this environment: {exc}")
+    download_thread = threading.Thread(target=download_server.serve_forever, daemon=True)
+    download_thread.start()
+
+    models_dir = tmp_path / "models"
+    models_dir.mkdir()
+    (models_dir / "http-model.gguf").write_bytes(b"")
+    catalog = tmp_path / "models.json"
+    write_catalog(
+        catalog,
+        "http-model",
+        "http-model.gguf",
+        f"http://127.0.0.1:{download_server.server_port}/model.gguf",
+    )
+
+    try:
+        completed = subprocess.run(
+            [node, str(CHAT_SCRIPT), "http-model"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            env={
+                **os.environ,
+                "UTOPIC_MODELS_CATALOG": str(catalog),
+                "UTOPIC_MODELS_DIR": str(models_dir),
+            },
+        )
+    finally:
+        download_server.shutdown()
+        download_server.server_close()
+        download_thread.join(timeout=5)
+
+    assert completed.returncode == 1
+    assert "utopic chat: downloaded" in completed.stderr
+    assert not (models_dir / "http-model.gguf").exists()
+    assert not (models_dir / "http-model.gguf.partial").exists()
+
+
 def test_bundled_chat_follows_relative_model_download_redirects(tmp_path):
     node = shutil.which("node")
     if node is None:

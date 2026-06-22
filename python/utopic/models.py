@@ -164,6 +164,9 @@ def pull_model(model_id: str, *, force: bool = False) -> Path:
     _validate_model_url(entry)
     destination.parent.mkdir(parents=True, exist_ok=True)
     tmp = destination.with_suffix(destination.suffix + ".partial")
+    remove_empty_destination_on_failure = (
+        destination.exists() and destination.stat().st_size == 0
+    )
     if tmp.exists():
         tmp.unlink()
 
@@ -177,6 +180,12 @@ def pull_model(model_id: str, *, force: bool = False) -> Path:
     except Exception as exc:
         if tmp.exists():
             tmp.unlink()
+        if (
+            remove_empty_destination_on_failure
+            and destination.exists()
+            and destination.stat().st_size == 0
+        ):
+            destination.unlink()
         raise RuntimeError(f"Failed to pull {entry.id} from {entry.url}: {exc}") from exc
     return destination
 

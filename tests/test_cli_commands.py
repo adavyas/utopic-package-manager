@@ -252,6 +252,36 @@ def test_models_version_does_not_read_catalog(monkeypatch, capsys):
     assert captured.err == ""
 
 
+def test_models_pull_removes_zero_byte_cached_model_after_redownload_failure(monkeypatch, tmp_path):
+    destination = tmp_path / "models" / "broken.gguf"
+    destination.parent.mkdir()
+    destination.write_bytes(b"")
+    entry = models.ModelEntry(
+        id="broken",
+        name="Broken",
+        family="test",
+        filename="broken.gguf",
+        url="https://example.test/broken.gguf",
+        size="1 KiB",
+        recommended=True,
+        description="Broken test model",
+    )
+
+    monkeypatch.setattr(models, "models_dir", lambda: tmp_path / "models")
+    monkeypatch.setattr(models, "get_model", lambda model_id: entry if model_id == "broken" else None)
+    monkeypatch.setattr(
+        models,
+        "_copy_stream_with_progress",
+        lambda url, path: (_ for _ in ()).throw(OSError("download failed")),
+    )
+
+    with pytest.raises(RuntimeError, match="download failed"):
+        models.pull_model("broken")
+
+    assert not destination.exists()
+    assert not (tmp_path / "models" / "broken.gguf.partial").exists()
+
+
 def test_cli_run_version_does_not_run_setup_or_native(monkeypatch, capsys):
     monkeypatch.setattr(cli, "_ensure_setup", lambda enabled=True, binary_name="utopic": pytest.fail("should not run setup"))
     monkeypatch.setattr(cli._native, "main", lambda name, argv: pytest.fail("should not launch native binary"))
