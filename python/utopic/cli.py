@@ -144,6 +144,24 @@ def _validate_model_argument_count(args: Sequence[str], value_flags: set[str]) -
         raise RuntimeError("expected at most one model argument")
 
 
+def _validate_server_options(args: Sequence[str]) -> None:
+    index = 0
+    while index < len(args):
+        arg = args[index]
+        if arg in _MODEL_VALUE_FLAGS or arg in _RUN_VALUE_FLAGS:
+            index += 2
+            continue
+        if arg.startswith("--model="):
+            index += 1
+            continue
+        if any(arg.startswith(flag + "=") for flag in _RUN_VALUE_FLAGS if flag.startswith("--")):
+            index += 1
+            continue
+        if arg.startswith("-"):
+            raise RuntimeError(f"unknown option: {arg}")
+        index += 1
+
+
 def _looks_like_negative_number(value: str) -> bool:
     return len(value) > 1 and value[0] == "-" and value[1].isdigit()
 
@@ -379,6 +397,7 @@ def _run(argv: Sequence[str]) -> int:
 
         _validate_run_value_flags(args)
         _validate_model_argument_count(args, _RUN_VALUE_FLAGS)
+        _validate_server_options(args)
         model_arg, server_args = _extract_model(args)
         _ensure_setup(setup_enabled, "utopic_server")
         _native.binary_path("utopic_server")

@@ -124,6 +124,17 @@ def test_chat_launch_reports_missing_node_before_setup(monkeypatch):
     assert setup_calls == []
 
 
+def test_chat_launch_rejects_unknown_options_before_setup(monkeypatch, capsys):
+    monkeypatch.setattr(chat.shutil, "which", lambda name: "/usr/bin/node" if name == "node" else None)
+    monkeypatch.setattr(chat.installer, "setup", lambda argv: pytest.fail("should not run setup"))
+    monkeypatch.setattr(chat.subprocess, "run", lambda command, env, check: pytest.fail("should not launch node"))
+
+    assert chat.launch(["--bogus"]) == 1
+
+    captured = capsys.readouterr()
+    assert "utopic chat: unknown option: --bogus" in captured.err
+
+
 @pytest.mark.parametrize(
     "args",
     [
@@ -474,6 +485,17 @@ def test_cli_run_allows_server_flags_before_positional_model(monkeypatch):
         ("setup", True, "utopic_server"),
         ("server", "/models/dream-7b-q4.gguf", ["--port", "8999", "-ngl", "99"], "127.0.0.1", "8999"),
     ]
+
+
+def test_cli_run_rejects_unknown_server_options_before_setup(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "_ensure_setup", lambda enabled=True, binary_name="utopic": pytest.fail("should not run setup"))
+    monkeypatch.setattr(cli.models, "ensure_model", lambda value=None: pytest.fail("should not resolve a model"))
+    monkeypatch.setattr(cli._native, "binary_path", lambda name: pytest.fail("should not inspect native binaries"))
+
+    assert cli.main(["run", "--bogus"]) == 1
+
+    captured = capsys.readouterr()
+    assert "utopic run: unknown option: --bogus" in captured.err
 
 
 @pytest.mark.parametrize("flag", ["--host", "--port", "-ngl", "--ctx-size"])

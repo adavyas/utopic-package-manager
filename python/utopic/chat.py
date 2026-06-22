@@ -119,6 +119,7 @@ def _validate_numeric_value(flag: str, value: str) -> None:
 def _validate_value_args(argv: Sequence[str]) -> None:
     model_args = 0
     for index, arg in enumerate(argv):
+        value_for_previous_flag = index > 0 and argv[index - 1] in VALUE_FLAGS
         if arg in VALUE_FLAGS:
             label = VALUE_FLAGS[arg]
             if index + 1 >= len(argv):
@@ -152,6 +153,14 @@ def _validate_value_args(argv: Sequence[str]) -> None:
             index == 0 or argv[index - 1] not in VALUE_FLAGS
         ):
             model_args += 1
+        if (
+            arg.startswith("-")
+            and not value_for_previous_flag
+            and arg not in VALUE_FLAGS
+            and arg not in ("-h", "--help", "--no-setup")
+            and not any(arg.startswith(f"{flag}=") for flag in LONG_VALUE_FLAGS)
+        ):
+            raise RuntimeError(f"unknown option: {arg}")
 
     if model_args > 1:
         raise RuntimeError("expected at most one model argument")
