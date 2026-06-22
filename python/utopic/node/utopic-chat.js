@@ -51,6 +51,12 @@ function parseArgs(argv) {
     };
     const positional = [];
     const valueAfterEquals = (arg, flag) => arg.slice(flag.length + 1);
+    const numberValue = (flag, value) => {
+        const parsed = Number(value);
+        if (!Number.isFinite(parsed))
+            throw new Error(`${flag} must be a number`);
+        return parsed;
+    };
     for (let i = 0; i < argv.length; i += 1) {
         const arg = argv[i];
         const next = () => {
@@ -84,13 +90,13 @@ function parseArgs(argv) {
         else if (arg.startsWith("--ctx-size="))
             options.ctxSize = valueAfterEquals(arg, "--ctx-size");
         else if (arg === "--max-tokens")
-            options.maxTokens = Number(next());
+            options.maxTokens = numberValue("--max-tokens", next());
         else if (arg.startsWith("--max-tokens="))
-            options.maxTokens = Number(valueAfterEquals(arg, "--max-tokens"));
+            options.maxTokens = numberValue("--max-tokens", valueAfterEquals(arg, "--max-tokens"));
         else if (arg === "--temperature")
-            options.temperature = Number(next());
+            options.temperature = numberValue("--temperature", next());
         else if (arg.startsWith("--temperature="))
-            options.temperature = Number(valueAfterEquals(arg, "--temperature"));
+            options.temperature = numberValue("--temperature", valueAfterEquals(arg, "--temperature"));
         else if (arg === "--no-setup")
             continue;
         else if (arg.startsWith("-"))

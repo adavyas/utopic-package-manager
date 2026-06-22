@@ -160,6 +160,32 @@ def test_bundled_chat_accepts_openai_compatible_server_url(fake_openai_server):
     ]
 
 
+@pytest.mark.parametrize(
+    ("flag", "value"),
+    [
+        ("--max-tokens", "abc"),
+        ("--temperature", "warm"),
+    ],
+)
+def test_bundled_chat_rejects_invalid_numeric_flags(fake_openai_server, flag, value):
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not installed")
+    base_url, requests, _paths = fake_openai_server
+
+    completed = subprocess.run(
+        [node, str(CHAT_SCRIPT), "--server", base_url, f"{flag}={value}"],
+        input="hi\n/exit\n",
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+
+    assert completed.returncode == 1
+    assert f"utopic chat: {flag} must be a number" in completed.stderr
+    assert requests == []
+
+
 def test_bundled_chat_removes_partial_model_after_download_failure(tmp_path):
     node = shutil.which("node")
     if node is None:

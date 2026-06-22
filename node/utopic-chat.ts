@@ -79,6 +79,11 @@ function parseArgs(argv: string[]): ChatOptions {
   };
   const positional: string[] = [];
   const valueAfterEquals = (arg: string, flag: string): string => arg.slice(flag.length + 1);
+  const numberValue = (flag: string, value: string): number => {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) throw new Error(`${flag} must be a number`);
+    return parsed;
+  };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     const next = (): string => {
@@ -98,10 +103,10 @@ function parseArgs(argv: string[]): ChatOptions {
     else if (arg === "-ngl") options.ngl = next();
     else if (arg === "--ctx-size") options.ctxSize = next();
     else if (arg.startsWith("--ctx-size=")) options.ctxSize = valueAfterEquals(arg, "--ctx-size");
-    else if (arg === "--max-tokens") options.maxTokens = Number(next());
-    else if (arg.startsWith("--max-tokens=")) options.maxTokens = Number(valueAfterEquals(arg, "--max-tokens"));
-    else if (arg === "--temperature") options.temperature = Number(next());
-    else if (arg.startsWith("--temperature=")) options.temperature = Number(valueAfterEquals(arg, "--temperature"));
+    else if (arg === "--max-tokens") options.maxTokens = numberValue("--max-tokens", next());
+    else if (arg.startsWith("--max-tokens=")) options.maxTokens = numberValue("--max-tokens", valueAfterEquals(arg, "--max-tokens"));
+    else if (arg === "--temperature") options.temperature = numberValue("--temperature", next());
+    else if (arg.startsWith("--temperature=")) options.temperature = numberValue("--temperature", valueAfterEquals(arg, "--temperature"));
     else if (arg === "--no-setup") continue;
     else if (arg.startsWith("-")) throw new Error(`unknown option: ${arg}`);
     else positional.push(arg);
