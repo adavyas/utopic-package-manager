@@ -83,6 +83,22 @@ def _validate_run_value_flags(args: Sequence[str]) -> None:
                 _validate_run_numeric_flag(flag, value)
 
 
+def _validate_prompt_value_flags(args: Sequence[str]) -> None:
+    prompt_only_flags = _PROMPT_VALUE_FLAGS - _RUN_VALUE_FLAGS
+    for index, arg in enumerate(args):
+        if arg in prompt_only_flags:
+            if index + 1 >= len(args):
+                raise RuntimeError(f"expected a value after {arg}")
+            value = args[index + 1]
+            if value == "" or (value.startswith("-") and not _looks_like_negative_number(value)):
+                raise RuntimeError(f"expected a value after {arg}")
+        for flag in prompt_only_flags:
+            if not flag.startswith("--") or not arg.startswith(f"{flag}="):
+                continue
+            if arg.split("=", 1)[1] == "":
+                raise RuntimeError(f"expected a value after {flag}")
+
+
 def _looks_like_negative_number(value: str) -> bool:
     return len(value) > 1 and value[0] == "-" and value[1].isdigit()
 
@@ -282,12 +298,14 @@ def _run(argv: Sequence[str]) -> int:
     args = _without_flag(args, "--no-setup")
 
     try:
-        _validate_run_value_flags(args)
         if _has_prompt(args):
+            _validate_prompt_value_flags(args)
+            _validate_run_value_flags(args)
             _ensure_setup(setup_enabled)
             _native.main("utopic", _resolve_prompt_model_args(args))
             return 0
 
+        _validate_run_value_flags(args)
         model_arg, server_args = _extract_model(args)
         _ensure_setup(setup_enabled, "utopic_server")
         _native.binary_path("utopic_server")

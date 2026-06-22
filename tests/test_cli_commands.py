@@ -215,6 +215,22 @@ def test_cli_run_with_prompt_without_model_uses_default_model(monkeypatch):
     ]
 
 
+def test_cli_run_prompt_allows_negative_numeric_prompt_values(monkeypatch):
+    calls = []
+
+    monkeypatch.setattr(cli, "_ensure_setup", lambda enabled=True, binary_name="utopic": calls.append(("setup", enabled, binary_name)))
+    monkeypatch.setattr(cli.models, "ensure_model", lambda value=None: calls.append(("model", value)) or Path("/models/default.gguf"))
+    monkeypatch.setattr(cli._native, "main", lambda name, argv: calls.append((name, list(argv))))
+
+    cli.main(["run", "-p", "hello", "--seed", "-1"])
+
+    assert calls == [
+        ("setup", True, "utopic"),
+        ("model", None),
+        ("utopic", ["-m", "/models/default.gguf", "-p", "hello", "--seed", "-1"]),
+    ]
+
+
 @pytest.mark.parametrize("args", [["--model="], ["-m", ""]])
 def test_cli_run_rejects_empty_model_values_before_setup(monkeypatch, capsys, args):
     monkeypatch.setattr(cli, "_ensure_setup", lambda enabled=True, binary_name="utopic": pytest.fail("should not run setup"))
@@ -257,6 +273,32 @@ def test_cli_run_prompt_rejects_missing_model_values_before_setup(monkeypatch, c
 
     captured = capsys.readouterr()
     assert "utopic run: expected a value after -m/--model" in captured.err
+
+
+@pytest.mark.parametrize(
+    ("args", "message"),
+    [
+        (["-p"], "expected a value after -p"),
+        (["-p", "--steps", "32"], "expected a value after -p"),
+        (["--prompt"], "expected a value after --prompt"),
+        (["--prompt="], "expected a value after --prompt"),
+        (["-p", "hi", "--steps"], "expected a value after --steps"),
+        (["-p", "hi", "--steps", "-ngl"], "expected a value after --steps"),
+        (["-p", "hi", "--steps="], "expected a value after --steps"),
+        (["-p", "hi", "--schema"], "expected a value after --schema"),
+        (["-p", "hi", "--schema", "--tools", "tools.json"], "expected a value after --schema"),
+        (["-p", "hi", "--schema="], "expected a value after --schema"),
+    ],
+)
+def test_cli_run_prompt_rejects_missing_prompt_option_values_before_setup(monkeypatch, capsys, args, message):
+    monkeypatch.setattr(cli, "_ensure_setup", lambda enabled=True, binary_name="utopic": pytest.fail("should not run setup"))
+    monkeypatch.setattr(cli.models, "ensure_model", lambda value=None: pytest.fail("should not resolve a model"))
+    monkeypatch.setattr(cli._native, "main", lambda name, argv: pytest.fail("should not run native cli"))
+
+    assert cli.main(["run", *args]) == 1
+
+    captured = capsys.readouterr()
+    assert f"utopic run: {message}" in captured.err
 
 
 @pytest.mark.parametrize("args", [["--model=-ngl"], ["--model", "-ngl"]])
