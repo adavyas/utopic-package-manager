@@ -1,4 +1,5 @@
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -999,6 +1000,76 @@ def test_cli_setup_version_does_not_run_setup(monkeypatch, capsys):
 
     captured = capsys.readouterr()
     assert captured.out == f"utopic setup {cli.__version__}\n"
+    assert captured.err == ""
+
+
+def test_cli_doctor_reports_environment_without_running_setup(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(cli.installer, "cache_root", lambda: tmp_path / "cache")
+    monkeypatch.setattr(cli.installer, "bin_dir", lambda: tmp_path / "bin")
+    monkeypatch.setattr(cli.installer, "native_installation_is_current", lambda binary_names: True)
+    monkeypatch.setattr(
+        cli.installer,
+        "_resolve_backend",
+        lambda requested, arch: cli.installer.BackendDecision(
+            backend="metal",
+            reason="Metal device available",
+            device="Apple M4 Pro",
+        ),
+    )
+    monkeypatch.setattr(cli.installer, "setup", lambda argv: pytest.fail("should not run setup"))
+    monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(cli.subprocess, "check_output", lambda command, text, stderr: "v20.0.0\n")
+
+    assert cli.main(["doctor"]) == 0
+
+    captured = capsys.readouterr()
+    assert f"Utopic {cli.__version__}" in captured.out
+    assert f"Cache root: {tmp_path / 'cache'}" in captured.out
+    assert f"Bin dir: {tmp_path / 'bin'}" in captured.out
+    assert "Backend: metal" in captured.out
+    assert "Device: Apple M4 Pro" in captured.out
+    assert "Reason: Metal device available" in captured.out
+    assert "Native cache: current" in captured.out
+    assert "cmake: /usr/bin/cmake" in captured.out
+    assert "git: /usr/bin/git" in captured.out
+    assert "Node.js: /usr/bin/node (v20.0.0)" in captured.out
+    assert captured.err == ""
+
+
+def test_cli_doctor_returns_failure_when_required_setup_tools_are_missing(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(cli.installer, "cache_root", lambda: tmp_path / "cache")
+    monkeypatch.setattr(cli.installer, "bin_dir", lambda: tmp_path / "bin")
+    monkeypatch.setattr(cli.installer, "native_installation_is_current", lambda binary_names: False)
+    monkeypatch.setattr(
+        cli.installer,
+        "_resolve_backend",
+        lambda requested, arch: cli.installer.BackendDecision(
+            backend="cpu",
+            reason="No usable Metal device or CUDA compiler found",
+            device="CPU",
+        ),
+    )
+    monkeypatch.setattr(shutil, "which", lambda name: None)
+
+    assert cli.main(["doctor"]) == 1
+
+    captured = capsys.readouterr()
+    assert "Native cache: missing or stale" in captured.out
+    assert "cmake: missing" in captured.out
+    assert "git: missing" in captured.out
+    assert "Node.js: missing (Python fallback chat remains available)" in captured.out
+    assert "Missing required setup tools: cmake, git" in captured.err
+
+
+def test_cli_doctor_help_does_not_probe_environment(monkeypatch, capsys):
+    monkeypatch.setattr(cli.installer, "_resolve_backend", lambda requested, arch: pytest.fail("should not probe backend"))
+    monkeypatch.setattr(cli.installer, "native_installation_is_current", lambda binary_names: pytest.fail("should not inspect cache"))
+
+    assert cli.main(["doctor", "--help"]) == 0
+
+    captured = capsys.readouterr()
+    assert "usage: utopic doctor" in captured.out
+    assert "Print local setup diagnostics" in captured.out
     assert captured.err == ""
 
 

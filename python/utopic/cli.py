@@ -1,5 +1,7 @@
 import math
+import os
 import shlex
+import shutil
 import subprocess
 import sys
 import time
@@ -440,12 +442,14 @@ Commands:
   run       Start an OpenAI-compatible server, or run one-shot prompts with -p.
   setup     Build and cache native binaries for this host.
   models    List, pull, and locate curated GGUF models.
+  doctor    Print local setup diagnostics without building anything.
 
 Examples:
   utopic --version
   utopic chat
   utopic chat dream-7b-q4
   utopic run dream-7b-q4 --port 8910 -ngl 99
+  utopic doctor
   utopic run -m /path/to/model.gguf -p "Answer with one word: 2+2?" -n 16
 
 Run `utopic <command> --help` for command-specific help.
@@ -483,6 +487,93 @@ def _format_command(command: object) -> str:
     if isinstance(command, (list, tuple)):
         return shlex.join(str(part) for part in command)
     return str(command)
+
+
+def _print_doctor_help() -> None:
+    print(
+        """usage: utopic doctor
+
+Print local setup diagnostics without cloning, building, downloading, or
+starting the native runtime.
+
+Checks:
+  - package version
+  - cache and binary directories
+  - detected backend, device, and reason
+  - whether cached native binaries are current
+  - required setup tools: cmake and git
+  - optional chat tool: Node.js
+"""
+    )
+
+
+def _node_status() -> str:
+    node = shutil.which("node")
+    if node is None:
+        return "missing (Python fallback chat remains available)"
+    try:
+        version = subprocess.check_output(
+            [node, "--version"],
+            text=True,
+            stderr=subprocess.STDOUT,
+        ).strip()
+    except (OSError, subprocess.CalledProcessError):
+        return f"{node} (version check failed)"
+    return f"{node} ({version})"
+
+
+def _doctor(argv: Sequence[str]) -> int:
+    if any(arg in ("-h", "--help") for arg in argv):
+        _print_doctor_help()
+        return 0
+    if "--version" in argv:
+        print(f"utopic doctor {__version__}")
+        return 0
+
+    requested_backend = os.environ.get("UTOPIC_BACKEND", "auto")
+    cuda_architectures = os.environ.get("UTOPIC_CUDA_ARCHITECTURES")
+    try:
+        decision = installer._resolve_backend(requested_backend, cuda_architectures)
+    except ValueError as exc:
+        print(f"utopic doctor: {exc}", file=sys.stderr)
+        return 1
+
+    required_tools = ("cmake", "git")
+    missing_required: list[str] = []
+    tool_paths = {}
+    for name in required_tools:
+        path = shutil.which(name)
+        tool_paths[name] = path
+        if path is None:
+            missing_required.append(name)
+
+    print(f"Utopic {__version__}")
+    print(f"Cache root: {installer.cache_root()}")
+    print(f"Bin dir: {installer.bin_dir()}")
+    print(f"Backend: {decision.backend}")
+    print(f"Device: {decision.device}")
+    print(f"Reason: {decision.reason}")
+    if decision.cuda_architectures:
+        print(f"CUDA architectures: {decision.cuda_architectures}")
+    if decision.cuda_graphs:
+        print(f"CUDA graphs: {decision.cuda_graphs}")
+    native_cache = (
+        "current"
+        if installer.native_installation_is_current(("utopic_server",))
+        else "missing or stale"
+    )
+    print(f"Native cache: {native_cache}")
+    for name in required_tools:
+        print(f"{name}: {tool_paths[name] or 'missing'}")
+    print(f"Node.js: {_node_status()}")
+
+    if missing_required:
+        print(
+            f"Missing required setup tools: {', '.join(missing_required)}",
+            file=sys.stderr,
+        )
+        return 1
+    return 0
 
 
 def _run(argv: Sequence[str]) -> int:
@@ -555,6 +646,8 @@ def main(argv: Optional[Sequence[str]] = None) -> Optional[int]:
         raise SystemExit(models.main(rest))
     if command == "run":
         return _run(rest)
+    if command == "doctor":
+        return _doctor(rest)
 
     if not command.startswith("-"):
         print(f"utopic: unknown command: {command}", file=sys.stderr)

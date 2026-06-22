@@ -59,6 +59,13 @@ If you want to run setup separately:
 utopic setup
 ```
 
+To inspect the local setup state without cloning, building, downloading, or
+starting a server:
+
+```sh
+utopic doctor
+```
+
 If a local build cache gets wedged after an interrupted or older setup run:
 
 ```sh
@@ -179,6 +186,7 @@ utopic --help
 utopic --version
 utopic chat --help
 utopic run --help
+utopic doctor
 utopic models --help
 ```
 
