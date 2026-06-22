@@ -51,6 +51,11 @@ function parseArgs(argv) {
     };
     const positional = [];
     const valueAfterEquals = (arg, flag) => arg.slice(flag.length + 1);
+    const requiredValue = (flag, value) => {
+        if (value === "")
+            throw new Error(`expected a value after ${flag}`);
+        return value;
+    };
     const numberValue = (flag, value) => {
         const parsed = Number(value);
         if (!Number.isFinite(parsed))
@@ -75,9 +80,9 @@ function parseArgs(argv) {
         if (arg === "-h" || arg === "--help")
             options.help = true;
         else if (arg === "-m" || arg === "--model")
-            options.model = next();
+            options.model = requiredValue("-m/--model", next());
         else if (arg.startsWith("--model="))
-            options.model = valueAfterEquals(arg, "--model");
+            options.model = requiredValue("-m/--model", valueAfterEquals(arg, "--model"));
         else if (arg === "--server")
             options.server = next();
         else if (arg.startsWith("--server="))

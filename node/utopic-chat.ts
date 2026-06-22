@@ -79,6 +79,10 @@ function parseArgs(argv: string[]): ChatOptions {
   };
   const positional: string[] = [];
   const valueAfterEquals = (arg: string, flag: string): string => arg.slice(flag.length + 1);
+  const requiredValue = (flag: string, value: string): string => {
+    if (value === "") throw new Error(`expected a value after ${flag}`);
+    return value;
+  };
   const numberValue = (flag: string, value: string): number => {
     const parsed = Number(value);
     if (!Number.isFinite(parsed)) throw new Error(`${flag} must be a number`);
@@ -99,8 +103,8 @@ function parseArgs(argv: string[]): ChatOptions {
       return argv[i];
     };
     if (arg === "-h" || arg === "--help") options.help = true;
-    else if (arg === "-m" || arg === "--model") options.model = next();
-    else if (arg.startsWith("--model=")) options.model = valueAfterEquals(arg, "--model");
+    else if (arg === "-m" || arg === "--model") options.model = requiredValue("-m/--model", next());
+    else if (arg.startsWith("--model=")) options.model = requiredValue("-m/--model", valueAfterEquals(arg, "--model"));
     else if (arg === "--server") options.server = next();
     else if (arg.startsWith("--server=")) options.server = valueAfterEquals(arg, "--server");
     else if (arg === "--host") options.host = next();

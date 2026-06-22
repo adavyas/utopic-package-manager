@@ -14,6 +14,7 @@ _RUN_NUMERIC_FLAGS = {
     "-ngl": (0, None, "a non-negative integer"),
     "--ctx-size": (1, None, "a positive integer"),
 }
+_MODEL_VALUE_FLAGS = {"-m", "--model"}
 
 
 def _ensure_setup(enabled: bool = True, binary_name: str = "utopic") -> None:
@@ -36,6 +37,11 @@ def _without_flag(args: Sequence[str], flag: str) -> list[str]:
 
 def _validate_run_value_flags(args: Sequence[str]) -> None:
     for index, arg in enumerate(args):
+        if arg in _MODEL_VALUE_FLAGS:
+            if index + 1 >= len(args) or args[index + 1] == "":
+                raise RuntimeError("expected a value after -m/--model")
+        if arg == "--model=":
+            raise RuntimeError("expected a value after -m/--model")
         if arg in _RUN_VALUE_FLAGS:
             if index + 1 >= len(args):
                 raise RuntimeError(f"expected a value after {arg}")
@@ -222,12 +228,12 @@ def _run(argv: Sequence[str]) -> int:
     args = _without_flag(args, "--no-setup")
 
     try:
+        _validate_run_value_flags(args)
         if _has_prompt(args):
             _ensure_setup(setup_enabled)
             _native.main("utopic", args)
             return 0
 
-        _validate_run_value_flags(args)
         model_arg, server_args = _extract_model(args)
         _ensure_setup(setup_enabled, "utopic_server")
         _native.binary_path("utopic_server")

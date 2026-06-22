@@ -138,6 +138,28 @@ def test_cli_run_with_prompt_delegates_to_native_one_shot(monkeypatch):
     ]
 
 
+@pytest.mark.parametrize("args", [["--model="], ["-m", ""]])
+def test_cli_run_rejects_empty_model_values_before_setup(monkeypatch, capsys, args):
+    monkeypatch.setattr(cli, "_ensure_setup", lambda enabled=True, binary_name="utopic": pytest.fail("should not run setup"))
+    monkeypatch.setattr(cli.models, "ensure_model", lambda value=None: pytest.fail("should not resolve a model"))
+
+    assert cli.main(["run", *args]) == 1
+
+    captured = capsys.readouterr()
+    assert "utopic run: expected a value after -m/--model" in captured.err
+
+
+@pytest.mark.parametrize("args", [["--model=", "-p", "hi"], ["-m", "", "-p", "hi"]])
+def test_cli_run_prompt_rejects_empty_model_values_before_setup(monkeypatch, capsys, args):
+    monkeypatch.setattr(cli, "_ensure_setup", lambda enabled=True, binary_name="utopic": pytest.fail("should not run setup"))
+    monkeypatch.setattr(cli._native, "main", lambda name, argv: pytest.fail("should not run native cli"))
+
+    assert cli.main(["run", *args]) == 1
+
+    captured = capsys.readouterr()
+    assert "utopic run: expected a value after -m/--model" in captured.err
+
+
 def test_cli_ensure_setup_rebuilds_stale_native_cache(monkeypatch):
     calls = []
 
