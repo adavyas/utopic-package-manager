@@ -206,15 +206,31 @@ function download(url: string, destination: string): Promise<string> {
   if (fs.existsSync(partial)) fs.unlinkSync(partial);
 
   return new Promise((resolve, reject) => {
+    let settled = false;
+    const removePartial = (): void => {
+      if (fs.existsSync(partial)) fs.unlinkSync(partial);
+    };
+    const fail = (error: Error): void => {
+      if (settled) return;
+      settled = true;
+      removePartial();
+      reject(error);
+    };
+    const succeed = (value: string): void => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
+
     const request = https.get(url, (response: http.IncomingMessage) => {
       if (response.statusCode && response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
         response.resume();
-        download(response.headers.location, destination).then(resolve, reject);
+        download(response.headers.location, destination).then(succeed, fail);
         return;
       }
       if (response.statusCode !== 200) {
         response.resume();
-        reject(new Error(`HTTP ${response.statusCode}`));
+        fail(new Error(`HTTP ${response.statusCode}`));
         return;
       }
       const total = Number(response.headers["content-length"] ?? "0");
@@ -229,15 +245,25 @@ function download(url: string, destination: string): Promise<string> {
       });
       response.pipe(out);
       out.on("finish", () => {
-        out.close(() => {
+        out.close((error) => {
+          if (error) {
+            fail(error);
+            return;
+          }
           if (total) process.stdout.write("\n");
-          fs.renameSync(partial, destination);
-          resolve(destination);
+          try {
+            fs.renameSync(partial, destination);
+            succeed(destination);
+          } catch (renameError) {
+            fail(renameError as Error);
+          }
         });
       });
-      out.on("error", reject);
+      response.on("error", fail);
+      response.on("aborted", () => fail(new Error("download aborted")));
+      out.on("error", fail);
     });
-    request.on("error", reject);
+    request.on("error", fail);
   });
 }
 

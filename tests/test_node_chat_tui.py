@@ -2,6 +2,7 @@ import json
 import os
 import shutil
 import subprocess
+import ssl
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -48,6 +49,21 @@ class FakeOpenAIServer(BaseHTTPRequestHandler):
         self.send_header("content-length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def log_message(self, *_args):
+        return
+
+
+class BrokenDownloadServer(BaseHTTPRequestHandler):
+    def do_GET(self):
+        body = b"partial gguf"
+        self.send_response(200)
+        self.send_header("content-type", "application/octet-stream")
+        self.send_header("content-length", str(len(body) + 1024))
+        self.end_headers()
+        self.wfile.write(body)
+        self.wfile.flush()
+        self.connection.close()
 
     def log_message(self, *_args):
         return
@@ -144,6 +160,92 @@ def test_bundled_chat_accepts_openai_compatible_server_url(fake_openai_server):
     ]
 
 
+def test_bundled_chat_removes_partial_model_after_download_failure(tmp_path):
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not installed")
+    openssl = shutil.which("openssl")
+    if openssl is None:
+        pytest.skip("openssl is not installed")
+
+    cert = tmp_path / "cert.pem"
+    key = tmp_path / "key.pem"
+    subprocess.run(
+        [
+            openssl,
+            "req",
+            "-x509",
+            "-newkey",
+            "rsa:2048",
+            "-nodes",
+            "-keyout",
+            str(key),
+            "-out",
+            str(cert),
+            "-subj",
+            "/CN=127.0.0.1",
+            "-addext",
+            "subjectAltName=IP:127.0.0.1",
+            "-days",
+            "1",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    try:
+        server = ThreadingHTTPServer(("127.0.0.1", 0), BrokenDownloadServer)
+    except PermissionError as exc:
+        pytest.skip(f"localhost bind is unavailable in this environment: {exc}")
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.load_cert_chain(cert, key)
+    server.socket = context.wrap_socket(server.socket, server_side=True)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        models_dir = tmp_path / "models"
+        catalog = tmp_path / "models.json"
+        catalog.write_text(
+            json.dumps(
+                [
+                    {
+                        "id": "broken",
+                        "name": "Broken",
+                        "family": "test",
+                        "filename": "broken.gguf",
+                        "url": f"https://127.0.0.1:{server.server_port}/broken.gguf",
+                        "size": "1 KiB",
+                        "recommended": True,
+                        "description": "Broken test download",
+                    }
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        completed = subprocess.run(
+            [node, str(CHAT_SCRIPT), "broken"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            env={
+                **os.environ,
+                "NODE_TLS_REJECT_UNAUTHORIZED": "0",
+                "UTOPIC_MODELS_CATALOG": str(catalog),
+                "UTOPIC_MODELS_DIR": str(models_dir),
+            },
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+    assert completed.returncode == 1
+    assert not (models_dir / "broken.gguf.partial").exists()
+    assert not (models_dir / "broken.gguf").exists()
+
+
 def test_bundled_chat_waits_for_started_server_to_exit(tmp_path):
     node = shutil.which("node")
     if node is None:
@@ -202,8 +304,10 @@ process.on("SIGTERM", () => {{
     fake_server.chmod(0o755)
     try:
         port_server = ThreadingHTTPServer(("127.0.0.1", 0), BaseHTTPRequestHandler)
+    except PermissionError as exc:
+        pytest.skip(f"localhost bind is unavailable in this environment: {exc}")
+    else:
         port = port_server.server_port
-    finally:
         port_server.server_close()
 
     completed = subprocess.run(
