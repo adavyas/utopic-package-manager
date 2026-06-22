@@ -102,7 +102,10 @@ def _validate_value_args(argv: Sequence[str]) -> None:
                 raise RuntimeError(f"expected a value after {label}")
 
         for flag, label in LONG_VALUE_FLAGS.items():
-            if arg == f"{flag}=":
+            if not arg.startswith(f"{flag}="):
+                continue
+            value = arg.split("=", 1)[1]
+            if value == "" or value.startswith("-"):
                 raise RuntimeError(f"expected a value after {label}")
 
 

@@ -44,8 +44,10 @@ def _validate_run_value_flags(args: Sequence[str]) -> None:
                 or args[index + 1].startswith("-")
             ):
                 raise RuntimeError("expected a value after -m/--model")
-        if arg == "--model=":
-            raise RuntimeError("expected a value after -m/--model")
+        if arg.startswith("--model="):
+            value = arg.split("=", 1)[1]
+            if value == "" or value.startswith("-"):
+                raise RuntimeError("expected a value after -m/--model")
         if arg in _RUN_VALUE_FLAGS:
             if index + 1 >= len(args):
                 raise RuntimeError(f"expected a value after {arg}")
