@@ -607,7 +607,7 @@ def setup(argv: Optional[Sequence[str]] = None) -> int:
     native_dir = Path(args.native_dir).expanduser() if args.native_dir else default_native_dir()
 
     if args.force:
-        for cache_path in (bin_dir(), build_root()):
+        for cache_path in (bin_dir(), build_root(), llama_dir / "build"):
             if cache_path.exists():
                 _remove_path(cache_path, dry_run=dry_run)
 

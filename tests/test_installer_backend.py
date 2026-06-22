@@ -391,9 +391,9 @@ def test_setup_rejects_invalid_jobs_environment_cleanly(monkeypatch, capsys):
 def test_setup_force_clears_stale_build_cache_before_rebuild(monkeypatch, tmp_path):
     bin_dir = tmp_path / "bin"
     build_root = tmp_path / "build"
-    stale_build_file = build_root / "utopic" / "stale-object.o"
-    stale_llama_file = build_root / "llama.cpp" / "stale-object.o"
     llama_dir = tmp_path / "src" / "llama.cpp"
+    stale_build_file = build_root / "utopic" / "stale-object.o"
+    stale_llama_file = llama_dir / "build" / "stale-object.o"
     native_dir = tmp_path / "site" / "utopic" / "native"
     decision = installer.BackendDecision(
         backend="cpu",
