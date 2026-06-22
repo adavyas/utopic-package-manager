@@ -451,6 +451,10 @@ def main(argv: Optional[Sequence[str]] = None) -> Optional[int]:
     if command == "run":
         return _run(rest)
 
+    if not command.startswith("-"):
+        print(f"utopic: unknown command: {command}", file=sys.stderr)
+        return 1
+
     _ensure_setup(True)
     _native.main("utopic", args)
     return 0

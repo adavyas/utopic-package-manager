@@ -216,6 +216,17 @@ def test_cli_version_does_not_run_setup_or_native(monkeypatch, capsys):
     assert captured.err == ""
 
 
+def test_cli_rejects_unknown_command_before_setup(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "_ensure_setup", lambda enabled=True, binary_name="utopic": pytest.fail("should not run setup"))
+    monkeypatch.setattr(cli._native, "main", lambda name, argv: pytest.fail("should not launch native binary"))
+
+    assert cli.main(["chaat"]) == 1
+
+    captured = capsys.readouterr()
+    assert "utopic: unknown command: chaat" in captured.err
+    assert "Traceback" not in captured.err
+
+
 def test_cli_run_with_prompt_delegates_to_native_one_shot(monkeypatch):
     calls = []
 
