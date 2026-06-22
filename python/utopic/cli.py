@@ -48,6 +48,38 @@ _PROMPT_NUMBER_FLAGS = {
     "--confidence": (None, None, "a number"),
 }
 _MODEL_VALUE_FLAGS = {"-m", "--model"}
+_LEGACY_NATIVE_VALUE_FLAGS = {
+    "-m",
+    "-p",
+    "-n",
+    "--temp",
+    "--seed",
+    "--system",
+    "--tools",
+    "--schema",
+    "--confidence",
+    "--converge",
+    "--steps",
+    "--diffusion-block-length",
+    "--canvas",
+    "--eb-steps",
+    "--slot-len",
+    "-ngl",
+}
+_LEGACY_NATIVE_NUMERIC_VALUE_FLAGS = {
+    "-n",
+    "--temp",
+    "--seed",
+    "--confidence",
+    "--converge",
+    "--steps",
+    "--diffusion-block-length",
+    "--canvas",
+    "--eb-steps",
+    "--slot-len",
+    "-ngl",
+}
+_LEGACY_NATIVE_BOOLEAN_FLAGS = {"--reasoning", "--soft-schema"}
 
 
 def _ensure_setup(enabled: bool = True, binary_name: str = "utopic") -> None:
@@ -159,6 +191,30 @@ def _validate_server_options(args: Sequence[str]) -> None:
             index += 1
             continue
         if any(arg.startswith(flag + "=") for flag in _RUN_VALUE_FLAGS if flag.startswith("--")):
+            index += 1
+            continue
+        if arg.startswith("-"):
+            raise RuntimeError(f"unknown option: {arg}")
+        index += 1
+
+
+def _validate_legacy_native_options(args: Sequence[str]) -> None:
+    index = 0
+    while index < len(args):
+        arg = args[index]
+        if arg in _LEGACY_NATIVE_VALUE_FLAGS:
+            if index + 1 >= len(args):
+                raise RuntimeError(f"expected a value after {arg}")
+            value = args[index + 1]
+            allow_negative = arg in _LEGACY_NATIVE_NUMERIC_VALUE_FLAGS
+            if value == "" or (
+                value.startswith("-")
+                and not (allow_negative and _looks_like_negative_number(value))
+            ):
+                raise RuntimeError(f"expected a value after {arg}")
+            index += 2
+            continue
+        if arg in _LEGACY_NATIVE_BOOLEAN_FLAGS:
             index += 1
             continue
         if arg.startswith("-"):
@@ -459,6 +515,12 @@ def main(argv: Optional[Sequence[str]] = None) -> Optional[int]:
 
     if not command.startswith("-"):
         print(f"utopic: unknown command: {command}", file=sys.stderr)
+        return 1
+
+    try:
+        _validate_legacy_native_options(args)
+    except RuntimeError as exc:
+        print(f"utopic: {exc}", file=sys.stderr)
         return 1
 
     _ensure_setup(True)

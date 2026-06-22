@@ -269,6 +269,51 @@ def test_cli_rejects_unknown_command_before_setup(monkeypatch, capsys):
     assert "Traceback" not in captured.err
 
 
+def test_cli_rejects_unknown_top_level_options_before_setup(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "_ensure_setup", lambda enabled=True, binary_name="utopic": pytest.fail("should not run setup"))
+    monkeypatch.setattr(cli._native, "main", lambda name, argv: pytest.fail("should not launch native binary"))
+
+    assert cli.main(["--bogus"]) == 1
+
+    captured = capsys.readouterr()
+    assert "utopic: unknown option: --bogus" in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_cli_keeps_legacy_top_level_native_shortcut(monkeypatch):
+    calls = []
+
+    monkeypatch.setattr(cli, "_ensure_setup", lambda enabled=True, binary_name="utopic": calls.append(("setup", enabled, binary_name)))
+    monkeypatch.setattr(cli._native, "main", lambda name, argv: calls.append((name, list(argv))))
+
+    assert cli.main(["-m", "model.gguf", "-p", "hello", "-n", "8"]) == 0
+
+    assert calls == [
+        ("setup", True, "utopic"),
+        ("utopic", ["-m", "model.gguf", "-p", "hello", "-n", "8"]),
+    ]
+
+
+def test_cli_rejects_missing_top_level_model_value_before_setup(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "_ensure_setup", lambda enabled=True, binary_name="utopic": pytest.fail("should not run setup"))
+    monkeypatch.setattr(cli._native, "main", lambda name, argv: pytest.fail("should not launch native binary"))
+
+    assert cli.main(["-m", "-1", "-p", "hello"]) == 1
+
+    captured = capsys.readouterr()
+    assert "utopic: expected a value after -m" in captured.err
+
+
+def test_cli_rejects_top_level_equals_options_before_setup(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "_ensure_setup", lambda enabled=True, binary_name="utopic": pytest.fail("should not run setup"))
+    monkeypatch.setattr(cli._native, "main", lambda name, argv: pytest.fail("should not launch native binary"))
+
+    assert cli.main(["-m", "model.gguf", "-p", "hello", "--temp=0"]) == 1
+
+    captured = capsys.readouterr()
+    assert "utopic: unknown option: --temp=0" in captured.err
+
+
 def test_models_version_does_not_read_catalog(monkeypatch, capsys):
     monkeypatch.setattr(models, "list_models", lambda: pytest.fail("version should not read model catalog"))
 
