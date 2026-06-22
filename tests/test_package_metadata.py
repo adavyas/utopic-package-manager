@@ -152,6 +152,11 @@ def test_ci_workflow_runs_on_commits_without_publishing():
     assert '"utopic",' in workflow
     assert '["setup", "--backend", "cpu", "--dry-run", "--jobs", "1"]' in workflow
     assert "Installed Node-free chat fallback smoke failed" in workflow
+    assert "Installed stale-Node chat fallback smoke failed" in workflow
+    assert "fake-node-bin" in workflow
+    assert "v16.20.2" in workflow
+    assert "stale-node fallback ok" in workflow
+    assert "Node.js 18 or newer is required; found v16.20.2; using the built-in Python chat fallback." in workflow
     assert 'utopic_server = bin_dir / ("utopic-server.exe" if os.name == "nt" else "utopic-server")' in workflow
     assert '[str(utopic), "setup", "--version"]' in workflow
     assert '[str(utopic), "models", "--version"]' in workflow
@@ -173,7 +178,12 @@ def test_release_workflow_smokes_installed_node_free_chat_fallback():
     assert "Installed Node-free chat fallback smoke failed" in workflow
     assert 'PATH=""' in workflow
     assert "node-free fallback ok" in workflow
+    assert "Installed stale-Node chat fallback smoke failed" in workflow
+    assert "fake-node-bin" in workflow
+    assert "v16.20.2" in workflow
+    assert "stale-node fallback ok" in workflow
     assert "utopic chat: Node.js was not found; using the built-in Python chat fallback." in workflow
+    assert "Node.js 18 or newer is required; found v16.20.2; using the built-in Python chat fallback." in workflow
 
 
 def test_readme_distinguishes_server_mode_from_chat_mode():
