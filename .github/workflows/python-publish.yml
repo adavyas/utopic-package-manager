@@ -125,7 +125,11 @@ jobs:
                   venv.EnvBuilder(with_pip=True).create(venv_dir)
 
                   python = venv_dir / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-                  utopic = venv_dir / ("Scripts/utopic.exe" if os.name == "nt" else "bin/utopic")
+                  bin_dir = venv_dir / ("Scripts" if os.name == "nt" else "bin")
+                  utopic = bin_dir / ("utopic.exe" if os.name == "nt" else "utopic")
+                  utopic_server = bin_dir / ("utopic-server.exe" if os.name == "nt" else "utopic-server")
+                  utopic_mcp = bin_dir / ("utopic-mcp.exe" if os.name == "nt" else "utopic-mcp")
+                  utopic_acp = bin_dir / ("utopic-acp.exe" if os.name == "nt" else "utopic-acp")
 
                   subprocess.run([str(python), "-m", "pip", "install", str(artifact)], check=True)
 
@@ -133,10 +137,23 @@ jobs:
                   commands = [
                       [str(utopic), "--help"],
                       [str(utopic), "--version"],
+                      [str(utopic), "setup", "--version"],
                       [str(utopic), "chat", "--help"],
+                      [str(utopic), "chat", "--version"],
+                      [str(utopic), "models", "--version"],
                       [str(utopic), "models", "list"],
+                      [str(utopic), "run", "--help"],
+                      [str(utopic), "run", "--no-setup", "--help"],
+                      [str(utopic), "run", "--version"],
+                      [str(utopic), "run", "--no-setup", "--version"],
                       [str(utopic), "run", "--no-setup"],
                       [str(utopic), "setup", "--dry-run"],
+                      [str(utopic_server), "--help"],
+                      [str(utopic_server), "--version"],
+                      [str(utopic_mcp), "--help"],
+                      [str(utopic_mcp), "--version"],
+                      [str(utopic_acp), "--help"],
+                      [str(utopic_acp), "--version"],
                   ]
 
                   for command in commands:
