@@ -3,6 +3,7 @@ import json
 import os
 import shutil
 import sys
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
@@ -42,6 +43,14 @@ def _safe_model_filename(entry: ModelEntry) -> str:
     ):
         raise RuntimeError(f"unsafe model filename for '{entry.id}': {filename}")
     return filename
+
+
+def _validate_model_url(entry: ModelEntry) -> None:
+    parsed = urllib.parse.urlsplit(entry.url)
+    if parsed.scheme not in {"http", "https"}:
+        raise RuntimeError(f"unsupported model URL protocol for '{entry.id}': {parsed.scheme or '<missing>'}")
+    if not parsed.netloc:
+        raise RuntimeError(f"model URL for '{entry.id}' must include a host")
 
 
 def models_dir() -> Path:
@@ -114,6 +123,7 @@ def pull_model(model_id: str, *, force: bool = False) -> Path:
     if destination.exists() and destination.stat().st_size > 0 and not force:
         return destination
 
+    _validate_model_url(entry)
     destination.parent.mkdir(parents=True, exist_ok=True)
     tmp = destination.with_suffix(destination.suffix + ".partial")
     if tmp.exists():

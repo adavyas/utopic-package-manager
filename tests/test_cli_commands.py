@@ -804,6 +804,68 @@ def test_model_pull_rejects_catalog_filename_outside_models_dir(monkeypatch, tmp
     assert not (models_dir / "escape.gguf.partial").exists()
 
 
+def test_model_pull_rejects_non_http_catalog_url(monkeypatch, tmp_path):
+    source = tmp_path / "source.gguf"
+    source.write_bytes(b"local file should not be copied")
+    catalog = tmp_path / "models.json"
+    models_dir = tmp_path / "models"
+    catalog.write_text(
+        f"""
+[
+  {{
+    "id": "local-file",
+    "name": "Local File",
+    "family": "test",
+    "filename": "local-file.gguf",
+    "url": "{source.as_uri()}",
+    "size": "1 B",
+    "recommended": true,
+    "description": "Unsafe local file URL"
+  }}
+]
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("UTOPIC_MODELS_CATALOG", str(catalog))
+    monkeypatch.setenv("UTOPIC_MODELS_DIR", str(models_dir))
+
+    with pytest.raises(RuntimeError, match="unsupported model URL protocol"):
+        models.pull_model("local-file")
+
+    assert not (models_dir / "local-file.gguf").exists()
+    assert not (models_dir / "local-file.gguf.partial").exists()
+
+
+def test_model_pull_rejects_catalog_url_without_host(monkeypatch, tmp_path):
+    catalog = tmp_path / "models.json"
+    models_dir = tmp_path / "models"
+    catalog.write_text(
+        """
+[
+  {
+    "id": "missing-host",
+    "name": "Missing Host",
+    "family": "test",
+    "filename": "missing-host.gguf",
+    "url": "https:///missing-host.gguf",
+    "size": "1 B",
+    "recommended": true,
+    "description": "Malformed URL"
+  }
+]
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("UTOPIC_MODELS_CATALOG", str(catalog))
+    monkeypatch.setenv("UTOPIC_MODELS_DIR", str(models_dir))
+
+    with pytest.raises(RuntimeError, match="must include a host"):
+        models.pull_model("missing-host")
+
+    assert not (models_dir / "missing-host.gguf").exists()
+    assert not (models_dir / "missing-host.gguf.partial").exists()
+
+
 def test_model_pull_redownloads_zero_byte_cached_model(monkeypatch, tmp_path):
     catalog = tmp_path / "models.json"
     model_file = tmp_path / "models" / "example.gguf"
