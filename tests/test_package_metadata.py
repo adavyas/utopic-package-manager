@@ -186,6 +186,23 @@ def test_release_workflow_smokes_installed_node_free_chat_fallback():
     assert "Node.js 18 or newer is required; found v16.20.2; using the built-in Python chat fallback." in workflow
 
 
+def test_workflows_smoke_installed_openai_v1_server_base_url():
+    workflows = [
+        REPO_ROOT / ".github" / "workflows" / "ci.yml",
+        REPO_ROOT / ".github" / "workflows" / "python-publish.yml",
+    ]
+
+    for workflow_path in workflows:
+        workflow = workflow_path.read_text(encoding="utf-8")
+        assert "Installed OpenAI /v1 server-base chat smoke failed" in workflow
+        assert '"chat",' in workflow
+        assert '"--server",' in workflow
+        assert 'f"http://127.0.0.1:{server.server_port}/v1"' in workflow
+        assert 'self.path != "/health"' in workflow
+        assert 'self.path != "/v1/chat/completions"' in workflow
+        assert "openai-v1 server-base ok" in workflow
+
+
 def test_readme_distinguishes_server_mode_from_chat_mode():
     readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
 
