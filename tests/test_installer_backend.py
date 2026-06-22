@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from utopic import installer
 
 
@@ -265,3 +267,54 @@ def test_setup_writes_install_metadata_after_success(monkeypatch, tmp_path):
     assert metadata["requested_backend"] == "cpu"
     assert metadata["llama_dir"] == str(installer._normalize_path(llama_dir))
     assert metadata["native_dir"] == str(installer._normalize_path(native_dir))
+
+
+def test_setup_jobs_argument_overrides_invalid_environment(monkeypatch, tmp_path):
+    llama_dir = tmp_path / "src" / "llama.cpp"
+    native_dir = tmp_path / "site" / "utopic" / "native"
+    observed_jobs = []
+    decision = installer.BackendDecision(
+        backend="cpu",
+        reason="Requested by --backend cpu",
+        device="CPU",
+    )
+
+    monkeypatch.setenv("UTOPIC_BUILD_JOBS", "fast")
+    monkeypatch.setattr(installer, "_resolve_backend", lambda requested, arch: decision)
+    monkeypatch.setattr(installer, "_print_backend_decision", lambda decision, requested: None)
+    monkeypatch.setattr(
+        installer,
+        "_build_llama",
+        lambda *args, **kwargs: observed_jobs.append(("llama", kwargs["jobs"])),
+    )
+    monkeypatch.setattr(
+        installer,
+        "_build_utopic",
+        lambda *args, **kwargs: observed_jobs.append(("utopic", kwargs["jobs"])) or tmp_path / "build" / "utopic",
+    )
+
+    assert installer.setup(
+        [
+            "--dry-run",
+            "--backend",
+            "cpu",
+            "--jobs",
+            "2",
+            "--llama-dir",
+            str(llama_dir),
+            "--native-dir",
+            str(native_dir),
+        ]
+    ) == 0
+
+    assert observed_jobs == [("llama", 2), ("utopic", 2)]
+
+
+def test_setup_rejects_invalid_jobs_environment_cleanly(monkeypatch, capsys):
+    monkeypatch.setenv("UTOPIC_BUILD_JOBS", "fast")
+
+    with pytest.raises(SystemExit) as exc_info:
+        installer.setup(["--dry-run"])
+
+    assert exc_info.value.code == 2
+    assert "UTOPIC_BUILD_JOBS must be a positive integer" in capsys.readouterr().err

@@ -63,6 +63,17 @@ def _positive_int(value: str) -> int:
     return parsed
 
 
+def _environment_build_jobs(parser: argparse.ArgumentParser) -> Optional[int]:
+    value = os.environ.get("UTOPIC_BUILD_JOBS")
+    if not value:
+        return None
+    try:
+        return _positive_int(value)
+    except (argparse.ArgumentTypeError, ValueError):
+        parser.error("UTOPIC_BUILD_JOBS must be a positive integer")
+    return None
+
+
 def cache_root() -> Path:
     configured = os.environ.get("UTOPIC_HOME")
     if configured:
@@ -550,7 +561,7 @@ def setup(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument(
         "--jobs",
         type=_positive_int,
-        default=int(os.environ["UTOPIC_BUILD_JOBS"]) if os.environ.get("UTOPIC_BUILD_JOBS") else None,
+        default=None,
         help="Limit native build parallelism when disk or temporary space is constrained.",
     )
     parser.add_argument("--llama-dir", help=argparse.SUPPRESS)
@@ -561,6 +572,8 @@ def setup(argv: Optional[Sequence[str]] = None) -> int:
         help=argparse.SUPPRESS,
     )
     args = parser.parse_args(list(argv) if argv is not None else None)
+    if args.jobs is None:
+        args.jobs = _environment_build_jobs(parser)
 
     dry_run = bool(args.dry_run)
     requested_backend = "cuda" if args.cuda else args.backend
