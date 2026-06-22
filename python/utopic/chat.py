@@ -111,6 +111,8 @@ def _validate_server_url_arg(args: Sequence[str]) -> None:
     server = _value_after(args, "--server", "")
     if not server:
         return
+    if "://" not in server:
+        raise RuntimeError("--server must be a URL")
     try:
         parsed = urllib.parse.urlsplit(server)
     except ValueError as exc:
