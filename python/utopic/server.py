@@ -1,5 +1,6 @@
 import sys
 
+from . import __version__
 from ._native import main as _main
 
 
@@ -20,6 +21,9 @@ Run `utopic setup` first if the native runtime is not installed.
 
 
 def main() -> int:
+    if any(arg == "--version" for arg in sys.argv[1:]):
+        print(f"utopic-server {__version__}")
+        return 0
     if any(arg in ("-h", "--help") for arg in sys.argv[1:]):
         print(HELP)
         return 0

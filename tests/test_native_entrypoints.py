@@ -1,6 +1,39 @@
 from utopic import acp, mcp, server
 
 
+def test_server_entrypoint_version_does_not_require_native_binary(monkeypatch, capsys):
+    monkeypatch.setattr(server.sys, "argv", ["utopic-server", "--version"])
+    monkeypatch.setattr(server, "_main", lambda binary_name: (_ for _ in ()).throw(AssertionError("should not launch native binary")))
+
+    assert server.main() == 0
+
+    captured = capsys.readouterr()
+    assert captured.out.startswith("utopic-server ")
+    assert captured.err == ""
+
+
+def test_mcp_entrypoint_version_does_not_require_native_binary(monkeypatch, capsys):
+    monkeypatch.setattr(mcp.sys, "argv", ["utopic-mcp", "--version"])
+    monkeypatch.setattr(mcp, "_main", lambda binary_name: (_ for _ in ()).throw(AssertionError("should not launch native binary")))
+
+    assert mcp.main() == 0
+
+    captured = capsys.readouterr()
+    assert captured.out.startswith("utopic-mcp ")
+    assert captured.err == ""
+
+
+def test_acp_entrypoint_version_does_not_require_native_binary(monkeypatch, capsys):
+    monkeypatch.setattr(acp.sys, "argv", ["utopic-acp", "--version"])
+    monkeypatch.setattr(acp, "_main", lambda binary_name: (_ for _ in ()).throw(AssertionError("should not launch native binary")))
+
+    assert acp.main() == 0
+
+    captured = capsys.readouterr()
+    assert captured.out.startswith("utopic-acp ")
+    assert captured.err == ""
+
+
 def test_server_entrypoint_help_does_not_require_native_binary(monkeypatch, capsys):
     monkeypatch.setattr(server.sys, "argv", ["utopic-server", "--help"])
     monkeypatch.setattr(server, "_main", lambda binary_name: (_ for _ in ()).throw(AssertionError("should not launch native binary")))

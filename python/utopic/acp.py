@@ -1,5 +1,6 @@
 import sys
 
+from . import __version__
 from ._native import main as _main
 
 
@@ -14,6 +15,9 @@ integrations that need the native protocol server directly.
 
 
 def main() -> int:
+    if any(arg == "--version" for arg in sys.argv[1:]):
+        print(f"utopic-acp {__version__}")
+        return 0
     if any(arg in ("-h", "--help") for arg in sys.argv[1:]):
         print(HELP)
         return 0
