@@ -137,9 +137,20 @@ def test_ci_workflow_runs_on_commits_without_publishing():
     assert "pull_request:" in workflow
     assert "PYTHONPATH=python pytest tests -q" in workflow
     assert "npm run check:chat" in workflow
+    assert "python -m pip install --upgrade build pytest twine uv" in workflow
     assert "python -m build" in workflow
     assert "python -m twine check dist/*" in workflow
     assert "Smoke test built distributions" in workflow
+    assert "Smoke test uv tool install" in workflow
+    assert "UV_TOOL_DIR" in workflow
+    assert '"uv",' in workflow
+    assert '"tool",' in workflow
+    assert '"install",' in workflow
+    assert '"--no-index",' in workflow
+    assert '"--find-links",' in workflow
+    assert '"dist",' in workflow
+    assert '"utopic",' in workflow
+    assert '["setup", "--backend", "cpu", "--dry-run", "--jobs", "1"]' in workflow
     assert "Installed Node-free chat fallback smoke failed" in workflow
     assert 'utopic_server = bin_dir / ("utopic-server.exe" if os.name == "nt" else "utopic-server")' in workflow
     assert '[str(utopic), "setup", "--version"]' in workflow
