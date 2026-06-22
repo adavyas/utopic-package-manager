@@ -731,6 +731,7 @@ def reserve_local_port():
 
 
 def write_fake_chat_server(node, bin_dir):
+    bin_dir.mkdir(parents=True, exist_ok=True)
     fake_server = bin_dir / "utopic_server"
     fake_server.write_text(
         f"""#!{node}
