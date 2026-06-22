@@ -145,23 +145,27 @@ function parseArgs(argv) {
         options.model = positional[0];
     return options;
 }
+function configuredPath(name, fallback) {
+    const value = process.env[name];
+    return value ? resolveLocalPath(value) : fallback;
+}
 function catalogPath() {
-    return process.env.UTOPIC_MODELS_CATALOG ?? path.resolve(__dirname, "..", "models.json");
+    return configuredPath("UTOPIC_MODELS_CATALOG", path.resolve(__dirname, "..", "models.json"));
 }
 function cacheRoot() {
-    return process.env.UTOPIC_HOME ?? path.join(os.homedir(), ".cache", "utopic");
+    return configuredPath("UTOPIC_HOME", path.join(os.homedir(), ".cache", "utopic"));
 }
 function modelsDir() {
-    return process.env.UTOPIC_MODELS_DIR ?? path.join(cacheRoot(), "models");
+    return configuredPath("UTOPIC_MODELS_DIR", path.join(cacheRoot(), "models"));
 }
 function binDir() {
-    return process.env.UTOPIC_BIN_DIR ?? path.join(cacheRoot(), "bin");
+    return configuredPath("UTOPIC_BIN_DIR", path.join(cacheRoot(), "bin"));
 }
 function serverBinary() {
     return path.join(binDir(), process.platform === "win32" ? "utopic_server.exe" : "utopic_server");
 }
 function serverLogPath() {
-    return process.env.UTOPIC_SERVER_LOG ?? path.join(cacheRoot(), "utopic-server.log");
+    return configuredPath("UTOPIC_SERVER_LOG", path.join(cacheRoot(), "utopic-server.log"));
 }
 function clientHost(host) {
     return host === "0.0.0.0" || host === "::" || host === "" ? "127.0.0.1" : host;

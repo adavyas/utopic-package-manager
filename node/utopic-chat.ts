@@ -152,20 +152,25 @@ function parseArgs(argv: string[]): ChatOptions {
   return options;
 }
 
+function configuredPath(name: string, fallback: string): string {
+  const value = process.env[name];
+  return value ? resolveLocalPath(value) : fallback;
+}
+
 function catalogPath(): string {
-  return process.env.UTOPIC_MODELS_CATALOG ?? path.resolve(__dirname, "..", "models.json");
+  return configuredPath("UTOPIC_MODELS_CATALOG", path.resolve(__dirname, "..", "models.json"));
 }
 
 function cacheRoot(): string {
-  return process.env.UTOPIC_HOME ?? path.join(os.homedir(), ".cache", "utopic");
+  return configuredPath("UTOPIC_HOME", path.join(os.homedir(), ".cache", "utopic"));
 }
 
 function modelsDir(): string {
-  return process.env.UTOPIC_MODELS_DIR ?? path.join(cacheRoot(), "models");
+  return configuredPath("UTOPIC_MODELS_DIR", path.join(cacheRoot(), "models"));
 }
 
 function binDir(): string {
-  return process.env.UTOPIC_BIN_DIR ?? path.join(cacheRoot(), "bin");
+  return configuredPath("UTOPIC_BIN_DIR", path.join(cacheRoot(), "bin"));
 }
 
 function serverBinary(): string {
@@ -173,7 +178,7 @@ function serverBinary(): string {
 }
 
 function serverLogPath(): string {
-  return process.env.UTOPIC_SERVER_LOG ?? path.join(cacheRoot(), "utopic-server.log");
+  return configuredPath("UTOPIC_SERVER_LOG", path.join(cacheRoot(), "utopic-server.log"));
 }
 
 function clientHost(host: string): string {
