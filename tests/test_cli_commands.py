@@ -6,6 +6,15 @@ import pytest
 from utopic import chat, cli, models
 
 
+@pytest.fixture(autouse=True)
+def _modern_node_version(monkeypatch):
+    monkeypatch.setattr(
+        chat.subprocess,
+        "check_output",
+        lambda command, text, stderr: "v20.0.0\n",
+    )
+
+
 def _stub_server_binary(monkeypatch):
     monkeypatch.setattr(cli._native, "binary_path", lambda name: Path(f"/fake/bin/{name}"))
 
@@ -158,6 +167,24 @@ def test_chat_launch_reports_missing_node_before_setup(monkeypatch):
     monkeypatch.setattr(chat.installer, "setup", lambda argv: setup_calls.append(list(argv)) or 0)
 
     assert chat.launch(["dream-7b-q4"]) == 1
+    assert setup_calls == []
+
+
+def test_chat_launch_reports_unsupported_node_version_before_setup(monkeypatch, tmp_path, capsys):
+    script = tmp_path / "utopic-chat.js"
+    script.write_text("console.log('chat')\n", encoding="utf-8")
+    setup_calls = []
+
+    monkeypatch.setattr(chat, "_chat_script", lambda: script)
+    monkeypatch.setattr(chat.shutil, "which", lambda name: "/usr/bin/node" if name == "node" else None)
+    monkeypatch.setattr(chat.subprocess, "check_output", lambda command, text, stderr: "v16.20.2\n")
+    monkeypatch.setattr(chat.installer, "setup", lambda argv: setup_calls.append(list(argv)) or 0)
+    monkeypatch.setattr(chat.subprocess, "run", lambda command, env, check: pytest.fail("should not launch node"))
+
+    assert chat.launch(["dream-7b-q4"]) == 1
+
+    captured = capsys.readouterr()
+    assert "utopic chat: Node.js 18 or newer is required; found v16.20.2" in captured.err
     assert setup_calls == []
 
 

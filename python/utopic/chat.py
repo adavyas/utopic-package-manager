@@ -43,6 +43,7 @@ INTEGER_VALUE_RULES = {
 NUMBER_VALUE_RULES = {
     "--temperature": (0.0, None, "a non-negative number"),
 }
+MIN_NODE_MAJOR = 18
 
 
 CHAT_HELP = """usage: utopic chat [model-alias|/path/to/model.gguf] [options]
@@ -178,10 +179,45 @@ def _node_command(argv: Sequence[str]) -> list[str]:
         raise RuntimeError(
             "Node.js was not found on PATH. Install Node.js, then rerun `utopic chat`."
         )
+    _ensure_node_version(node)
     script = _chat_script()
     if not script.exists():
         raise RuntimeError(f"Bundled Utopic chat app was not found: {script}")
     return [node, str(script), *argv]
+
+
+def _ensure_node_version(node: str) -> None:
+    try:
+        output = subprocess.check_output(
+            [node, "--version"],
+            text=True,
+            stderr=subprocess.STDOUT,
+        ).strip()
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise RuntimeError(
+            "Could not determine Node.js version. Node.js 18 or newer is required for `utopic chat`."
+        ) from exc
+
+    major = _parse_node_major(output)
+    if major is None:
+        raise RuntimeError(
+            f"Could not determine Node.js version from {output!r}. Node.js 18 or newer is required for `utopic chat`."
+        )
+    if major < MIN_NODE_MAJOR:
+        raise RuntimeError(
+            f"Node.js {MIN_NODE_MAJOR} or newer is required; found {output}"
+        )
+
+
+def _parse_node_major(value: str) -> Optional[int]:
+    version = value.strip()
+    if version.startswith("v"):
+        version = version[1:]
+    major = version.split(".", 1)[0]
+    try:
+        return int(major)
+    except ValueError:
+        return None
 
 
 def _format_command(command: object) -> str:
