@@ -934,6 +934,7 @@ def test_cli_run_prompt_no_setup_checks_binary_before_default_model_download(mon
 
 def test_cli_run_prompt_reports_missing_binary_without_traceback(monkeypatch, capsys):
     monkeypatch.setattr(cli, "_ensure_setup", lambda enabled=True, binary_name="utopic": None)
+    monkeypatch.setattr(cli._native, "binary_path", lambda name: Path("/fake/bin/utopic"))
     monkeypatch.setattr(
         cli._native,
         "main",
