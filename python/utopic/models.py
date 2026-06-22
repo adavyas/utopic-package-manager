@@ -128,7 +128,11 @@ def default_model() -> ModelEntry:
 
 def _copy_stream_with_progress(url: str, destination: Path) -> None:
     with urllib.request.urlopen(url) as response:
-        total = int(response.headers.get("content-length", "0") or "0")
+        content_length = response.headers.get("content-length", "0") or "0"
+        try:
+            total = int(content_length)
+        except ValueError as exc:
+            raise OSError(f"invalid content-length: {content_length}") from exc
         downloaded = 0
         with destination.open("wb") as out:
             while True:

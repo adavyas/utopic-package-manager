@@ -1121,6 +1121,28 @@ def test_model_stream_download_rejects_truncated_content_length(monkeypatch, tmp
     assert destination.read_bytes() == b"partial"
 
 
+def test_model_stream_download_rejects_invalid_content_length(monkeypatch, tmp_path):
+    class InvalidLengthResponse:
+        headers = {"content-length": "not-a-number"}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self, _size):
+            return b""
+
+    destination = tmp_path / "model.gguf.partial"
+    monkeypatch.setattr(models.urllib.request, "urlopen", lambda url: InvalidLengthResponse())
+
+    with pytest.raises(OSError, match="invalid content-length: not-a-number"):
+        models._copy_stream_with_progress("https://example.invalid/model.gguf", destination)
+
+    assert not destination.exists()
+
+
 def test_model_pull_removes_partial_file_on_download_failure(monkeypatch, tmp_path):
     catalog = tmp_path / "models.json"
     models_dir = tmp_path / "models"
