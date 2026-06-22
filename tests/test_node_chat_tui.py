@@ -230,6 +230,31 @@ def test_bundled_chat_rejects_empty_model_values(args):
 
 
 @pytest.mark.parametrize(
+    "args",
+    [
+        ["dream-7b-q4", "llada-8b-q4"],
+        ["-m", "dream-7b-q4", "llada-8b-q4"],
+        ["-m", "dream-7b-q4", "-m", "llada-8b-q4"],
+    ],
+)
+def test_bundled_chat_rejects_extra_model_arguments(args):
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not installed")
+
+    completed = subprocess.run(
+        [node, str(CHAT_SCRIPT), "--server", "http://127.0.0.1:9", *args],
+        input="hi\n/exit\n",
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+
+    assert completed.returncode == 1
+    assert "utopic chat: expected at most one model argument" in completed.stderr
+
+
+@pytest.mark.parametrize(
     ("args", "message"),
     [
         (["--server="], "expected a value after --server"),

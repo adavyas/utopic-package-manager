@@ -117,6 +117,33 @@ def _validate_prompt_value_flags(args: Sequence[str]) -> None:
             _validate_prompt_numeric_flag(flag, value)
 
 
+def _validate_model_argument_count(args: Sequence[str], value_flags: set[str]) -> None:
+    count = 0
+    index = 0
+    while index < len(args):
+        arg = args[index]
+        if arg in _MODEL_VALUE_FLAGS:
+            count += 1
+            index += 2
+            continue
+        if arg.startswith("--model="):
+            count += 1
+            index += 1
+            continue
+        if arg in value_flags:
+            index += 2
+            continue
+        if any(arg.startswith(flag + "=") for flag in value_flags if flag.startswith("--")):
+            index += 1
+            continue
+        if not arg.startswith("-"):
+            count += 1
+        index += 1
+
+    if count > 1:
+        raise RuntimeError("expected at most one model argument")
+
+
 def _looks_like_negative_number(value: str) -> bool:
     return len(value) > 1 and value[0] == "-" and value[1].isdigit()
 
@@ -345,11 +372,13 @@ def _run(argv: Sequence[str]) -> int:
         if _has_prompt(args):
             _validate_prompt_value_flags(args)
             _validate_run_value_flags(args)
+            _validate_model_argument_count(args, _PROMPT_VALUE_FLAGS)
             _ensure_setup(setup_enabled)
             _native.main("utopic", _resolve_prompt_model_args(args))
             return 0
 
         _validate_run_value_flags(args)
+        _validate_model_argument_count(args, _RUN_VALUE_FLAGS)
         model_arg, server_args = _extract_model(args)
         _ensure_setup(setup_enabled, "utopic_server")
         _native.binary_path("utopic_server")

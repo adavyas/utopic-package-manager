@@ -117,6 +117,7 @@ def _validate_numeric_value(flag: str, value: str) -> None:
 
 
 def _validate_value_args(argv: Sequence[str]) -> None:
+    model_args = 0
     for index, arg in enumerate(argv):
         if arg in VALUE_FLAGS:
             label = VALUE_FLAGS[arg]
@@ -130,6 +131,8 @@ def _validate_value_args(argv: Sequence[str]) -> None:
             ):
                 raise RuntimeError(f"expected a value after {label}")
             _validate_numeric_value(arg, value)
+            if arg in ("-m", "--model"):
+                model_args += 1
 
         for flag, label in LONG_VALUE_FLAGS.items():
             if not arg.startswith(f"{flag}="):
@@ -142,6 +145,16 @@ def _validate_value_args(argv: Sequence[str]) -> None:
             ):
                 raise RuntimeError(f"expected a value after {label}")
             _validate_numeric_value(flag, value)
+            if flag == "--model":
+                model_args += 1
+
+        if not arg.startswith("-") and (
+            index == 0 or argv[index - 1] not in VALUE_FLAGS
+        ):
+            model_args += 1
+
+    if model_args > 1:
+        raise RuntimeError("expected at most one model argument")
 
 
 def _node_command(argv: Sequence[str]) -> list[str]:

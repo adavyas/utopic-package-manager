@@ -78,6 +78,7 @@ function parseArgs(argv: string[]): ChatOptions {
     help: false,
   };
   const positional: string[] = [];
+  let modelArgs = 0;
   const valueAfterEquals = (arg: string, flag: string): string => arg.slice(flag.length + 1);
   const looksLikeNegativeNumber = (value: string): boolean => value.length > 1 && value[0] === "-" && /\d/.test(value[1]);
   const requiredValue = (flag: string, value: string, allowNegativeNumber = false): string => {
@@ -116,8 +117,14 @@ function parseArgs(argv: string[]): ChatOptions {
       return requiredValue(flag, argv[i], allowNegativeNumber);
     };
     if (arg === "-h" || arg === "--help") options.help = true;
-    else if (arg === "-m" || arg === "--model") options.model = next("-m/--model");
-    else if (arg.startsWith("--model=")) options.model = requiredValue("-m/--model", valueAfterEquals(arg, "--model"));
+    else if (arg === "-m" || arg === "--model") {
+      modelArgs += 1;
+      options.model = next("-m/--model");
+    }
+    else if (arg.startsWith("--model=")) {
+      modelArgs += 1;
+      options.model = requiredValue("-m/--model", valueAfterEquals(arg, "--model"));
+    }
     else if (arg === "--server") options.server = next("--server");
     else if (arg.startsWith("--server=")) options.server = requiredValue("--server", valueAfterEquals(arg, "--server"));
     else if (arg === "--host") options.host = next("--host");
@@ -135,6 +142,7 @@ function parseArgs(argv: string[]): ChatOptions {
     else if (arg.startsWith("-")) throw new Error(`unknown option: ${arg}`);
     else positional.push(arg);
   }
+  if (modelArgs + positional.length > 1) throw new Error("expected at most one model argument");
   if (!options.model && positional.length > 0) options.model = positional[0];
   return options;
 }

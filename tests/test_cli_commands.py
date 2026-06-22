@@ -125,6 +125,25 @@ def test_chat_launch_reports_missing_node_before_setup(monkeypatch):
 
 
 @pytest.mark.parametrize(
+    "args",
+    [
+        ["dream-7b-q4", "llada-8b-q4"],
+        ["-m", "dream-7b-q4", "llada-8b-q4"],
+        ["-m", "dream-7b-q4", "-m", "llada-8b-q4"],
+    ],
+)
+def test_chat_launch_rejects_extra_model_arguments_before_setup(monkeypatch, capsys, args):
+    monkeypatch.setattr(chat.shutil, "which", lambda name: "/usr/bin/node" if name == "node" else None)
+    monkeypatch.setattr(chat.installer, "setup", lambda argv: pytest.fail("should not run setup"))
+    monkeypatch.setattr(chat.subprocess, "run", lambda command, env, check: pytest.fail("should not launch node"))
+
+    assert chat.launch(args) == 1
+
+    captured = capsys.readouterr()
+    assert "utopic chat: expected at most one model argument" in captured.err
+
+
+@pytest.mark.parametrize(
     ("args", "message"),
     [
         (["--server="], "expected a value after --server"),
@@ -328,6 +347,28 @@ def test_cli_run_prompt_rejects_invalid_numeric_prompt_values_before_setup(monke
 
     captured = capsys.readouterr()
     assert f"utopic run: {message}" in captured.err
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["dream-7b-q4", "llada-8b-q4"],
+        ["-m", "dream-7b-q4", "llada-8b-q4"],
+        ["-m", "dream-7b-q4", "-m", "llada-8b-q4"],
+        ["dream-7b-q4", "llada-8b-q4", "-p", "hi"],
+        ["-m", "dream-7b-q4", "llada-8b-q4", "-p", "hi"],
+        ["-m", "dream-7b-q4", "-m", "llada-8b-q4", "-p", "hi"],
+    ],
+)
+def test_cli_run_rejects_extra_model_arguments_before_setup(monkeypatch, capsys, args):
+    monkeypatch.setattr(cli, "_ensure_setup", lambda enabled=True, binary_name="utopic": pytest.fail("should not run setup"))
+    monkeypatch.setattr(cli.models, "ensure_model", lambda value=None: pytest.fail("should not resolve a model"))
+    monkeypatch.setattr(cli._native, "main", lambda name, argv: pytest.fail("should not run native cli"))
+
+    assert cli.main(["run", *args]) == 1
+
+    captured = capsys.readouterr()
+    assert "utopic run: expected at most one model argument" in captured.err
 
 
 @pytest.mark.parametrize("args", [["--model=-ngl"], ["--model", "-ngl"]])

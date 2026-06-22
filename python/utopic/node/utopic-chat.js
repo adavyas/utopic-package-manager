@@ -50,6 +50,7 @@ function parseArgs(argv) {
         help: false,
     };
     const positional = [];
+    let modelArgs = 0;
     const valueAfterEquals = (arg, flag) => arg.slice(flag.length + 1);
     const looksLikeNegativeNumber = (value) => value.length > 1 && value[0] === "-" && /\d/.test(value[1]);
     const requiredValue = (flag, value, allowNegativeNumber = false) => {
@@ -93,10 +94,14 @@ function parseArgs(argv) {
         };
         if (arg === "-h" || arg === "--help")
             options.help = true;
-        else if (arg === "-m" || arg === "--model")
+        else if (arg === "-m" || arg === "--model") {
+            modelArgs += 1;
             options.model = next("-m/--model");
-        else if (arg.startsWith("--model="))
+        }
+        else if (arg.startsWith("--model=")) {
+            modelArgs += 1;
             options.model = requiredValue("-m/--model", valueAfterEquals(arg, "--model"));
+        }
         else if (arg === "--server")
             options.server = next("--server");
         else if (arg.startsWith("--server="))
@@ -130,6 +135,8 @@ function parseArgs(argv) {
         else
             positional.push(arg);
     }
+    if (modelArgs + positional.length > 1)
+        throw new Error("expected at most one model argument");
     if (!options.model && positional.length > 0)
         options.model = positional[0];
     return options;
