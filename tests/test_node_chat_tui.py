@@ -219,6 +219,41 @@ def test_bundled_chat_rejects_empty_model_values(args):
 
 
 @pytest.mark.parametrize(
+    ("args", "message"),
+    [
+        (["--server="], "expected a value after --server"),
+        (["--server", "--model", "dream-7b-q4"], "expected a value after --server"),
+        (["--host="], "expected a value after --host"),
+        (["--host", "--port", "8910"], "expected a value after --host"),
+        (["--port="], "expected a value after --port"),
+        (["--port", "--host", "127.0.0.1"], "expected a value after --port"),
+        (["-ngl", "--ctx-size", "4096"], "expected a value after -ngl"),
+        (["--ctx-size="], "expected a value after --ctx-size"),
+        (["--ctx-size", "--port", "8910"], "expected a value after --ctx-size"),
+        (["--max-tokens="], "expected a value after --max-tokens"),
+        (["--max-tokens", "--temperature", "0"], "expected a value after --max-tokens"),
+        (["--temperature="], "expected a value after --temperature"),
+        (["--temperature", "--max-tokens", "16"], "expected a value after --temperature"),
+    ],
+)
+def test_bundled_chat_rejects_missing_option_values(args, message):
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not installed")
+
+    completed = subprocess.run(
+        [node, str(CHAT_SCRIPT), *args],
+        input="hi\n/exit\n",
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+
+    assert completed.returncode == 1
+    assert f"utopic chat: {message}" in completed.stderr
+
+
+@pytest.mark.parametrize(
     ("flag", "value"),
     [
         ("--max-tokens", "abc"),

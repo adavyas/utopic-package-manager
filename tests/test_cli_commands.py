@@ -124,6 +124,35 @@ def test_chat_launch_reports_missing_node_before_setup(monkeypatch):
     assert setup_calls == []
 
 
+@pytest.mark.parametrize(
+    ("args", "message"),
+    [
+        (["--server="], "expected a value after --server"),
+        (["--server", "--model", "dream-7b-q4"], "expected a value after --server"),
+        (["--host="], "expected a value after --host"),
+        (["--host", "--port", "8910"], "expected a value after --host"),
+        (["--port="], "expected a value after --port"),
+        (["--port", "--host", "127.0.0.1"], "expected a value after --port"),
+        (["-ngl", "--ctx-size", "4096"], "expected a value after -ngl"),
+        (["--ctx-size="], "expected a value after --ctx-size"),
+        (["--ctx-size", "--port", "8910"], "expected a value after --ctx-size"),
+        (["--max-tokens="], "expected a value after --max-tokens"),
+        (["--max-tokens", "--temperature", "0"], "expected a value after --max-tokens"),
+        (["--temperature="], "expected a value after --temperature"),
+        (["--temperature", "--max-tokens", "16"], "expected a value after --temperature"),
+    ],
+)
+def test_chat_launch_rejects_missing_option_values_before_setup(monkeypatch, capsys, args, message):
+    monkeypatch.setattr(chat.shutil, "which", lambda name: "/usr/bin/node" if name == "node" else None)
+    monkeypatch.setattr(chat.installer, "setup", lambda argv: pytest.fail("should not run setup"))
+    monkeypatch.setattr(chat.subprocess, "run", lambda command, env, check: pytest.fail("should not launch node"))
+
+    assert chat.launch(args) == 1
+
+    captured = capsys.readouterr()
+    assert f"utopic chat: {message}" in captured.err
+
+
 def test_cli_run_with_prompt_delegates_to_native_one_shot(monkeypatch):
     calls = []
 

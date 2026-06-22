@@ -10,6 +10,27 @@ from . import installer, models
 
 PACKAGE_DIR = Path(__file__).resolve().parent
 NODE_CHAT_SCRIPT = PACKAGE_DIR / "node" / "utopic-chat.js"
+VALUE_FLAGS = {
+    "-m": "-m/--model",
+    "--model": "-m/--model",
+    "--server": "--server",
+    "--host": "--host",
+    "--port": "--port",
+    "-ngl": "-ngl",
+    "--ctx-size": "--ctx-size",
+    "--max-tokens": "--max-tokens",
+    "--temperature": "--temperature",
+}
+LONG_VALUE_FLAGS = {
+    "--model": "-m/--model",
+    "--server": "--server",
+    "--host": "--host",
+    "--port": "--port",
+    "--ctx-size": "--ctx-size",
+    "--max-tokens": "--max-tokens",
+    "--temperature": "--temperature",
+}
+NUMERIC_VALUE_FLAGS = {"--port", "-ngl", "--ctx-size", "--max-tokens", "--temperature"}
 
 
 CHAT_HELP = """usage: utopic chat [model-alias|/path/to/model.gguf] [options]
@@ -62,6 +83,29 @@ def _uses_existing_server(argv: Sequence[str]) -> bool:
     return any(arg == "--server" or arg.startswith("--server=") for arg in argv)
 
 
+def _looks_like_negative_number(value: str) -> bool:
+    return len(value) > 1 and value[0] == "-" and value[1].isdigit()
+
+
+def _validate_value_args(argv: Sequence[str]) -> None:
+    for index, arg in enumerate(argv):
+        if arg in VALUE_FLAGS:
+            label = VALUE_FLAGS[arg]
+            if index + 1 >= len(argv):
+                raise RuntimeError(f"expected a value after {label}")
+            value = argv[index + 1]
+            allow_negative = arg in NUMERIC_VALUE_FLAGS
+            if value == "" or (
+                value.startswith("-")
+                and not (allow_negative and _looks_like_negative_number(value))
+            ):
+                raise RuntimeError(f"expected a value after {label}")
+
+        for flag, label in LONG_VALUE_FLAGS.items():
+            if arg == f"{flag}=":
+                raise RuntimeError(f"expected a value after {label}")
+
+
 def _node_command(argv: Sequence[str]) -> list[str]:
     node = shutil.which("node")
     if node is None:
@@ -81,6 +125,7 @@ def launch(argv: Optional[Sequence[str]] = None) -> int:
         return 0
 
     try:
+        _validate_value_args(args)
         command = _node_command(args)
         if _wants_setup(args) and not installer.native_installation_is_current(("utopic_server",)):
             code = installer.setup([])

@@ -51,9 +51,11 @@ function parseArgs(argv) {
     };
     const positional = [];
     const valueAfterEquals = (arg, flag) => arg.slice(flag.length + 1);
-    const requiredValue = (flag, value) => {
-        if (value === "")
+    const looksLikeNegativeNumber = (value) => value.length > 1 && value[0] === "-" && /\d/.test(value[1]);
+    const requiredValue = (flag, value, allowNegativeNumber = false) => {
+        if (value === "" || (value.startsWith("-") && !(allowNegativeNumber && looksLikeNegativeNumber(value)))) {
             throw new Error(`expected a value after ${flag}`);
+        }
         return value;
     };
     const numberValue = (flag, value) => {
@@ -71,44 +73,44 @@ function parseArgs(argv) {
     };
     for (let i = 0; i < argv.length; i += 1) {
         const arg = argv[i];
-        const next = () => {
+        const next = (flag = arg, allowNegativeNumber = false) => {
             if (i + 1 >= argv.length)
                 throw new Error(`expected a value after ${arg}`);
             i += 1;
-            return argv[i];
+            return requiredValue(flag, argv[i], allowNegativeNumber);
         };
         if (arg === "-h" || arg === "--help")
             options.help = true;
         else if (arg === "-m" || arg === "--model")
-            options.model = requiredValue("-m/--model", next());
+            options.model = next("-m/--model");
         else if (arg.startsWith("--model="))
             options.model = requiredValue("-m/--model", valueAfterEquals(arg, "--model"));
         else if (arg === "--server")
-            options.server = next();
+            options.server = next("--server");
         else if (arg.startsWith("--server="))
-            options.server = valueAfterEquals(arg, "--server");
+            options.server = requiredValue("--server", valueAfterEquals(arg, "--server"));
         else if (arg === "--host")
-            options.host = next();
+            options.host = next("--host");
         else if (arg.startsWith("--host="))
-            options.host = valueAfterEquals(arg, "--host");
+            options.host = requiredValue("--host", valueAfterEquals(arg, "--host"));
         else if (arg === "--port")
-            options.port = integerString("--port", next(), 1, 65535, "an integer from 1 to 65535");
+            options.port = integerString("--port", next("--port", true), 1, 65535, "an integer from 1 to 65535");
         else if (arg.startsWith("--port="))
-            options.port = integerString("--port", valueAfterEquals(arg, "--port"), 1, 65535, "an integer from 1 to 65535");
+            options.port = integerString("--port", requiredValue("--port", valueAfterEquals(arg, "--port"), true), 1, 65535, "an integer from 1 to 65535");
         else if (arg === "-ngl")
-            options.ngl = integerString("-ngl", next(), 0, null, "a non-negative integer");
+            options.ngl = integerString("-ngl", next("-ngl", true), 0, null, "a non-negative integer");
         else if (arg === "--ctx-size")
-            options.ctxSize = integerString("--ctx-size", next(), 1, null, "a positive integer");
+            options.ctxSize = integerString("--ctx-size", next("--ctx-size", true), 1, null, "a positive integer");
         else if (arg.startsWith("--ctx-size="))
-            options.ctxSize = integerString("--ctx-size", valueAfterEquals(arg, "--ctx-size"), 1, null, "a positive integer");
+            options.ctxSize = integerString("--ctx-size", requiredValue("--ctx-size", valueAfterEquals(arg, "--ctx-size"), true), 1, null, "a positive integer");
         else if (arg === "--max-tokens")
-            options.maxTokens = numberValue("--max-tokens", next());
+            options.maxTokens = numberValue("--max-tokens", next("--max-tokens", true));
         else if (arg.startsWith("--max-tokens="))
-            options.maxTokens = numberValue("--max-tokens", valueAfterEquals(arg, "--max-tokens"));
+            options.maxTokens = numberValue("--max-tokens", requiredValue("--max-tokens", valueAfterEquals(arg, "--max-tokens"), true));
         else if (arg === "--temperature")
-            options.temperature = numberValue("--temperature", next());
+            options.temperature = numberValue("--temperature", next("--temperature", true));
         else if (arg.startsWith("--temperature="))
-            options.temperature = numberValue("--temperature", valueAfterEquals(arg, "--temperature"));
+            options.temperature = numberValue("--temperature", requiredValue("--temperature", valueAfterEquals(arg, "--temperature"), true));
         else if (arg === "--no-setup")
             continue;
         else if (arg.startsWith("-"))
