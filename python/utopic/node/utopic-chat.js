@@ -229,6 +229,21 @@ function safeModelFilename(entry) {
     }
     return entry.filename;
 }
+function validateModelUrl(entry) {
+    let parsed;
+    try {
+        parsed = new URL(entry.url);
+    }
+    catch {
+        throw new Error(`model URL for '${entry.id}' must be a URL`);
+    }
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+        throw new Error(`unsupported model URL protocol for '${entry.id}': ${parsed.protocol || "<missing>"}`);
+    }
+    if (!parsed.host) {
+        throw new Error(`model URL for '${entry.id}' must include a host`);
+    }
+}
 function localModelPath(entry) {
     return path.join(modelsDir(), safeModelFilename(entry));
 }
@@ -276,6 +291,7 @@ async function resolveModel(value) {
     const destination = localModelPath(entry);
     if (fs.existsSync(destination) && fs.statSync(destination).size > 0)
         return destination;
+    validateModelUrl(entry);
     console.log(`\nPulling ${entry.name} from Hugging Face`);
     console.log(entry.url);
     return download(entry.url, destination);

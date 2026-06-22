@@ -708,6 +708,34 @@ def test_bundled_chat_reports_incomplete_catalog_entry(tmp_path):
     assert "utopic chat: Invalid model catalog entry 0" in completed.stderr
 
 
+def test_bundled_chat_rejects_malformed_model_download_url(tmp_path):
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not installed")
+
+    catalog = tmp_path / "models.json"
+    models_dir = tmp_path / "models"
+    write_catalog(catalog, "bad-url", "bad-url.gguf", "not-a-url")
+
+    completed = subprocess.run(
+        [node, str(CHAT_SCRIPT), "bad-url"],
+        capture_output=True,
+        text=True,
+        timeout=15,
+        env={
+            **os.environ,
+            "UTOPIC_MODELS_CATALOG": str(catalog),
+            "UTOPIC_MODELS_DIR": str(models_dir),
+        },
+    )
+
+    assert completed.returncode == 1
+    assert "utopic chat: model URL for 'bad-url' must be a URL" in completed.stderr
+    assert "Invalid URL" not in completed.stderr
+    assert not (models_dir / "bad-url.gguf").exists()
+    assert not (models_dir / "bad-url.gguf.partial").exists()
+
+
 def test_bundled_chat_downloads_http_model_catalog_entries(tmp_path):
     node = shutil.which("node")
     if node is None:
