@@ -390,7 +390,7 @@ def _format_command(command: object) -> str:
 
 def _run(argv: Sequence[str]) -> int:
     args = list(argv)
-    if args and args[0] in ("-h", "--help"):
+    if any(arg in ("-h", "--help") for arg in args):
         _print_run_help()
         return 0
     if "--version" in args:

@@ -274,6 +274,17 @@ def test_cli_run_version_after_no_setup_does_not_run_setup_or_native(monkeypatch
     assert captured.err == ""
 
 
+def test_cli_run_help_after_no_setup_does_not_run_setup_or_native(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "_ensure_setup", lambda enabled=True, binary_name="utopic": pytest.fail("should not run setup"))
+    monkeypatch.setattr(cli._native, "main", lambda name, argv: pytest.fail("should not launch native binary"))
+
+    assert cli.main(["run", "--no-setup", "--help"]) == 0
+
+    captured = capsys.readouterr()
+    assert "usage: utopic run" in captured.out
+    assert captured.err == ""
+
+
 def test_cli_run_with_prompt_delegates_to_native_one_shot(monkeypatch):
     calls = []
 
