@@ -55,13 +55,14 @@ class FakeOpenAIServer(BaseHTTPRequestHandler):
 
 
 class BrokenDownloadServer(BaseHTTPRequestHandler):
+    body = b"partial gguf"
+
     def do_GET(self):
-        body = b"partial gguf"
         self.send_response(200)
         self.send_header("content-type", "application/octet-stream")
-        self.send_header("content-length", str(len(body) + 1024))
+        self.send_header("content-length", str(len(self.body) + 1024))
         self.end_headers()
-        self.wfile.write(body)
+        self.wfile.write(self.body)
         self.wfile.flush()
         self.connection.close()
 
@@ -461,6 +462,51 @@ def test_bundled_chat_removes_partial_model_after_download_failure(tmp_path):
     assert completed.returncode == 1
     assert not (models_dir / "broken.gguf.partial").exists()
     assert not (models_dir / "broken.gguf").exists()
+
+
+def test_bundled_chat_reports_truncated_model_download(tmp_path):
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not installed")
+
+    try:
+        download_server = ThreadingHTTPServer(("127.0.0.1", 0), BrokenDownloadServer)
+    except PermissionError as exc:
+        pytest.skip(f"localhost bind is unavailable in this environment: {exc}")
+    download_thread = threading.Thread(target=download_server.serve_forever, daemon=True)
+    download_thread.start()
+
+    models_dir = tmp_path / "models"
+    catalog = tmp_path / "models.json"
+    write_catalog(
+        catalog,
+        "truncated-model",
+        "truncated-model.gguf",
+        f"http://127.0.0.1:{download_server.server_port}/model.gguf",
+    )
+
+    try:
+        completed = subprocess.run(
+            [node, str(CHAT_SCRIPT), "truncated-model"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            env={
+                **os.environ,
+                "UTOPIC_MODELS_CATALOG": str(catalog),
+                "UTOPIC_MODELS_DIR": str(models_dir),
+            },
+        )
+    finally:
+        download_server.shutdown()
+        download_server.server_close()
+        download_thread.join(timeout=5)
+
+    assert completed.returncode == 1
+    expected_size = len(BrokenDownloadServer.body) + 1024
+    assert f"utopic chat: downloaded {len(BrokenDownloadServer.body)} of {expected_size} bytes" in completed.stderr
+    assert not (models_dir / "truncated-model.gguf").exists()
+    assert not (models_dir / "truncated-model.gguf.partial").exists()
 
 
 def test_bundled_chat_rejects_empty_model_download(tmp_path):

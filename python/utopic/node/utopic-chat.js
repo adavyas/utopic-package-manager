@@ -278,13 +278,18 @@ function download(url, destination) {
                 fail(new Error(`HTTP ${response.statusCode}`));
                 return;
             }
-            const total = Number(response.headers["content-length"] ?? "0");
+            const contentLength = Array.isArray(response.headers["content-length"])
+                ? response.headers["content-length"][0]
+                : response.headers["content-length"];
+            const total = Number(contentLength ?? "0");
+            const expectedTotal = Number.isFinite(total) && total > 0 ? total : 0;
             let downloaded = 0;
+            const incompleteDownloadError = () => new Error(`downloaded ${downloaded} of ${expectedTotal} bytes`);
             const out = fs.createWriteStream(partial);
             response.on("data", (chunk) => {
                 downloaded += chunk.length;
-                if (total) {
-                    const percent = String(Math.floor((downloaded * 100) / total)).padStart(3, " ");
+                if (expectedTotal) {
+                    const percent = String(Math.floor((downloaded * 100) / expectedTotal)).padStart(3, " ");
                     process.stdout.write(`\rDownloading ${path.basename(destination)}: ${percent}%`);
                 }
             });
@@ -295,11 +300,13 @@ function download(url, destination) {
                         fail(error);
                         return;
                     }
-                    if (total)
+                    if (expectedTotal)
                         process.stdout.write("\n");
                     try {
                         if (downloaded === 0)
                             throw new Error("downloaded 0 bytes");
+                        if (expectedTotal && downloaded !== expectedTotal)
+                            throw incompleteDownloadError();
                         fs.renameSync(partial, destination);
                         succeed(destination);
                     }
@@ -309,7 +316,7 @@ function download(url, destination) {
                 });
             });
             response.on("error", fail);
-            response.on("aborted", () => fail(new Error("download aborted")));
+            response.on("aborted", () => fail(expectedTotal ? incompleteDownloadError() : new Error("download aborted")));
             out.on("error", fail);
         });
         request.on("error", fail);
