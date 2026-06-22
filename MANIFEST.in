@@ -1,0 +1,10 @@
+prune tests
+prune node_modules
+prune .pytest_cache
+prune build
+prune dist
+
+exclude node/utopic-chat.ts
+
+global-exclude __pycache__
+global-exclude *.py[cod]
