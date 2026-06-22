@@ -24,7 +24,7 @@ uv tool upgrade utopic
 ```
 
 If you previously installed an exact pinned version such as
-`uv tool install utopic==0.1.3`, uv keeps that pin during upgrades. Reinstall
+`uv tool install utopic==0.1.4`, uv keeps that pin during upgrades. Reinstall
 the tool without the pin:
 
 ```sh

@@ -51,6 +51,13 @@ def test_release_version_literals_match_package_version():
     assert f'project_version = "{__version__}"' in identity
 
 
+def test_readme_pinned_install_example_matches_package_version():
+    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert f"utopic=={__version__}" in readme
+    assert "utopic==0.1.3" not in readme
+
+
 def test_chat_check_script_rejects_stale_bundled_javascript():
     package_json = json.loads((REPO_ROOT / "package.json").read_text(encoding="utf-8"))
     check_script = package_json["scripts"]["check:chat"]
