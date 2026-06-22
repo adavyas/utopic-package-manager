@@ -252,6 +252,31 @@ def test_native_installation_keeps_auto_metal_cache_without_reprobing(monkeypatc
     assert installer.native_installation_is_current(("utopic_server",)) is True
 
 
+def test_native_installation_keeps_auto_cuda_cache_without_requiring_compiler(monkeypatch, tmp_path):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _write_executable(bin_dir / "utopic_server")
+    decision = installer.BackendDecision(
+        backend="cuda",
+        reason="old",
+        device="CUDA arch 80",
+        cuda_architectures="80",
+    )
+
+    monkeypatch.setattr(installer, "bin_dir", lambda: bin_dir)
+    monkeypatch.setattr(installer, "default_llama_dir", lambda: tmp_path / "src" / "llama.cpp")
+    monkeypatch.setattr(installer, "default_native_dir", lambda: tmp_path / "site" / "utopic" / "native")
+    installer._write_install_metadata(
+        decision,
+        requested_backend="auto",
+        llama_dir=installer.default_llama_dir(),
+        native_dir=installer.default_native_dir(),
+    )
+    monkeypatch.setattr(installer, "_resolve_backend", lambda requested, arch: pytest.fail("should not require CUDA build tools for a CUDA runtime cache"))
+
+    assert installer.native_installation_is_current(("utopic_server",)) is True
+
+
 def test_native_installation_is_not_current_when_explicit_backend_changes(monkeypatch, tmp_path):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()

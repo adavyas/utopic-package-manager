@@ -424,7 +424,7 @@ def native_installation_is_current(binary_names: Sequence[str] = BIN_NAMES) -> b
     if metadata_cuda_architectures is not None and not isinstance(metadata_cuda_architectures, str):
         return False
 
-    if requested_backend != "auto" or metadata_backend != "metal":
+    if requested_backend != "auto" or metadata_backend == "cpu":
         current_decision = _resolve_backend(requested_backend, cuda_architectures)
         if metadata_backend != current_decision.backend:
             return False
