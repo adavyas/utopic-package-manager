@@ -65,3 +65,15 @@ def test_readme_uses_release_build_commands():
     assert "python -m build" in readme
     assert "python -m twine check dist/*" in readme
     assert "python -m pip wheel . --no-deps -w dist/" not in readme
+
+
+def test_release_workflow_smokes_installed_prompt_flag_normalization():
+    workflow = (REPO_ROOT / ".github" / "workflows" / "python-publish.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert "import textwrap" in workflow
+    assert "prompt_probe = textwrap.dedent" in workflow
+    assert '"--model=dream-7b-q4"' in workflow
+    assert '"--prompt=hello"' in workflow
+    assert '["-m", "/models/dream.gguf", "-p", "hello"' in workflow

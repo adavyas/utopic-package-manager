@@ -138,6 +138,7 @@ jobs:
           import subprocess
           import sys
           import tempfile
+          import textwrap
           import venv
           from pathlib import Path
 
@@ -221,6 +222,37 @@ jobs:
                   )
                   if completed.returncode != 0:
                       print("--jobs did not override invalid UTOPIC_BUILD_JOBS", file=sys.stderr)
+                      print(completed.stdout, file=sys.stderr)
+                      print(completed.stderr, file=sys.stderr)
+                      sys.exit(completed.returncode)
+
+                  prompt_probe = textwrap.dedent(r'''
+          from pathlib import Path
+          from utopic import cli
+
+          calls = []
+          cli._ensure_setup = lambda enabled=True, binary_name="utopic": calls.append(("setup", enabled, binary_name))
+          cli.models.ensure_model = lambda value=None: calls.append(("model", value)) or Path("/models/dream.gguf")
+          cli._native.main = lambda name, argv=None: calls.append((name, list(argv or [])))
+
+          code = cli.main(["run", "--model=dream-7b-q4", "--prompt=hello", "--temp=0.1", "--seed=7"])
+          expected = [
+              ("setup", True, "utopic"),
+              ("model", "dream-7b-q4"),
+              ("utopic", ["-m", "/models/dream.gguf", "-p", "hello", "--temp", "0.1", "--seed", "7"]),
+          ]
+          if code not in (0, None) or calls != expected:
+              raise SystemExit(f"unexpected run prompt argv normalization: code={code!r} calls={calls!r}")
+          ''')
+                  completed = subprocess.run(
+                      [str(python), "-c", prompt_probe],
+                      env=smoke_env,
+                      text=True,
+                      stdout=subprocess.PIPE,
+                      stderr=subprocess.PIPE,
+                  )
+                  if completed.returncode != 0:
+                      print("Installed run prompt normalization smoke failed", file=sys.stderr)
                       print(completed.stdout, file=sys.stderr)
                       print(completed.stderr, file=sys.stderr)
                       sys.exit(completed.returncode)
