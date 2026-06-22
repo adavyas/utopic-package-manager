@@ -6,6 +6,8 @@ import * as path from "node:path";
 import * as readline from "node:readline";
 import { spawn, type ChildProcess } from "node:child_process";
 
+const VERSION = "0.1.4";
+
 type ModelEntry = {
   id: string;
   name: string;
@@ -27,6 +29,7 @@ type ChatOptions = {
   maxTokens: number;
   temperature: number;
   help: boolean;
+  version: boolean;
 };
 
 type ChatMessage = {
@@ -76,6 +79,7 @@ function parseArgs(argv: string[]): ChatOptions {
     maxTokens: 512,
     temperature: 0,
     help: false,
+    version: false,
   };
   const positional: string[] = [];
   let modelArgs = 0;
@@ -117,6 +121,7 @@ function parseArgs(argv: string[]): ChatOptions {
       return requiredValue(flag, argv[i], allowNegativeNumber);
     };
     if (arg === "-h" || arg === "--help") options.help = true;
+    else if (arg === "--version") options.version = true;
     else if (arg === "-m" || arg === "--model") {
       modelArgs += 1;
       options.model = next("-m/--model");
@@ -567,6 +572,10 @@ async function main(): Promise<number> {
   const options = parseArgs(process.argv.slice(2));
   if (options.help) {
     printHelp();
+    return 0;
+  }
+  if (options.version) {
+    console.log(`utopic chat ${VERSION}`);
     return 0;
   }
 

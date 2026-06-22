@@ -136,6 +136,21 @@ def test_chat_help_does_not_run_setup(monkeypatch, tmp_path):
     assert setup_calls == []
 
 
+def test_chat_version_does_not_require_node_or_setup(monkeypatch, capsys):
+    setup_calls = []
+
+    monkeypatch.setattr(chat.shutil, "which", lambda name: pytest.fail("version should not require node"))
+    monkeypatch.setattr(chat.installer, "setup", lambda argv: setup_calls.append(list(argv)) or 0)
+    monkeypatch.setattr(chat.subprocess, "run", lambda command, env, check: pytest.fail("version should not launch node"))
+
+    assert chat.launch(["--version"]) == 0
+
+    captured = capsys.readouterr()
+    assert captured.out == f"utopic chat {cli.__version__}\n"
+    assert captured.err == ""
+    assert setup_calls == []
+
+
 def test_chat_launch_reports_missing_node_before_setup(monkeypatch):
     setup_calls = []
 

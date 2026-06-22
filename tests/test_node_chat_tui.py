@@ -9,6 +9,8 @@ from pathlib import Path
 
 import pytest
 
+from utopic import __version__
+
 
 CHAT_SCRIPT = Path(__file__).resolve().parents[1] / "python" / "utopic" / "node" / "utopic-chat.js"
 
@@ -164,6 +166,22 @@ def test_bundled_chat_help_runs_without_server():
 
     assert "usage: utopic chat" in completed.stdout
     assert "utopic chat dream-7b-q4" in completed.stdout
+
+
+def test_bundled_chat_version_runs_without_server():
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not installed")
+
+    completed = subprocess.run(
+        [node, str(CHAT_SCRIPT), "--version"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.stdout == f"utopic chat {__version__}\n"
+    assert completed.stderr == ""
 
 
 def test_bundled_chat_posts_messages_to_openai_compatible_server(fake_openai_server):

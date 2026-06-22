@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 from typing import Optional, Sequence
 
+from . import __version__
 from . import installer, models
 
 
@@ -88,6 +89,10 @@ def _wants_setup(argv: Sequence[str]) -> bool:
 
 def _wants_help(argv: Sequence[str]) -> bool:
     return any(arg in ("-h", "--help") for arg in argv)
+
+
+def _wants_version(argv: Sequence[str]) -> bool:
+    return any(arg == "--version" for arg in argv)
 
 
 def _uses_existing_server(argv: Sequence[str]) -> bool:
@@ -189,6 +194,9 @@ def launch(argv: Optional[Sequence[str]] = None) -> int:
     args = list(argv) if argv is not None else sys.argv[1:]
     if _wants_help(args):
         print(CHAT_HELP)
+        return 0
+    if _wants_version(args):
+        print(f"utopic chat {__version__}")
         return 0
 
     try:

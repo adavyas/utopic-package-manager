@@ -7,6 +7,7 @@ const os = require("node:os");
 const path = require("node:path");
 const readline = require("node:readline");
 const node_child_process_1 = require("node:child_process");
+const VERSION = "0.1.4";
 function printHelp() {
     console.log(`usage: utopic chat [model-alias|/path/to/model.gguf] [options]
 
@@ -48,6 +49,7 @@ function parseArgs(argv) {
         maxTokens: 512,
         temperature: 0,
         help: false,
+        version: false,
     };
     const positional = [];
     let modelArgs = 0;
@@ -94,6 +96,8 @@ function parseArgs(argv) {
         };
         if (arg === "-h" || arg === "--help")
             options.help = true;
+        else if (arg === "--version")
+            options.version = true;
         else if (arg === "-m" || arg === "--model") {
             modelArgs += 1;
             options.model = next("-m/--model");
@@ -566,6 +570,10 @@ async function main() {
     const options = parseArgs(process.argv.slice(2));
     if (options.help) {
         printHelp();
+        return 0;
+    }
+    if (options.version) {
+        console.log(`utopic chat ${VERSION}`);
         return 0;
     }
     let child = null;
