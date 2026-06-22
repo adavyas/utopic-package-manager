@@ -5,6 +5,10 @@ import pytest
 from utopic import chat, cli, models
 
 
+def _stub_server_binary(monkeypatch):
+    monkeypatch.setattr(cli._native, "binary_path", lambda name: Path(f"/fake/bin/{name}"))
+
+
 def test_chat_launch_sets_runtime_paths_and_executes_node(monkeypatch, tmp_path):
     script = tmp_path / "utopic-chat.js"
     script.write_text("console.log('chat')\n", encoding="utf-8")
@@ -160,6 +164,7 @@ def test_cli_run_without_prompt_starts_openai_server(monkeypatch):
     calls = []
 
     monkeypatch.setattr(cli, "_ensure_setup", lambda enabled=True, binary_name="utopic": calls.append(("setup", enabled, binary_name)))
+    _stub_server_binary(monkeypatch)
     monkeypatch.setattr(cli.models, "ensure_model", lambda value=None: Path("/models/dream.gguf"))
     monkeypatch.setattr(
         cli,
@@ -182,6 +187,7 @@ def test_cli_run_allows_server_flags_before_positional_model(monkeypatch):
     calls = []
 
     monkeypatch.setattr(cli, "_ensure_setup", lambda enabled=True, binary_name="utopic": calls.append(("setup", enabled, binary_name)))
+    _stub_server_binary(monkeypatch)
     monkeypatch.setattr(cli.models, "ensure_model", lambda value=None: Path(f"/models/{value}.gguf"))
     monkeypatch.setattr(
         cli,
@@ -204,6 +210,7 @@ def test_cli_run_normalizes_wildcard_host_for_client_url(monkeypatch):
     calls = []
 
     monkeypatch.setattr(cli, "_ensure_setup", lambda enabled=True, binary_name="utopic": None)
+    _stub_server_binary(monkeypatch)
     monkeypatch.setattr(cli.models, "ensure_model", lambda value=None: Path("/models/dream.gguf"))
     monkeypatch.setattr(
         cli,
@@ -226,6 +233,7 @@ def test_cli_run_without_arguments_uses_default_model_and_starts_server(monkeypa
     calls = []
 
     monkeypatch.setattr(cli, "_ensure_setup", lambda enabled=True, binary_name="utopic": calls.append(("setup", enabled, binary_name)))
+    _stub_server_binary(monkeypatch)
     monkeypatch.setattr(cli.models, "ensure_model", lambda value=None: Path("/models/default.gguf"))
     monkeypatch.setattr(
         cli,
