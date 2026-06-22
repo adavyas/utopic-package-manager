@@ -229,6 +229,28 @@ def test_cli_run_rejects_empty_equals_server_flag_values(monkeypatch, capsys, ar
     assert f"utopic run: expected a value after {flag}" in captured.err
 
 
+@pytest.mark.parametrize(
+    ("args", "message"),
+    [
+        (["--port", "abc"], "--port must be an integer from 1 to 65535"),
+        (["--port=0"], "--port must be an integer from 1 to 65535"),
+        (["--port", "65536"], "--port must be an integer from 1 to 65535"),
+        (["-ngl", "-1"], "-ngl must be a non-negative integer"),
+        (["-ngl", "1.5"], "-ngl must be a non-negative integer"),
+        (["--ctx-size=-1"], "--ctx-size must be a positive integer"),
+        (["--ctx-size", "4.5"], "--ctx-size must be a positive integer"),
+    ],
+)
+def test_cli_run_rejects_invalid_server_numeric_flags(monkeypatch, capsys, args, message):
+    monkeypatch.setattr(cli, "_ensure_setup", lambda enabled=True, binary_name="utopic": None)
+    monkeypatch.setattr(cli.models, "ensure_model", lambda value=None: pytest.fail("should not resolve a model"))
+
+    assert cli.main(["run", *args]) == 1
+
+    captured = capsys.readouterr()
+    assert f"utopic run: {message}" in captured.err
+
+
 def test_cli_run_normalizes_wildcard_host_for_client_url(monkeypatch):
     calls = []
 

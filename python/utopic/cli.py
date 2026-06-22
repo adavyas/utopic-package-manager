@@ -9,6 +9,11 @@ from . import _native, chat, installer, models
 
 
 _RUN_VALUE_FLAGS = {"--host", "--port", "-ngl", "--ctx-size"}
+_RUN_NUMERIC_FLAGS = {
+    "--port": (1, 65535, "an integer from 1 to 65535"),
+    "-ngl": (0, None, "a non-negative integer"),
+    "--ctx-size": (1, None, "a positive integer"),
+}
 
 
 def _ensure_setup(enabled: bool = True, binary_name: str = "utopic") -> None:
@@ -31,11 +36,36 @@ def _without_flag(args: Sequence[str], flag: str) -> list[str]:
 
 def _validate_run_value_flags(args: Sequence[str]) -> None:
     for index, arg in enumerate(args):
-        if arg in _RUN_VALUE_FLAGS and (index + 1 >= len(args) or args[index + 1].startswith("-")):
-            raise RuntimeError(f"expected a value after {arg}")
+        if arg in _RUN_VALUE_FLAGS:
+            if index + 1 >= len(args):
+                raise RuntimeError(f"expected a value after {arg}")
+            value = args[index + 1]
+            if value.startswith("-") and not (arg in _RUN_NUMERIC_FLAGS and _looks_like_negative_number(value)):
+                raise RuntimeError(f"expected a value after {arg}")
+            if arg in _RUN_NUMERIC_FLAGS:
+                _validate_run_numeric_flag(arg, value)
         for flag in _RUN_VALUE_FLAGS:
-            if flag.startswith("--") and arg == f"{flag}=":
+            if not flag.startswith("--") or not arg.startswith(f"{flag}="):
+                continue
+            value = arg.split("=", 1)[1]
+            if value == "":
                 raise RuntimeError(f"expected a value after {flag}")
+            if flag in _RUN_NUMERIC_FLAGS:
+                _validate_run_numeric_flag(flag, value)
+
+
+def _looks_like_negative_number(value: str) -> bool:
+    return len(value) > 1 and value[0] == "-" and value[1].isdigit()
+
+
+def _validate_run_numeric_flag(flag: str, value: str) -> None:
+    minimum, maximum, label = _RUN_NUMERIC_FLAGS[flag]
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise RuntimeError(f"{flag} must be {label}") from exc
+    if parsed < minimum or (maximum is not None and parsed > maximum):
+        raise RuntimeError(f"{flag} must be {label}")
 
 
 def _extract_model(args: Sequence[str]) -> tuple[Optional[str], list[str]]:
