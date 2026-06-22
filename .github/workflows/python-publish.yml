@@ -358,6 +358,55 @@ jobs:
           name: release-dists
           path: dist/
 
+      - name: Check PyPI version availability
+        run: |
+          python - <<'PY'
+          import json
+          import sys
+          import tarfile
+          import urllib.error
+          import urllib.request
+          import zipfile
+          from pathlib import Path
+
+          dist = Path("dist")
+          wheel = next(dist.glob("utopic-*.whl"))
+          sdist = next(dist.glob("utopic-*.tar.gz"))
+
+          with zipfile.ZipFile(wheel) as archive:
+              metadata_name = next(name for name in archive.namelist() if name.endswith(".dist-info/METADATA"))
+              wheel_metadata = archive.read(metadata_name).decode("utf-8")
+
+          version = None
+          for line in wheel_metadata.splitlines():
+              if line.startswith("Version: "):
+                  version = line.removeprefix("Version: ").strip()
+                  break
+          if not version:
+              raise SystemExit("Could not determine package version from wheel metadata")
+
+          expected_sdist = f"utopic-{version}"
+          with tarfile.open(sdist) as archive:
+              top_level = {Path(name).parts[0] for name in archive.getnames() if Path(name).parts}
+          if expected_sdist not in top_level:
+              raise SystemExit(f"sdist name does not match wheel version {version}: expected {expected_sdist}")
+
+          try:
+              with urllib.request.urlopen("https://pypi.org/pypi/utopic/json", timeout=30) as response:
+                  releases = json.load(response).get("releases", {})
+          except urllib.error.HTTPError as exc:
+              if exc.code == 404:
+                  releases = {}
+              else:
+                  raise
+
+          if version in releases:
+              print(f"utopic version is already published on PyPI: {version}", file=sys.stderr)
+              sys.exit(1)
+
+          print(f"utopic {version} is available for PyPI publishing")
+          PY
+
       - name: Publish release distributions to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:

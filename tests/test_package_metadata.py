@@ -114,6 +114,19 @@ def test_release_workflow_only_publishes_from_github_releases():
     assert "pypa/gh-action-pypi-publish@release/v1" in workflow
 
 
+def test_release_workflow_checks_pypi_version_before_publishing():
+    workflow = (REPO_ROOT / ".github" / "workflows" / "python-publish.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert "Check PyPI version availability" in workflow
+    assert "https://pypi.org/pypi/utopic/json" in workflow
+    assert "version is already published on PyPI" in workflow
+    assert workflow.index("Check PyPI version availability") < workflow.index(
+        "pypa/gh-action-pypi-publish@release/v1"
+    )
+
+
 def test_ci_workflow_runs_on_commits_without_publishing():
     workflow_path = REPO_ROOT / ".github" / "workflows" / "ci.yml"
 
