@@ -247,6 +247,20 @@ function validateModelUrl(entry) {
 function localModelPath(entry) {
     return path.join(modelsDir(), safeModelFilename(entry));
 }
+function parseContentLength(value) {
+    if (!value)
+        return 0;
+    const total = Number(value);
+    if (!Number.isInteger(total) || total < 0)
+        throw new Error(`invalid content-length: ${value}`);
+    return total;
+}
+function normalizeDownloadError(error) {
+    if (/content-length/i.test(error.message) && /parse error|invalid/i.test(error.message)) {
+        return new Error("invalid content-length");
+    }
+    return error;
+}
 function isLikelyPath(value) {
     return value.includes("/") || value.includes("\\") || value.endsWith(".gguf");
 }
@@ -345,8 +359,7 @@ function download(url, destination, redirectsRemaining = 10) {
             const contentLength = Array.isArray(response.headers["content-length"])
                 ? response.headers["content-length"][0]
                 : response.headers["content-length"];
-            const total = Number(contentLength ?? "0");
-            const expectedTotal = Number.isFinite(total) && total > 0 ? total : 0;
+            const expectedTotal = parseContentLength(contentLength);
             let downloaded = 0;
             const incompleteDownloadError = () => new Error(`downloaded ${downloaded} of ${expectedTotal} bytes`);
             const out = fs.createWriteStream(partial);
@@ -379,11 +392,11 @@ function download(url, destination, redirectsRemaining = 10) {
                     }
                 });
             });
-            response.on("error", fail);
+            response.on("error", (error) => fail(normalizeDownloadError(error)));
             response.on("aborted", () => fail(expectedTotal ? incompleteDownloadError() : new Error("download aborted")));
             out.on("error", fail);
         });
-        request.on("error", fail);
+        request.on("error", (error) => fail(normalizeDownloadError(error)));
     });
 }
 function waitForHealth(baseUrl, timeoutMs, shouldStop) {

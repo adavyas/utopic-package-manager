@@ -70,6 +70,20 @@ class BrokenDownloadServer(BaseHTTPRequestHandler):
         return
 
 
+class InvalidLengthDownloadServer(BaseHTTPRequestHandler):
+    body = b"fake gguf with invalid length"
+
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("content-type", "application/octet-stream")
+        self.send_header("content-length", "not-a-number")
+        self.end_headers()
+        self.wfile.write(self.body)
+
+    def log_message(self, *_args):
+        return
+
+
 class ModelDownloadServer(BaseHTTPRequestHandler):
     body = b"fake gguf over http"
 
@@ -538,6 +552,51 @@ def test_bundled_chat_reports_truncated_model_download(tmp_path):
     assert f"utopic chat: downloaded {len(BrokenDownloadServer.body)} of {expected_size} bytes" in completed.stderr
     assert not (models_dir / "truncated-model.gguf").exists()
     assert not (models_dir / "truncated-model.gguf.partial").exists()
+
+
+def test_bundled_chat_rejects_invalid_model_download_content_length(tmp_path):
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not installed")
+
+    try:
+        download_server = ThreadingHTTPServer(("127.0.0.1", 0), InvalidLengthDownloadServer)
+    except PermissionError as exc:
+        pytest.skip(f"localhost bind is unavailable in this environment: {exc}")
+    download_thread = threading.Thread(target=download_server.serve_forever, daemon=True)
+    download_thread.start()
+
+    catalog = tmp_path / "models.json"
+    models_dir = tmp_path / "models"
+    write_catalog(
+        catalog,
+        "bad-length-model",
+        "bad-length-model.gguf",
+        f"http://127.0.0.1:{download_server.server_port}/model.gguf",
+    )
+
+    try:
+        completed = subprocess.run(
+            [node, str(CHAT_SCRIPT), "bad-length-model"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            env={
+                **os.environ,
+                "UTOPIC_MODELS_CATALOG": str(catalog),
+                "UTOPIC_MODELS_DIR": str(models_dir),
+            },
+        )
+    finally:
+        download_server.shutdown()
+        download_server.server_close()
+        download_thread.join(timeout=5)
+
+    assert completed.returncode == 1
+    assert "utopic chat: invalid content-length" in completed.stderr
+    assert "Parse Error" not in completed.stderr
+    assert not (models_dir / "bad-length-model.gguf").exists()
+    assert not (models_dir / "bad-length-model.gguf.partial").exists()
 
 
 def test_bundled_chat_rejects_empty_model_download(tmp_path):
