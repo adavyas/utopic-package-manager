@@ -78,6 +78,7 @@ function parseArgs(argv: string[]): ChatOptions {
     help: false,
   };
   const positional: string[] = [];
+  const valueAfterEquals = (arg: string, flag: string): string => arg.slice(flag.length + 1);
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     const next = (): string => {
@@ -87,20 +88,20 @@ function parseArgs(argv: string[]): ChatOptions {
     };
     if (arg === "-h" || arg === "--help") options.help = true;
     else if (arg === "-m" || arg === "--model") options.model = next();
-    else if (arg.startsWith("--model=")) options.model = arg.split("=", 2)[1];
+    else if (arg.startsWith("--model=")) options.model = valueAfterEquals(arg, "--model");
     else if (arg === "--server") options.server = next();
-    else if (arg.startsWith("--server=")) options.server = arg.split("=", 2)[1];
+    else if (arg.startsWith("--server=")) options.server = valueAfterEquals(arg, "--server");
     else if (arg === "--host") options.host = next();
-    else if (arg.startsWith("--host=")) options.host = arg.split("=", 2)[1];
+    else if (arg.startsWith("--host=")) options.host = valueAfterEquals(arg, "--host");
     else if (arg === "--port") options.port = next();
-    else if (arg.startsWith("--port=")) options.port = arg.split("=", 2)[1];
+    else if (arg.startsWith("--port=")) options.port = valueAfterEquals(arg, "--port");
     else if (arg === "-ngl") options.ngl = next();
     else if (arg === "--ctx-size") options.ctxSize = next();
-    else if (arg.startsWith("--ctx-size=")) options.ctxSize = arg.split("=", 2)[1];
+    else if (arg.startsWith("--ctx-size=")) options.ctxSize = valueAfterEquals(arg, "--ctx-size");
     else if (arg === "--max-tokens") options.maxTokens = Number(next());
-    else if (arg.startsWith("--max-tokens=")) options.maxTokens = Number(arg.split("=", 2)[1]);
+    else if (arg.startsWith("--max-tokens=")) options.maxTokens = Number(valueAfterEquals(arg, "--max-tokens"));
     else if (arg === "--temperature") options.temperature = Number(next());
-    else if (arg.startsWith("--temperature=")) options.temperature = Number(arg.split("=", 2)[1]);
+    else if (arg.startsWith("--temperature=")) options.temperature = Number(valueAfterEquals(arg, "--temperature"));
     else if (arg === "--no-setup") continue;
     else if (arg.startsWith("-")) throw new Error(`unknown option: ${arg}`);
     else positional.push(arg);
