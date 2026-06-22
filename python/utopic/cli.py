@@ -110,6 +110,18 @@ def _extract_model(args: Sequence[str]) -> tuple[Optional[str], list[str]]:
     return None, remaining
 
 
+def _resolve_prompt_model_args(args: Sequence[str]) -> list[str]:
+    resolved = list(args)
+    for index, arg in enumerate(resolved):
+        if arg in ("-m", "--model"):
+            resolved[index + 1] = str(models.ensure_model(resolved[index + 1]))
+            return resolved
+        if arg.startswith("--model="):
+            resolved[index] = f"--model={models.ensure_model(arg.split('=', 1)[1])}"
+            return resolved
+    return resolved
+
+
 def _value_after(args: Sequence[str], flag: str, default: str) -> str:
     for index, arg in enumerate(args):
         if arg == flag and index + 1 < len(args):
@@ -237,7 +249,7 @@ def _run(argv: Sequence[str]) -> int:
         _validate_run_value_flags(args)
         if _has_prompt(args):
             _ensure_setup(setup_enabled)
-            _native.main("utopic", args)
+            _native.main("utopic", _resolve_prompt_model_args(args))
             return 0
 
         model_arg, server_args = _extract_model(args)

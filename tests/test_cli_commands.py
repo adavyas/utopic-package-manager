@@ -167,6 +167,22 @@ def test_cli_run_with_prompt_delegates_to_native_one_shot(monkeypatch):
     ]
 
 
+def test_cli_run_with_prompt_resolves_model_alias(monkeypatch):
+    calls = []
+
+    monkeypatch.setattr(cli, "_ensure_setup", lambda enabled=True, binary_name="utopic": calls.append(("setup", enabled, binary_name)))
+    monkeypatch.setattr(cli.models, "ensure_model", lambda value=None: calls.append(("model", value)) or Path("/models/dream.gguf"))
+    monkeypatch.setattr(cli._native, "main", lambda name, argv: calls.append((name, list(argv))))
+
+    cli.main(["run", "-m", "dream-7b-q4", "-p", "hello"])
+
+    assert calls == [
+        ("setup", True, "utopic"),
+        ("model", "dream-7b-q4"),
+        ("utopic", ["-m", "/models/dream.gguf", "-p", "hello"]),
+    ]
+
+
 @pytest.mark.parametrize("args", [["--model="], ["-m", ""]])
 def test_cli_run_rejects_empty_model_values_before_setup(monkeypatch, capsys, args):
     monkeypatch.setattr(cli, "_ensure_setup", lambda enabled=True, binary_name="utopic": pytest.fail("should not run setup"))
