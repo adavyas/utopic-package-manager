@@ -520,7 +520,11 @@ function requestJson(url: string, body: unknown): Promise<any> {
           reject(new Error(`HTTP ${res.statusCode}: ${data}`));
           return;
         }
-        resolve(JSON.parse(data));
+        try {
+          resolve(JSON.parse(data));
+        } catch {
+          reject(new Error("invalid JSON response"));
+        }
       });
     });
     req.on("error", reject);

@@ -56,6 +56,27 @@ class FakeOpenAIServer(BaseHTTPRequestHandler):
         return
 
 
+class InvalidJSONOpenAIServer(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == "/health":
+            self.send_response(200)
+            self.send_header("content-type", "application/json")
+            self.end_headers()
+            self.wfile.write(b'{"status":"ok"}')
+            return
+        self.send_response(404)
+        self.end_headers()
+
+    def do_POST(self):
+        self.send_response(200)
+        self.send_header("content-type", "application/json")
+        self.end_headers()
+        self.wfile.write(b"not-json")
+
+    def log_message(self, *_args):
+        return
+
+
 class BrokenDownloadServer(BaseHTTPRequestHandler):
     body = b"partial gguf"
 
@@ -238,6 +259,35 @@ def test_bundled_chat_accepts_openai_compatible_server_url(fake_openai_server):
             "temperature": 0,
         }
     ]
+
+
+def test_bundled_chat_reports_invalid_json_responses_without_crashing():
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not installed")
+    try:
+        server = ThreadingHTTPServer(("127.0.0.1", 0), InvalidJSONOpenAIServer)
+    except PermissionError as exc:
+        pytest.skip(f"localhost bind is unavailable in this environment: {exc}")
+
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        completed = subprocess.run(
+            [node, str(CHAT_SCRIPT), "--server", base_url],
+            input="hi\n/exit\n",
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+    assert completed.returncode == 0
+    assert "request failed: invalid JSON response" in completed.stderr
 
 
 def test_bundled_chat_rejects_unsupported_server_protocol():
