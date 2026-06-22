@@ -13,6 +13,10 @@ uv tool install utopic
 utopic chat
 ```
 
+Use `uv tool install` for the global `utopic` command. `uv pip install utopic`
+installs into the current Python environment instead; use that only inside an
+activated project or virtual environment.
+
 If you already installed an older Utopic package:
 
 ```sh
@@ -181,19 +185,15 @@ The package manager owns the user-facing setup path:
 
 - use the packaged Utopic native source
 - fetch the pinned compatible public llama.cpp dependency source
-- configure the native build for CPU or CUDA, including CUDA compiler and architecture detection
+- configure the native build for Metal, CUDA, or CPU, including CUDA compiler and architecture detection
 - build the dependency layer and Utopic
 - copy the final binaries into the Utopic cache
 
 The published wheel stays pure Python and does not fetch or compile native code
 during `pip install`. Users should not need to clone dependency repositories or
-run build-system commands directly for normal setup.
-
-Use the package-managed binary produced by `utopic setup` for user-facing runs.
-On the 2026-06-21 GB10 smoke, `/home/adavya/.cache/utopic-current/bin/utopic`
-successfully generated from the installed Dream Q4, LLaDA Q4, DiffusionGemma
-BF16, and DiffusionGemma Q4 GGUFs. The repo-local native build loaded the same
-files, but was stale for DiffusionGemma prompt wrapping.
+run build-system commands directly for normal setup. Models are downloaded by
+`utopic chat`, `utopic run`, or `utopic models pull` when you choose a curated
+model alias.
 
 ## Development
 
