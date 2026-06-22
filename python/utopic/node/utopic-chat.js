@@ -170,7 +170,13 @@ function httpClientForUrl(parsed, label) {
     throw new Error(`${label} must use http:// or https://`);
 }
 function normalizeServerBaseUrl(value) {
-    const parsed = new URL(value);
+    let parsed;
+    try {
+        parsed = new URL(value);
+    }
+    catch {
+        throw new Error("--server must be a URL");
+    }
     httpClientForUrl(parsed, "--server");
     if (parsed.pathname.replace(/\/+$/, "") === "/v1/chat/completions") {
         parsed.pathname = "/";

@@ -182,7 +182,12 @@ function httpClientForUrl(parsed: URL, label: string): typeof http | typeof http
 }
 
 function normalizeServerBaseUrl(value: string): string {
-  const parsed = new URL(value);
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new Error("--server must be a URL");
+  }
   httpClientForUrl(parsed, "--server");
   if (parsed.pathname.replace(/\/+$/, "") === "/v1/chat/completions") {
     parsed.pathname = "/";

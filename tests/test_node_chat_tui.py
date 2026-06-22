@@ -212,6 +212,24 @@ def test_bundled_chat_rejects_unsupported_server_protocol():
     assert "utopic chat: --server must use http:// or https://" in completed.stderr
 
 
+def test_bundled_chat_rejects_malformed_server_url():
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not installed")
+
+    completed = subprocess.run(
+        [node, str(CHAT_SCRIPT), "--server", "not-a-url"],
+        input="hi\n/exit\n",
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+
+    assert completed.returncode == 1
+    assert "utopic chat: --server must be a URL" in completed.stderr
+    assert "Invalid URL" not in completed.stderr
+
+
 @pytest.mark.parametrize("args", [["--model="], ["-m", ""]])
 def test_bundled_chat_rejects_empty_model_values(args):
     node = shutil.which("node")
