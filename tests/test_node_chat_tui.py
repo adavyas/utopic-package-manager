@@ -590,6 +590,8 @@ def test_bundled_chat_reports_truncated_model_download(tmp_path):
     download_thread.start()
 
     models_dir = tmp_path / "models"
+    bin_dir = tmp_path / "bin"
+    write_fake_chat_server(node, bin_dir)
     catalog = tmp_path / "models.json"
     write_catalog(
         catalog,
@@ -606,6 +608,7 @@ def test_bundled_chat_reports_truncated_model_download(tmp_path):
             timeout=15,
             env={
                 **os.environ,
+                "UTOPIC_BIN_DIR": str(bin_dir),
                 "UTOPIC_MODELS_CATALOG": str(catalog),
                 "UTOPIC_MODELS_DIR": str(models_dir),
             },
@@ -636,6 +639,8 @@ def test_bundled_chat_rejects_invalid_model_download_content_length(tmp_path):
 
     catalog = tmp_path / "models.json"
     models_dir = tmp_path / "models"
+    bin_dir = tmp_path / "bin"
+    write_fake_chat_server(node, bin_dir)
     write_catalog(
         catalog,
         "bad-length-model",
@@ -651,6 +656,7 @@ def test_bundled_chat_rejects_invalid_model_download_content_length(tmp_path):
             timeout=15,
             env={
                 **os.environ,
+                "UTOPIC_BIN_DIR": str(bin_dir),
                 "UTOPIC_MODELS_CATALOG": str(catalog),
                 "UTOPIC_MODELS_DIR": str(models_dir),
             },
@@ -680,6 +686,8 @@ def test_bundled_chat_rejects_empty_model_download(tmp_path):
     download_thread.start()
 
     models_dir = tmp_path / "models"
+    bin_dir = tmp_path / "bin"
+    write_fake_chat_server(node, bin_dir)
     catalog = tmp_path / "models.json"
     write_catalog(
         catalog,
@@ -696,6 +704,7 @@ def test_bundled_chat_rejects_empty_model_download(tmp_path):
             timeout=15,
             env={
                 **os.environ,
+                "UTOPIC_BIN_DIR": str(bin_dir),
                 "UTOPIC_MODELS_CATALOG": str(catalog),
                 "UTOPIC_MODELS_DIR": str(models_dir),
             },
@@ -1207,6 +1216,8 @@ def test_bundled_chat_removes_zero_byte_cached_model_after_redownload_failure(tm
     models_dir = tmp_path / "models"
     models_dir.mkdir()
     (models_dir / "http-model.gguf").write_bytes(b"")
+    bin_dir = tmp_path / "bin"
+    write_fake_chat_server(node, bin_dir)
     catalog = tmp_path / "models.json"
     write_catalog(
         catalog,
@@ -1223,6 +1234,7 @@ def test_bundled_chat_removes_zero_byte_cached_model_after_redownload_failure(tm
             timeout=15,
             env={
                 **os.environ,
+                "UTOPIC_BIN_DIR": str(bin_dir),
                 "UTOPIC_MODELS_CATALOG": str(catalog),
                 "UTOPIC_MODELS_DIR": str(models_dir),
             },
@@ -1310,6 +1322,8 @@ def test_bundled_chat_rejects_model_download_redirect_loops(tmp_path):
     download_thread.start()
 
     models_dir = tmp_path / "models"
+    bin_dir = tmp_path / "bin"
+    write_fake_chat_server(node, bin_dir)
     catalog = tmp_path / "models.json"
     write_catalog(
         catalog,
@@ -1326,6 +1340,7 @@ def test_bundled_chat_rejects_model_download_redirect_loops(tmp_path):
             timeout=5,
             env={
                 **os.environ,
+                "UTOPIC_BIN_DIR": str(bin_dir),
                 "UTOPIC_MODELS_CATALOG": str(catalog),
                 "UTOPIC_MODELS_DIR": str(models_dir),
             },
