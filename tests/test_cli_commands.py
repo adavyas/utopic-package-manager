@@ -590,6 +590,31 @@ def test_model_pull_reuses_existing_download(monkeypatch, tmp_path):
     assert models.pull_model("example") == model_file
 
 
+def test_model_stream_download_rejects_truncated_content_length(monkeypatch, tmp_path):
+    class TruncatedResponse:
+        headers = {"content-length": "16"}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self, _size):
+            if getattr(self, "_sent", False):
+                return b""
+            self._sent = True
+            return b"partial"
+
+    destination = tmp_path / "model.gguf.partial"
+    monkeypatch.setattr(models.urllib.request, "urlopen", lambda url: TruncatedResponse())
+
+    with pytest.raises(OSError, match="downloaded 7 of 16 bytes"):
+        models._copy_stream_with_progress("https://example.invalid/model.gguf", destination)
+
+    assert destination.read_bytes() == b"partial"
+
+
 def test_model_pull_removes_partial_file_on_download_failure(monkeypatch, tmp_path):
     catalog = tmp_path / "models.json"
     models_dir = tmp_path / "models"

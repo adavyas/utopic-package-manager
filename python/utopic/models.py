@@ -87,6 +87,8 @@ def _copy_stream_with_progress(url: str, destination: Path) -> None:
                     print(f"\rDownloading {destination.name}: {percent:3d}%", end="", flush=True)
         if total:
             print()
+            if downloaded != total:
+                raise OSError(f"downloaded {downloaded} of {total} bytes")
 
 
 def pull_model(model_id: str, *, force: bool = False) -> Path:
