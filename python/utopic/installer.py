@@ -407,7 +407,8 @@ def _binary_suffix() -> str:
 def native_installation_is_current(binary_names: Sequence[str] = BIN_NAMES) -> bool:
     suffix = _binary_suffix()
     for name in binary_names:
-        if not (bin_dir() / f"{name}{suffix}").exists():
+        binary = bin_dir() / f"{name}{suffix}"
+        if not binary.is_file() or not os.access(binary, os.X_OK):
             return False
 
     metadata = _read_install_metadata()

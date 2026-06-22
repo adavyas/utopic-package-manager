@@ -5,6 +5,11 @@ import pytest
 from utopic import installer
 
 
+def _write_executable(path: Path) -> None:
+    path.write_text("binary", encoding="utf-8")
+    path.chmod(0o755)
+
+
 def test_auto_backend_prefers_metal_when_available(monkeypatch):
     monkeypatch.setattr(installer, "_detect_metal_device", lambda: "Apple M4 Pro")
     monkeypatch.setattr(installer, "_detect_cuda_architectures", lambda: "80")
@@ -159,7 +164,7 @@ def test_build_utopic_clears_stale_cmake_cache_when_source_changes(monkeypatch, 
 def test_native_installation_is_not_current_without_metadata(monkeypatch, tmp_path):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    (bin_dir / "utopic_server").write_text("binary", encoding="utf-8")
+    _write_executable(bin_dir / "utopic_server")
 
     monkeypatch.setattr(installer, "bin_dir", lambda: bin_dir)
 
@@ -169,7 +174,7 @@ def test_native_installation_is_not_current_without_metadata(monkeypatch, tmp_pa
 def test_native_installation_is_current_when_auto_probe_changes(monkeypatch, tmp_path):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    (bin_dir / "utopic_server").write_text("binary", encoding="utf-8")
+    _write_executable(bin_dir / "utopic_server")
     installed_decision = installer.BackendDecision(
         backend="metal",
         reason="old",
@@ -198,7 +203,7 @@ def test_native_installation_is_current_when_auto_probe_changes(monkeypatch, tmp
 def test_native_installation_is_not_current_when_explicit_backend_changes(monkeypatch, tmp_path):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    (bin_dir / "utopic_server").write_text("binary", encoding="utf-8")
+    _write_executable(bin_dir / "utopic_server")
     old_decision = installer.BackendDecision(
         backend="metal",
         reason="old",
@@ -222,7 +227,7 @@ def test_native_installation_is_not_current_when_explicit_backend_changes(monkey
 def test_native_installation_is_not_current_when_cuda_architecture_override_changes(monkeypatch, tmp_path):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    (bin_dir / "utopic_server").write_text("binary", encoding="utf-8")
+    _write_executable(bin_dir / "utopic_server")
     old_decision = installer.BackendDecision(
         backend="cuda",
         reason="old",
@@ -247,7 +252,7 @@ def test_native_installation_is_not_current_when_cuda_architecture_override_chan
 def test_native_installation_is_current_when_metadata_matches(monkeypatch, tmp_path):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    (bin_dir / "utopic_server").write_text("binary", encoding="utf-8")
+    _write_executable(bin_dir / "utopic_server")
     decision = installer.BackendDecision(
         backend="cpu",
         reason="No usable Metal device or CUDA compiler found",
@@ -268,10 +273,33 @@ def test_native_installation_is_current_when_metadata_matches(monkeypatch, tmp_p
     assert installer.native_installation_is_current(("utopic_server",)) is True
 
 
-def test_native_installation_accepts_different_request_that_resolves_to_same_backend(monkeypatch, tmp_path):
+def test_native_installation_is_not_current_when_cached_binary_is_not_executable(monkeypatch, tmp_path):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     (bin_dir / "utopic_server").write_text("binary", encoding="utf-8")
+    decision = installer.BackendDecision(
+        backend="cpu",
+        reason="No usable Metal device or CUDA compiler found",
+        device="CPU",
+    )
+
+    monkeypatch.setattr(installer, "bin_dir", lambda: bin_dir)
+    monkeypatch.setattr(installer, "default_llama_dir", lambda: tmp_path / "src" / "llama.cpp")
+    monkeypatch.setattr(installer, "default_native_dir", lambda: tmp_path / "site" / "utopic" / "native")
+    installer._write_install_metadata(
+        decision,
+        requested_backend="auto",
+        llama_dir=installer.default_llama_dir(),
+        native_dir=installer.default_native_dir(),
+    )
+
+    assert installer.native_installation_is_current(("utopic_server",)) is False
+
+
+def test_native_installation_accepts_different_request_that_resolves_to_same_backend(monkeypatch, tmp_path):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _write_executable(bin_dir / "utopic_server")
     decision = installer.BackendDecision(
         backend="cpu",
         reason="No usable Metal device or CUDA compiler found",
@@ -314,7 +342,7 @@ def test_setup_writes_install_metadata_after_success(monkeypatch, tmp_path):
         assert build_dir_arg == build_dir
         bin_dir.mkdir(parents=True)
         for name in installer.BIN_NAMES:
-            (bin_dir / name).write_text("binary", encoding="utf-8")
+            _write_executable(bin_dir / name)
 
     monkeypatch.setattr(installer, "_install_binaries", install_binaries)
 
