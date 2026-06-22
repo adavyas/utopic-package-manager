@@ -119,16 +119,24 @@ function catalogPath(): string {
   return process.env.UTOPIC_MODELS_CATALOG ?? path.resolve(__dirname, "..", "models.json");
 }
 
+function cacheRoot(): string {
+  return process.env.UTOPIC_HOME ?? path.join(os.homedir(), ".cache", "utopic");
+}
+
 function modelsDir(): string {
-  return process.env.UTOPIC_MODELS_DIR ?? path.join(os.homedir(), ".cache", "utopic", "models");
+  return process.env.UTOPIC_MODELS_DIR ?? path.join(cacheRoot(), "models");
 }
 
 function binDir(): string {
-  return process.env.UTOPIC_BIN_DIR ?? path.join(os.homedir(), ".cache", "utopic", "bin");
+  return process.env.UTOPIC_BIN_DIR ?? path.join(cacheRoot(), "bin");
 }
 
 function serverBinary(): string {
   return path.join(binDir(), process.platform === "win32" ? "utopic_server.exe" : "utopic_server");
+}
+
+function serverLogPath(): string {
+  return process.env.UTOPIC_SERVER_LOG ?? path.join(cacheRoot(), "utopic-server.log");
 }
 
 function clientHost(host: string): string {
@@ -303,7 +311,7 @@ async function startServer(options: ChatOptions, modelPath: string): Promise<{ b
   const binary = serverBinary();
   if (!fs.existsSync(binary)) throw new Error("Utopic native binaries are missing. Run `utopic setup`, then retry.");
   const baseUrl = `http://${clientHost(options.host)}:${options.port}`;
-  const logPath = path.join(os.homedir(), ".cache", "utopic", "utopic-server.log");
+  const logPath = serverLogPath();
   fs.mkdirSync(path.dirname(logPath), { recursive: true });
   const log = fs.openSync(logPath, "a");
   const child = spawn(binary, [
