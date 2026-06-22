@@ -286,6 +286,12 @@ function isLikelyPath(value: string): boolean {
   return value.includes("/") || value.includes("\\") || value.toLowerCase().endsWith(".gguf");
 }
 
+function resolveLocalPath(value: string): string {
+  if (value === "~") return os.homedir();
+  if (value.startsWith("~/") || value.startsWith("~\\")) return path.join(os.homedir(), value.slice(2));
+  return path.resolve(value);
+}
+
 function ask(rl: readline.Interface, text: string): Promise<string> {
   return new Promise((resolve) => rl.question(text, resolve));
 }
@@ -318,7 +324,7 @@ async function chooseModel(catalog: ModelEntry[]): Promise<string> {
 }
 
 async function resolveModel(value: string | null): Promise<string> {
-  if (value && isLikelyPath(value)) return path.resolve(value);
+  if (value && isLikelyPath(value)) return resolveLocalPath(value);
 
   const catalog = readCatalog();
   const modelId = value ?? await chooseModel(catalog);

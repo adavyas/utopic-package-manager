@@ -268,6 +268,13 @@ function normalizeDownloadError(error) {
 function isLikelyPath(value) {
     return value.includes("/") || value.includes("\\") || value.toLowerCase().endsWith(".gguf");
 }
+function resolveLocalPath(value) {
+    if (value === "~")
+        return os.homedir();
+    if (value.startsWith("~/") || value.startsWith("~\\"))
+        return path.join(os.homedir(), value.slice(2));
+    return path.resolve(value);
+}
 function ask(rl, text) {
     return new Promise((resolve) => rl.question(text, resolve));
 }
@@ -300,7 +307,7 @@ async function chooseModel(catalog) {
 }
 async function resolveModel(value) {
     if (value && isLikelyPath(value))
-        return path.resolve(value);
+        return resolveLocalPath(value);
     const catalog = readCatalog();
     const modelId = value ?? await chooseModel(catalog);
     const entry = catalog.find((item) => item.id === modelId);
