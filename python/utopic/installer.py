@@ -136,7 +136,17 @@ def _run(
 
 
 def _clone_or_checkout(repo: str, ref: str, dest: Path, *, dry_run: bool, reset: bool = False) -> None:
-    if dest.exists():
+    dest_exists = dest.exists()
+    if dest.exists() and not (dest / ".git").exists():
+        print(f"+ remove invalid source checkout {dest}")
+        if not dry_run:
+            if dest.is_dir():
+                shutil.rmtree(dest)
+            else:
+                dest.unlink()
+        dest_exists = False
+
+    if dest_exists:
         _run(["git", "fetch", "--all", "--tags"], cwd=dest, dry_run=dry_run)
     else:
         if not dry_run:

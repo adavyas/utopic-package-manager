@@ -59,6 +59,74 @@ def test_metal_backend_adds_explicit_cmake_flags(monkeypatch, tmp_path):
     assert "-DGGML_CUDA=OFF" in configure
 
 
+def test_managed_source_checkout_recovers_non_git_cache(monkeypatch, tmp_path):
+    dest = tmp_path / "src" / "llama.cpp"
+    dest.mkdir(parents=True)
+    stale_file = dest / "partial-download.txt"
+    stale_file.write_text("not a git checkout", encoding="utf-8")
+    commands = []
+
+    monkeypatch.setattr(installer, "_run", lambda command, **kwargs: commands.append(command))
+
+    installer._clone_or_checkout(
+        "https://example.test/llama.cpp.git",
+        "main",
+        dest,
+        dry_run=False,
+        reset=True,
+    )
+
+    assert not stale_file.exists()
+    assert commands[0] == ["git", "clone", "https://example.test/llama.cpp.git", dest]
+    assert commands[1] == ["git", "checkout", "main"]
+    assert commands[2] == ["git", "reset", "--hard", "main"]
+
+
+def test_managed_source_checkout_dry_run_previews_reclone_for_non_git_cache(monkeypatch, tmp_path):
+    dest = tmp_path / "src" / "llama.cpp"
+    dest.mkdir(parents=True)
+    stale_file = dest / "partial-download.txt"
+    stale_file.write_text("not a git checkout", encoding="utf-8")
+    commands = []
+
+    monkeypatch.setattr(installer, "_run", lambda command, **kwargs: commands.append(command))
+
+    installer._clone_or_checkout(
+        "https://example.test/llama.cpp.git",
+        "main",
+        dest,
+        dry_run=True,
+        reset=True,
+    )
+
+    assert stale_file.exists()
+    assert commands[0] == ["git", "clone", "https://example.test/llama.cpp.git", dest]
+    assert commands[1] == ["git", "checkout", "main"]
+    assert commands[2] == ["git", "reset", "--hard", "main"]
+
+
+def test_managed_source_checkout_recovers_file_at_cache_path(monkeypatch, tmp_path):
+    dest = tmp_path / "src" / "llama.cpp"
+    dest.parent.mkdir(parents=True)
+    dest.write_text("not a directory", encoding="utf-8")
+    commands = []
+
+    monkeypatch.setattr(installer, "_run", lambda command, **kwargs: commands.append(command))
+
+    installer._clone_or_checkout(
+        "https://example.test/llama.cpp.git",
+        "main",
+        dest,
+        dry_run=False,
+        reset=True,
+    )
+
+    assert not dest.exists()
+    assert commands[0] == ["git", "clone", "https://example.test/llama.cpp.git", dest]
+    assert commands[1] == ["git", "checkout", "main"]
+    assert commands[2] == ["git", "reset", "--hard", "main"]
+
+
 def test_build_utopic_clears_stale_cmake_cache_when_source_changes(monkeypatch, tmp_path):
     cache_root = tmp_path / "cache"
     old_source = cache_root / "src" / "Utopic" / "native"
