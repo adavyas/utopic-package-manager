@@ -232,6 +232,9 @@ def test_chat_launch_rejects_option_like_model_values_before_setup(monkeypatch, 
         (["--max-tokens=1.5"], "--max-tokens must be a positive integer"),
         (["--temperature=-1"], "--temperature must be a non-negative number"),
         (["--temperature", "-1"], "--temperature must be a non-negative number"),
+        (["--temperature=inf"], "--temperature must be a non-negative number"),
+        (["--temperature=nan"], "--temperature must be a non-negative number"),
+        (["--temperature", "nan"], "--temperature must be a non-negative number"),
     ],
 )
 def test_chat_launch_rejects_invalid_sampling_values_before_setup(monkeypatch, capsys, args, message):

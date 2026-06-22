@@ -1,3 +1,4 @@
+import math
 import os
 import shutil
 import subprocess
@@ -111,7 +112,7 @@ def _validate_numeric_value(flag: str, value: str) -> None:
             parsed = float(value)
         except ValueError as exc:
             raise RuntimeError(f"{flag} must be {label}") from exc
-        if parsed < minimum or (maximum is not None and parsed > maximum):
+        if not math.isfinite(parsed) or parsed < minimum or (maximum is not None and parsed > maximum):
             raise RuntimeError(f"{flag} must be {label}")
 
 
