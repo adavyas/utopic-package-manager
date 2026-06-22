@@ -211,7 +211,8 @@ async function chooseModel(catalog: ModelEntry[]): Promise<string> {
   console.log("\nAvailable models:");
   catalog.forEach((entry, index) => {
     const marker = entry.recommended ? "*" : " ";
-    const exists = fs.existsSync(localModelPath(entry)) ? "downloaded" : "not downloaded";
+    const modelPath = localModelPath(entry);
+    const exists = fs.existsSync(modelPath) && fs.statSync(modelPath).size > 0 ? "downloaded" : "not downloaded";
     console.log(`${index + 1}. ${marker} ${entry.id} (${entry.size}, ${exists})`);
     console.log(`   ${entry.name}`);
   });

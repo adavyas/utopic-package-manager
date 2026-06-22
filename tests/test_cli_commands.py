@@ -624,6 +624,38 @@ def test_model_pull_redownloads_zero_byte_cached_model(monkeypatch, tmp_path):
     assert model_file.read_bytes() == b"model"
 
 
+def test_model_list_marks_zero_byte_cached_model_not_downloaded(monkeypatch, tmp_path, capsys):
+    catalog = tmp_path / "models.json"
+    model_file = tmp_path / "models" / "example.gguf"
+    model_file.parent.mkdir()
+    model_file.write_bytes(b"")
+    catalog.write_text(
+        """
+[
+  {
+    "id": "example",
+    "name": "Example",
+    "family": "test",
+    "filename": "example.gguf",
+    "url": "https://example.invalid/example.gguf",
+    "size": "1 B",
+    "recommended": true,
+    "description": "Test model"
+  }
+]
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("UTOPIC_MODELS_CATALOG", str(catalog))
+    monkeypatch.setenv("UTOPIC_MODELS_DIR", str(model_file.parent))
+
+    assert models.main(["list"]) == 0
+
+    captured = capsys.readouterr()
+    assert "not downloaded" in captured.out
+    assert "downloaded" not in captured.out.replace("not downloaded", "")
+
+
 def test_model_stream_download_rejects_truncated_content_length(monkeypatch, tmp_path):
     class TruncatedResponse:
         headers = {"content-length": "16"}

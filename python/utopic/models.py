@@ -142,7 +142,7 @@ def ensure_model(value: Optional[str] = None) -> Path:
 def _print_models() -> None:
     for entry in list_models():
         marker = "*" if entry.recommended else " "
-        status = "downloaded" if entry.path.exists() else "not downloaded"
+        status = "downloaded" if entry.path.exists() and entry.path.stat().st_size > 0 else "not downloaded"
         print(f"{marker} {entry.id:24} {entry.size:14} {status}")
         print(f"  {entry.name}")
         print(f"  {entry.description}")
