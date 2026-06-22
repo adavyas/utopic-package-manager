@@ -301,6 +301,35 @@ def test_cli_run_prompt_rejects_missing_prompt_option_values_before_setup(monkey
     assert f"utopic run: {message}" in captured.err
 
 
+@pytest.mark.parametrize(
+    ("args", "message"),
+    [
+        (["-p", "hi", "-n", "0"], "-n must be a positive integer"),
+        (["-p", "hi", "-n", "many"], "-n must be a positive integer"),
+        (["-p", "hi", "--steps", "0"], "--steps must be a positive integer"),
+        (["-p", "hi", "--steps", "fast"], "--steps must be a positive integer"),
+        (["-p", "hi", "--diffusion-block-length", "0"], "--diffusion-block-length must be a positive integer"),
+        (["-p", "hi", "--canvas", "-1"], "--canvas must be a non-negative integer"),
+        (["-p", "hi", "--canvas", "wide"], "--canvas must be a non-negative integer"),
+        (["-p", "hi", "--eb-steps", "-1"], "--eb-steps must be a non-negative integer"),
+        (["-p", "hi", "--slot-len", "0"], "--slot-len must be a positive integer"),
+        (["-p", "hi", "--converge", "-1"], "--converge must be a non-negative integer"),
+        (["-p", "hi", "--temp", "-0.1"], "--temp must be a non-negative number"),
+        (["-p", "hi", "--temp", "warm"], "--temp must be a non-negative number"),
+        (["-p", "hi", "--seed", "abc"], "--seed must be an integer"),
+    ],
+)
+def test_cli_run_prompt_rejects_invalid_numeric_prompt_values_before_setup(monkeypatch, capsys, args, message):
+    monkeypatch.setattr(cli, "_ensure_setup", lambda enabled=True, binary_name="utopic": pytest.fail("should not run setup"))
+    monkeypatch.setattr(cli.models, "ensure_model", lambda value=None: pytest.fail("should not resolve a model"))
+    monkeypatch.setattr(cli._native, "main", lambda name, argv: pytest.fail("should not run native cli"))
+
+    assert cli.main(["run", *args]) == 1
+
+    captured = capsys.readouterr()
+    assert f"utopic run: {message}" in captured.err
+
+
 @pytest.mark.parametrize("args", [["--model=-ngl"], ["--model", "-ngl"]])
 def test_chat_launch_rejects_option_like_model_values_before_setup(monkeypatch, capsys, args):
     monkeypatch.setattr(chat.shutil, "which", lambda name: "/usr/bin/node" if name == "node" else None)

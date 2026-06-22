@@ -1,3 +1,4 @@
+import math
 import subprocess
 import sys
 import time
@@ -30,6 +31,20 @@ _RUN_NUMERIC_FLAGS = {
     "--port": (1, 65535, "an integer from 1 to 65535"),
     "-ngl": (0, None, "a non-negative integer"),
     "--ctx-size": (1, None, "a positive integer"),
+}
+_PROMPT_INTEGER_FLAGS = {
+    "-n": (1, None, "a positive integer"),
+    "--seed": (None, None, "an integer"),
+    "--steps": (1, None, "a positive integer"),
+    "--diffusion-block-length": (1, None, "a positive integer"),
+    "--canvas": (0, None, "a non-negative integer"),
+    "--eb-steps": (0, None, "a non-negative integer"),
+    "--slot-len": (1, None, "a positive integer"),
+    "--converge": (0, None, "a non-negative integer"),
+}
+_PROMPT_NUMBER_FLAGS = {
+    "--temp": (0.0, None, "a non-negative number"),
+    "--confidence": (None, None, "a number"),
 }
 _MODEL_VALUE_FLAGS = {"-m", "--model"}
 
@@ -92,11 +107,14 @@ def _validate_prompt_value_flags(args: Sequence[str]) -> None:
             value = args[index + 1]
             if value == "" or (value.startswith("-") and not _looks_like_negative_number(value)):
                 raise RuntimeError(f"expected a value after {arg}")
+            _validate_prompt_numeric_flag(arg, value)
         for flag in prompt_only_flags:
             if not flag.startswith("--") or not arg.startswith(f"{flag}="):
                 continue
-            if arg.split("=", 1)[1] == "":
+            value = arg.split("=", 1)[1]
+            if value == "":
                 raise RuntimeError(f"expected a value after {flag}")
+            _validate_prompt_numeric_flag(flag, value)
 
 
 def _looks_like_negative_number(value: str) -> bool:
@@ -111,6 +129,32 @@ def _validate_run_numeric_flag(flag: str, value: str) -> None:
         raise RuntimeError(f"{flag} must be {label}") from exc
     if parsed < minimum or (maximum is not None and parsed > maximum):
         raise RuntimeError(f"{flag} must be {label}")
+
+
+def _validate_prompt_numeric_flag(flag: str, value: str) -> None:
+    if flag in _PROMPT_INTEGER_FLAGS:
+        minimum, maximum, label = _PROMPT_INTEGER_FLAGS[flag]
+        try:
+            parsed = int(value)
+        except ValueError as exc:
+            raise RuntimeError(f"{flag} must be {label}") from exc
+        if (
+            (minimum is not None and parsed < minimum)
+            or (maximum is not None and parsed > maximum)
+        ):
+            raise RuntimeError(f"{flag} must be {label}")
+    if flag in _PROMPT_NUMBER_FLAGS:
+        minimum, maximum, label = _PROMPT_NUMBER_FLAGS[flag]
+        try:
+            parsed = float(value)
+        except ValueError as exc:
+            raise RuntimeError(f"{flag} must be {label}") from exc
+        if (
+            not math.isfinite(parsed)
+            or (minimum is not None and parsed < minimum)
+            or (maximum is not None and parsed > maximum)
+        ):
+            raise RuntimeError(f"{flag} must be {label}")
 
 
 def _extract_model(args: Sequence[str]) -> tuple[Optional[str], list[str]]:
