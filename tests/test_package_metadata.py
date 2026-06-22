@@ -57,3 +57,11 @@ def test_chat_check_script_rejects_stale_bundled_javascript():
 
     assert "npm run build:chat" in check_script
     assert "git diff --exit-code -- python/utopic/node/utopic-chat.js" in check_script
+
+
+def test_readme_uses_release_build_commands():
+    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert "python -m build" in readme
+    assert "python -m twine check dist/*" in readme
+    assert "python -m pip wheel . --no-deps -w dist/" not in readme

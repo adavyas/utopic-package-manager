@@ -221,8 +221,9 @@ npm run build:chat
 npm run check:chat
 ```
 
-Build a wheel:
+Build the same release distributions that CI validates:
 
 ```sh
-python -m pip wheel . --no-deps -w dist/
+python -m build
+python -m twine check dist/*
 ```
