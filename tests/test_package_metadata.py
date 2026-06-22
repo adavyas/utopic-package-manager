@@ -114,6 +114,24 @@ def test_release_workflow_only_publishes_from_github_releases():
     assert "pypa/gh-action-pypi-publish@release/v1" in workflow
 
 
+def test_ci_workflow_runs_on_commits_without_publishing():
+    workflow_path = REPO_ROOT / ".github" / "workflows" / "ci.yml"
+
+    assert workflow_path.exists()
+    workflow = workflow_path.read_text(encoding="utf-8")
+
+    assert "push:" in workflow
+    assert "pull_request:" in workflow
+    assert "PYTHONPATH=python pytest tests -q" in workflow
+    assert "npm run check:chat" in workflow
+    assert "python -m build" in workflow
+    assert "python -m twine check dist/*" in workflow
+    assert "Smoke test built distributions" in workflow
+    assert '[str(utopic), "--help"]' in workflow
+    assert "pypi-publish" not in workflow
+    assert "pypa/gh-action-pypi-publish" not in workflow
+
+
 def test_readme_distinguishes_server_mode_from_chat_mode():
     readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
 
