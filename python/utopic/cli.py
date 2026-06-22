@@ -559,7 +559,7 @@ def _doctor(argv: Sequence[str]) -> int:
         print(f"CUDA graphs: {decision.cuda_graphs}")
     native_cache = (
         "current"
-        if installer.native_installation_is_current(("utopic_server",))
+        if installer.native_installation_is_current(installer.BIN_NAMES)
         else "missing or stale"
     )
     print(f"Native cache: {native_cache}")

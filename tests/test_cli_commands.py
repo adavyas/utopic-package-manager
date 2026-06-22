@@ -1004,9 +1004,14 @@ def test_cli_setup_version_does_not_run_setup(monkeypatch, capsys):
 
 
 def test_cli_doctor_reports_environment_without_running_setup(monkeypatch, tmp_path, capsys):
+    cache_checks = []
     monkeypatch.setattr(cli.installer, "cache_root", lambda: tmp_path / "cache")
     monkeypatch.setattr(cli.installer, "bin_dir", lambda: tmp_path / "bin")
-    monkeypatch.setattr(cli.installer, "native_installation_is_current", lambda binary_names: True)
+    monkeypatch.setattr(
+        cli.installer,
+        "native_installation_is_current",
+        lambda binary_names: cache_checks.append(tuple(binary_names)) or True,
+    )
     monkeypatch.setattr(
         cli.installer,
         "_resolve_backend",
@@ -1034,6 +1039,7 @@ def test_cli_doctor_reports_environment_without_running_setup(monkeypatch, tmp_p
     assert "git: /usr/bin/git" in captured.out
     assert "Node.js: /usr/bin/node (v20.0.0)" in captured.out
     assert captured.err == ""
+    assert cache_checks == [cli.installer.BIN_NAMES]
 
 
 def test_cli_doctor_returns_failure_when_required_setup_tools_are_missing(monkeypatch, tmp_path, capsys):
