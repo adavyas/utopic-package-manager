@@ -151,6 +151,21 @@ def _copy_stream_with_progress(url: str, destination: Path) -> None:
                 raise OSError(f"downloaded {downloaded} of {total} bytes")
 
 
+def _is_nonempty_file(path: Path) -> bool:
+    return path.is_file() and path.stat().st_size > 0
+
+
+def _is_empty_file(path: Path) -> bool:
+    return path.is_file() and path.stat().st_size == 0
+
+
+def _remove_path(path: Path) -> None:
+    if path.is_dir() and not path.is_symlink():
+        shutil.rmtree(path)
+    else:
+        path.unlink()
+
+
 def pull_model(model_id: str, *, force: bool = False) -> Path:
     entry = get_model(model_id)
     if entry is None:
@@ -158,17 +173,17 @@ def pull_model(model_id: str, *, force: bool = False) -> Path:
         raise RuntimeError(f"Unknown Utopic model '{model_id}'. Known models: {known}")
 
     destination = entry.path
-    if destination.exists() and destination.stat().st_size > 0 and not force:
+    if destination.exists() and _is_nonempty_file(destination) and not force:
         return destination
 
     _validate_model_url(entry)
     destination.parent.mkdir(parents=True, exist_ok=True)
     tmp = destination.with_suffix(destination.suffix + ".partial")
-    remove_empty_destination_on_failure = (
-        destination.exists() and destination.stat().st_size == 0
-    )
+    remove_empty_destination_on_failure = _is_empty_file(destination)
+    if destination.exists() and not destination.is_file():
+        _remove_path(destination)
     if tmp.exists():
-        tmp.unlink()
+        _remove_path(tmp)
 
     try:
         print(f"Pulling {entry.name} from Hugging Face")
@@ -179,13 +194,13 @@ def pull_model(model_id: str, *, force: bool = False) -> Path:
         shutil.move(str(tmp), str(destination))
     except Exception as exc:
         if tmp.exists():
-            tmp.unlink()
+            _remove_path(tmp)
         if (
             remove_empty_destination_on_failure
             and destination.exists()
-            and destination.stat().st_size == 0
+            and _is_empty_file(destination)
         ):
-            destination.unlink()
+            _remove_path(destination)
         raise RuntimeError(f"Failed to pull {entry.id} from {entry.url}: {exc}") from exc
     return destination
 
@@ -214,7 +229,7 @@ def ensure_model(value: Optional[str] = None) -> Path:
 def _print_models() -> None:
     for entry in list_models():
         marker = "*" if entry.recommended else " "
-        status = "downloaded" if entry.path.exists() and entry.path.stat().st_size > 0 else "not downloaded"
+        status = "downloaded" if _is_nonempty_file(entry.path) else "not downloaded"
         print(f"{marker} {entry.id:24} {entry.size:14} {status}")
         print(f"  {entry.name}")
         print(f"  {entry.description}")

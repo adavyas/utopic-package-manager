@@ -280,6 +280,22 @@ function parseContentLength(value: string | undefined): number {
   return total;
 }
 
+function isNonEmptyFile(filePath: string): boolean {
+  if (!fs.existsSync(filePath)) return false;
+  const stats = fs.statSync(filePath);
+  return stats.isFile() && stats.size > 0;
+}
+
+function isEmptyFile(filePath: string): boolean {
+  if (!fs.existsSync(filePath)) return false;
+  const stats = fs.statSync(filePath);
+  return stats.isFile() && stats.size === 0;
+}
+
+function removePathIfExists(filePath: string): void {
+  if (fs.existsSync(filePath)) fs.rmSync(filePath, { recursive: true, force: true });
+}
+
 function normalizeDownloadError(error: Error): Error {
   if (/content-length/i.test(error.message) && /parse error|invalid/i.test(error.message)) {
     return new Error("invalid content-length");
@@ -309,7 +325,7 @@ async function chooseModel(catalog: ModelEntry[]): Promise<string> {
   catalog.forEach((entry, index) => {
     const marker = entry.recommended ? "*" : " ";
     const modelPath = localModelPath(entry);
-    const exists = fs.existsSync(modelPath) && fs.statSync(modelPath).size > 0 ? "downloaded" : "not downloaded";
+    const exists = isNonEmptyFile(modelPath) ? "downloaded" : "not downloaded";
     console.log(`${index + 1}. ${marker} ${entry.id} (${entry.size}, ${exists})`);
     console.log(`   ${entry.name}`);
   });
@@ -336,7 +352,7 @@ async function resolveModel(value: string | null): Promise<string> {
   const entry = catalog.find((item) => item.id === modelId);
   if (!entry) throw new Error(`unknown model '${modelId}'. Run 'utopic models list' to see aliases.`);
   const destination = localModelPath(entry);
-  if (fs.existsSync(destination) && fs.statSync(destination).size > 0) return destination;
+  if (isNonEmptyFile(destination)) return destination;
 
   validateModelUrl(entry);
   console.log(`\nPulling ${entry.name} from Hugging Face`);
@@ -347,24 +363,23 @@ async function resolveModel(value: string | null): Promise<string> {
 function download(url: string, destination: string, redirectsRemaining = 10): Promise<string> {
   fs.mkdirSync(path.dirname(destination), { recursive: true });
   const partial = `${destination}.partial`;
-  const removeEmptyDestinationOnFailure =
-    fs.existsSync(destination) && fs.statSync(destination).size === 0;
-  if (fs.existsSync(partial)) fs.unlinkSync(partial);
+  const removeEmptyDestinationOnFailure = isEmptyFile(destination);
+  if (fs.existsSync(destination) && !fs.statSync(destination).isFile()) removePathIfExists(destination);
+  removePathIfExists(partial);
 
   return new Promise((resolve, reject) => {
     const parsed = new URL(url);
     const client = parsed.protocol === "https:" ? https : parsed.protocol === "http:" ? http : null;
     let settled = false;
     const removePartial = (): void => {
-      if (fs.existsSync(partial)) fs.unlinkSync(partial);
+      removePathIfExists(partial);
     };
     const removeStaleDestination = (): void => {
       if (
         removeEmptyDestinationOnFailure &&
-        fs.existsSync(destination) &&
-        fs.statSync(destination).size === 0
+        isEmptyFile(destination)
       ) {
-        fs.unlinkSync(destination);
+        removePathIfExists(destination);
       }
     };
     const fail = (error: Error): void => {

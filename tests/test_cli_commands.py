@@ -1389,3 +1389,74 @@ def test_model_pull_removes_partial_file_on_download_failure(monkeypatch, tmp_pa
         models.pull_model("example")
 
     assert not (models_dir / "example.gguf.partial").exists()
+
+
+def test_model_pull_replaces_stale_partial_directory(monkeypatch, tmp_path):
+    catalog = tmp_path / "models.json"
+    models_dir = tmp_path / "models"
+    partial_dir = models_dir / "example.gguf.partial"
+    partial_dir.mkdir(parents=True)
+    (partial_dir / "stale").write_text("old partial cache", encoding="utf-8")
+    catalog.write_text(
+        """
+[
+  {
+    "id": "example",
+    "name": "Example",
+    "family": "test",
+    "filename": "example.gguf",
+    "url": "https://example.invalid/example.gguf",
+    "size": "1 B",
+    "recommended": true,
+    "description": "Test model"
+  }
+]
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("UTOPIC_MODELS_CATALOG", str(catalog))
+    monkeypatch.setenv("UTOPIC_MODELS_DIR", str(models_dir))
+
+    def download(_url, destination):
+        destination.write_bytes(b"model")
+
+    monkeypatch.setattr(models, "_copy_stream_with_progress", download)
+
+    assert models.pull_model("example") == models_dir / "example.gguf"
+    assert (models_dir / "example.gguf").read_bytes() == b"model"
+    assert not partial_dir.exists()
+
+
+def test_model_pull_replaces_stale_model_directory(monkeypatch, tmp_path):
+    catalog = tmp_path / "models.json"
+    models_dir = tmp_path / "models"
+    model_dir = models_dir / "example.gguf"
+    model_dir.mkdir(parents=True)
+    (model_dir / "stale").write_text("old model cache", encoding="utf-8")
+    catalog.write_text(
+        """
+[
+  {
+    "id": "example",
+    "name": "Example",
+    "family": "test",
+    "filename": "example.gguf",
+    "url": "https://example.invalid/example.gguf",
+    "size": "1 B",
+    "recommended": true,
+    "description": "Test model"
+  }
+]
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("UTOPIC_MODELS_CATALOG", str(catalog))
+    monkeypatch.setenv("UTOPIC_MODELS_DIR", str(models_dir))
+
+    def download(_url, destination):
+        destination.write_bytes(b"model")
+
+    monkeypatch.setattr(models, "_copy_stream_with_progress", download)
+
+    assert models.pull_model("example") == model_dir
+    assert model_dir.read_bytes() == b"model"
