@@ -131,9 +131,9 @@ def test_readme_documents_supported_models_without_prohibited_mentions():
         assert entry["id"] in readme
         assert entry["name"] in readme
     assert all(entry["family"] != "diffusiongemma" for entry in catalog)
-    assert "DiffusionGemma GGUF paths are still experimental" in readme
-    assert "GB10 CUDA" in readme
-    assert "ggml CUDA SOFT_MAX" in readme
+    assert "DiffusionGemma is not exposed as a one-command curated download yet" in readme
+    assert "GB10/DGX Spark with" in readme
+    assert "CUDA compiler/toolkit mismatch" in readme
     assert "LLaDA2.0" not in readme
     assert "LLaDA 2.0" not in readme
 

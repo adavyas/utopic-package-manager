@@ -11,6 +11,12 @@ def _write_executable(path: Path) -> None:
     path.chmod(0o755)
 
 
+def test_dry_run_quotes_arguments_that_need_shell_escaping(capsys):
+    installer._run(["cmake", "-DCMAKE_BUILD_RPATH=/a;/b"], dry_run=True)
+
+    assert capsys.readouterr().out == "+ cmake '-DCMAKE_BUILD_RPATH=/a;/b'\n"
+
+
 def test_auto_backend_prefers_metal_when_available(monkeypatch):
     monkeypatch.setattr(installer, "_detect_metal_device", lambda: "Apple M4 Pro")
     monkeypatch.setattr(installer, "_detect_cuda_architectures", lambda: "80")
@@ -117,6 +123,75 @@ def test_cuda_build_resets_cached_cuda_matmul_force_options(monkeypatch, tmp_pat
     configure = commands[0]
     assert "-DGGML_CUDA_FORCE_CUBLAS=OFF" in configure
     assert "-DGGML_CUDA_FORCE_MMQ=OFF" in configure
+
+
+def test_cuda_build_sets_toolkit_root_for_selected_cuda_compiler(monkeypatch, tmp_path):
+    commands = []
+    monkeypatch.setattr(
+        installer,
+        "_find_cuda_compiler",
+        lambda cuda_architectures=None: Path("/usr/local/cuda-13.0/bin/nvcc"),
+    )
+    monkeypatch.setattr(installer, "_run", lambda command, **kwargs: commands.append(command))
+
+    installer._build_llama(
+        tmp_path,
+        backend="cuda",
+        cuda_architectures="121",
+        jobs=None,
+        dry_run=True,
+    )
+
+    configure = commands[0]
+    assert "-DCMAKE_CUDA_COMPILER=/usr/local/cuda-13.0/bin/nvcc" in configure
+    assert "-DCUDAToolkit_ROOT=/usr/local/cuda-13.0" in configure
+
+
+def test_cuda_build_clears_stale_cmake_cuda_toolkit_cache(monkeypatch, tmp_path):
+    commands = []
+    monkeypatch.setattr(
+        installer,
+        "_find_cuda_compiler",
+        lambda cuda_architectures=None: Path("/usr/local/cuda-13.0/bin/nvcc"),
+    )
+    monkeypatch.setattr(installer, "_run", lambda command, **kwargs: commands.append(command))
+
+    installer._build_llama(
+        tmp_path,
+        backend="cuda",
+        cuda_architectures="121",
+        jobs=None,
+        dry_run=True,
+    )
+
+    configure = commands[0]
+    assert "-UCUDAToolkit_*" in configure
+    assert "-U_cmake_CUDAToolkit_*" in configure
+    assert "-UFIND_PACKAGE_MESSAGE_DETAILS_CUDAToolkit" in configure
+
+
+def test_cuda_build_adds_toolkit_library_dirs_to_build_rpath(monkeypatch, tmp_path):
+    commands = []
+    monkeypatch.setattr(
+        installer,
+        "_find_cuda_compiler",
+        lambda cuda_architectures=None: Path("/usr/local/cuda-13.0/bin/nvcc"),
+    )
+    monkeypatch.setattr(installer, "_run", lambda command, **kwargs: commands.append(command))
+
+    installer._build_llama(
+        tmp_path,
+        backend="cuda",
+        cuda_architectures="121",
+        jobs=None,
+        dry_run=True,
+    )
+
+    configure = commands[0]
+    assert (
+        "-DCMAKE_BUILD_RPATH=/usr/local/cuda-13.0/targets/sbsa-linux/lib;"
+        "/usr/local/cuda-13.0/lib64;/usr/local/cuda-13.0/lib"
+    ) in configure
 
 
 def test_cuda_graphs_environment_override_wins_over_gb10_default(monkeypatch, tmp_path):

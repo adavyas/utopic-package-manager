@@ -24,6 +24,12 @@ python -m utopic --help
 python -m utopic chat
 ```
 
+For a reproducible install of this release:
+
+```sh
+uv tool install utopic==0.1.6
+```
+
 If you already installed an older Utopic package:
 
 ```sh
@@ -97,6 +103,9 @@ utopic setup --backend cuda
 
 The CUDA setup path detects the local GPU architecture and selects a suitable
 CUDA compiler when possible, including CUDA 13 on GB10/DGX Spark hosts. On
+hosts with multiple CUDA toolkits, setup pins CMake's CUDA toolkit lookup to
+the selected `nvcc` and resets stale toolkit cache entries so the compiler and
+runtime libraries do not silently mix versions. On
 constrained hosts, limit build parallelism:
 
 ```sh
@@ -139,12 +148,13 @@ paths for GGUF models by architecture family:
 |---|---|---|
 | LLaDA | masked | GGUF tensor types the linked llama.cpp build can load |
 | Dream | masked | GGUF tensor types the linked llama.cpp build can load |
-| DiffusionGemma | canvas / entropy-bound | Experimental GGUF path |
+| DiffusionGemma | canvas / entropy-bound | Local GGUF path validated on GB10 CUDA |
 
-DiffusionGemma GGUF paths are still experimental in this package. GB10 CUDA
-currently fails inside ggml CUDA SOFT_MAX for the tested Q4_K_M and BF16 GGUF
-files, so DiffusionGemma is not exposed as a one-command curated download until
-that backend path is fixed and revalidated.
+DiffusionGemma is not exposed as a one-command curated download yet because the
+public GGUF files are large and still best treated as local model paths. The
+package CUDA setup path has been validated on GB10/DGX Spark with
+DiffusionGemma Q4_K_M and BF16 GGUF files. The previous GB10 SOFT_MAX failure
+was caused by a CUDA compiler/toolkit mismatch during setup.
 
 FP8 file names are recognized through common GGUF markers such as `FP8`,
 `F8_E4M3`, `F8_E5M2`, `E4M3`, and `E5M2`. Quantized GGUF weights include common

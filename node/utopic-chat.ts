@@ -6,7 +6,7 @@ import * as path from "node:path";
 import * as readline from "node:readline";
 import { spawn, type ChildProcess } from "node:child_process";
 
-const VERSION = "0.1.5";
+const VERSION = "0.1.6";
 
 type ModelEntry = {
   id: string;

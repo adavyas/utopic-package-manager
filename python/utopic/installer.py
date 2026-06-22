@@ -2,6 +2,7 @@ import argparse
 import json
 import os
 import platform
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -125,7 +126,7 @@ def _run(
     env: Optional[Mapping[str, str]] = None,
     dry_run: bool = False,
 ) -> None:
-    printable = " ".join(str(part) for part in command)
+    printable = " ".join(shlex.quote(str(part)) for part in command)
     print(f"+ {printable}")
     if dry_run:
         return
@@ -225,6 +226,23 @@ def _find_cuda_compiler(cuda_architectures: Optional[str] = None) -> Optional[Pa
         if candidate.exists():
             return candidate
     return None
+
+
+def _cuda_toolkit_root(cuda_compiler: Path) -> Optional[Path]:
+    if cuda_compiler.name != "nvcc" or cuda_compiler.parent.name != "bin":
+        return None
+    return cuda_compiler.parent.parent
+
+
+def _cuda_toolkit_library_rpath(cuda_toolkit_root: Path) -> str:
+    return ";".join(
+        str(path)
+        for path in (
+            cuda_toolkit_root / "targets" / "sbsa-linux" / "lib",
+            cuda_toolkit_root / "lib64",
+            cuda_toolkit_root / "lib",
+        )
+    )
 
 
 def _detect_cuda_architectures() -> Optional[str]:
@@ -543,7 +561,18 @@ def _build_llama(
             cuda_architectures = _detect_cuda_architectures()
         cuda_compiler = _find_cuda_compiler(cuda_architectures)
         if cuda_compiler:
+            command.extend(
+                [
+                    "-UCUDAToolkit_*",
+                    "-U_cmake_CUDAToolkit_*",
+                    "-UFIND_PACKAGE_MESSAGE_DETAILS_CUDAToolkit",
+                ]
+            )
             command.append(f"-DCMAKE_CUDA_COMPILER={cuda_compiler}")
+            cuda_toolkit_root = _cuda_toolkit_root(cuda_compiler)
+            if cuda_toolkit_root:
+                command.append(f"-DCUDAToolkit_ROOT={cuda_toolkit_root}")
+                command.append(f"-DCMAKE_BUILD_RPATH={_cuda_toolkit_library_rpath(cuda_toolkit_root)}")
         if cuda_architectures:
             command.append(f"-DCMAKE_CUDA_ARCHITECTURES={cuda_architectures}")
         command.append(f"-DGGML_CUDA_GRAPHS={cuda_graphs or _cuda_graphs_setting(cuda_architectures)}")
