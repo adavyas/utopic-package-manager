@@ -140,9 +140,22 @@ def test_ci_workflow_runs_on_commits_without_publishing():
     assert "python -m build" in workflow
     assert "python -m twine check dist/*" in workflow
     assert "Smoke test built distributions" in workflow
+    assert "Installed Node-free chat fallback smoke failed" in workflow
+    assert 'PATH=""' in workflow
     assert '[str(utopic), "--help"]' in workflow
     assert "pypi-publish" not in workflow
     assert "pypa/gh-action-pypi-publish" not in workflow
+
+
+def test_release_workflow_smokes_installed_node_free_chat_fallback():
+    workflow = (REPO_ROOT / ".github" / "workflows" / "python-publish.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert "Installed Node-free chat fallback smoke failed" in workflow
+    assert 'PATH=""' in workflow
+    assert "node-free fallback ok" in workflow
+    assert "utopic chat: Node.js was not found; using the built-in Python chat fallback." in workflow
 
 
 def test_readme_distinguishes_server_mode_from_chat_mode():

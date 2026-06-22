@@ -134,16 +134,80 @@ jobs:
       - name: Smoke test built distributions
         run: |
           python - <<'PY'
+          import json
           import os
           import subprocess
           import sys
           import tempfile
           import textwrap
+          import threading
           import venv
+          from http.server import BaseHTTPRequestHandler, HTTPServer
           from pathlib import Path
 
           wheel = next(Path("dist").glob("utopic-*.whl"))
           sdist = next(Path("dist").glob("utopic-*.tar.gz"))
+
+          def smoke_node_free_chat_fallback(utopic: Path, smoke_env: dict[str, str]) -> None:
+              class FakeChatHandler(BaseHTTPRequestHandler):
+                  def log_message(self, *args: object) -> None:
+                      pass
+
+                  def do_GET(self) -> None:
+                      self.send_response(200 if self.path == "/health" else 404)
+                      self.end_headers()
+                      self.wfile.write(b"{}")
+
+                  def do_POST(self) -> None:
+                      length = int(self.headers.get("content-length", "0"))
+                      payload = json.loads(self.rfile.read(length) or b"{}")
+                      if self.path != "/v1/chat/completions" or payload.get("messages") != [{"role": "user", "content": "hello"}]:
+                          self.send_response(400)
+                          self.end_headers()
+                          return
+                      body = json.dumps({"choices": [{"message": {"content": "node-free fallback ok"}}]}).encode()
+                      self.send_response(200)
+                      self.send_header("content-type", "application/json")
+                      self.send_header("content-length", str(len(body)))
+                      self.end_headers()
+                      self.wfile.write(body)
+
+              server = HTTPServer(("127.0.0.1", 0), FakeChatHandler)
+              thread = threading.Thread(target=server.serve_forever, daemon=True)
+              thread.start()
+              try:
+                  fallback_env = dict(smoke_env, PATH="")
+                  completed = subprocess.run(
+                      [
+                          str(utopic),
+                          "chat",
+                          "--server",
+                          f"http://127.0.0.1:{server.server_port}",
+                          "--max-tokens",
+                          "7",
+                      ],
+                      env=fallback_env,
+                      input="hello\n/exit\n",
+                      text=True,
+                      stdout=subprocess.PIPE,
+                      stderr=subprocess.PIPE,
+                      timeout=30,
+                  )
+              finally:
+                  server.shutdown()
+                  thread.join(timeout=5)
+                  server.server_close()
+
+              if completed.returncode != 0 or "node-free fallback ok" not in completed.stdout:
+                  print("Installed Node-free chat fallback smoke failed", file=sys.stderr)
+                  print(completed.stdout, file=sys.stderr)
+                  print(completed.stderr, file=sys.stderr)
+                  sys.exit(completed.returncode or 1)
+              if "utopic chat: Node.js was not found; using the built-in Python chat fallback." not in completed.stdout:
+                  print("Installed chat did not use the Python fallback", file=sys.stderr)
+                  print(completed.stdout, file=sys.stderr)
+                  print(completed.stderr, file=sys.stderr)
+                  sys.exit(1)
 
           def smoke(artifact: Path) -> None:
               with tempfile.TemporaryDirectory() as tmp:
@@ -258,6 +322,8 @@ jobs:
                       print(completed.stdout, file=sys.stderr)
                       print(completed.stderr, file=sys.stderr)
                       sys.exit(completed.returncode)
+
+                  smoke_node_free_chat_fallback(utopic, smoke_env)
 
           smoke(wheel)
           smoke(sdist)
