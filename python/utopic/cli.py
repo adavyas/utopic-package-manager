@@ -436,6 +436,9 @@ def main(argv: Optional[Sequence[str]] = None) -> Optional[int]:
     command = args[0]
     rest = args[1:]
     if command == "setup":
+        if "--version" in rest:
+            print(f"utopic setup {__version__}")
+            return 0
         try:
             return installer.setup(rest)
         except subprocess.CalledProcessError as exc:

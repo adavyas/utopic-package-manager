@@ -587,6 +587,16 @@ def test_cli_setup_reports_runtime_failures_without_traceback(monkeypatch, capsy
     assert "Traceback" not in captured.err
 
 
+def test_cli_setup_version_does_not_run_setup(monkeypatch, capsys):
+    monkeypatch.setattr(cli.installer, "setup", lambda argv: pytest.fail("should not run setup"))
+
+    assert cli.main(["setup", "--version"]) == 0
+
+    captured = capsys.readouterr()
+    assert captured.out == f"utopic setup {cli.__version__}\n"
+    assert captured.err == ""
+
+
 def test_cli_run_without_prompt_starts_openai_server(monkeypatch):
     calls = []
 
