@@ -266,6 +266,110 @@ def test_chat_python_fallback_starts_local_server_and_cleans_up(monkeypatch, tmp
     assert process_state == {"terminated": True, "waited": True}
 
 
+def test_chat_python_fallback_prompts_for_model_when_interactive(monkeypatch, tmp_path, capsys):
+    selected_models = []
+    commands = []
+    bin_dir = tmp_path / "bin"
+    server_binary = bin_dir / (
+        "utopic_server.exe" if chat.sys.platform == "win32" else "utopic_server"
+    )
+    bin_dir.mkdir()
+    server_binary.write_text("#!/bin/sh\n", encoding="utf-8")
+    server_binary.chmod(0o755)
+
+    class InteractiveStdin:
+        def isatty(self):
+            return True
+
+    class FakeProcess:
+        def poll(self):
+            return None
+
+        def terminate(self):
+            pass
+
+        def wait(self, timeout=None):
+            pass
+
+    catalog = [
+        models.ModelEntry(
+            id="dream-7b-q4",
+            name="Dream 7B Instruct Q4_K_M",
+            family="dream",
+            filename="dream.gguf",
+            url="https://example.invalid/dream.gguf",
+            size="4.4 GB",
+            recommended=True,
+            description="Recommended local chat model.",
+        ),
+        models.ModelEntry(
+            id="llada-8b-q4",
+            name="LLaDA 8B Instruct Q4_K_M",
+            family="llada",
+            filename="llada.gguf",
+            url="https://example.invalid/llada.gguf",
+            size="4.8 GB",
+            recommended=False,
+            description="Discrete diffusion instruct model.",
+        ),
+    ]
+
+    monkeypatch.setattr(chat.sys, "stdin", InteractiveStdin())
+    monkeypatch.setattr("builtins.input", lambda prompt="": "2")
+    monkeypatch.setattr(chat.models, "list_models", lambda: catalog)
+    monkeypatch.setattr(
+        chat.models,
+        "ensure_model",
+        lambda model: selected_models.append(model) or tmp_path / "models" / f"{model}.gguf",
+    )
+    monkeypatch.setattr(chat.installer, "bin_dir", lambda: bin_dir)
+    monkeypatch.setattr(chat.installer, "cache_root", lambda: tmp_path / "cache")
+    monkeypatch.setattr(
+        chat.subprocess,
+        "Popen",
+        lambda command, stdout, stderr: commands.append(list(command)) or FakeProcess(),
+    )
+    monkeypatch.setattr(chat, "_wait_for_health", lambda process, health_url, log_path: None)
+    monkeypatch.setattr(chat, "_python_chat_loop", lambda base_url, args: 0)
+
+    assert chat._python_fallback_launch([]) == 0
+
+    captured = capsys.readouterr()
+    assert "Available models:" in captured.out
+    assert "1. * dream-7b-q4 (4.4 GB, not downloaded)" in captured.out
+    assert "2.   llada-8b-q4 (4.8 GB, not downloaded)" in captured.out
+    assert selected_models == ["llada-8b-q4"]
+    assert commands[0][2] == str(tmp_path / "models" / "llada-8b-q4.gguf")
+
+
+def test_chat_python_fallback_uses_recommended_model_on_prompt_eof(monkeypatch):
+    class InteractiveStdin:
+        def isatty(self):
+            return True
+
+    catalog = [
+        models.ModelEntry(
+            id="dream-7b-q4",
+            name="Dream 7B Instruct Q4_K_M",
+            family="dream",
+            filename="dream.gguf",
+            url="https://example.invalid/dream.gguf",
+            size="4.4 GB",
+            recommended=True,
+            description="Recommended local chat model.",
+        )
+    ]
+
+    monkeypatch.setattr(chat.sys, "stdin", InteractiveStdin())
+    monkeypatch.setattr(
+        "builtins.input",
+        lambda prompt="": (_ for _ in ()).throw(EOFError()),
+    )
+    monkeypatch.setattr(chat.models, "list_models", lambda: catalog)
+
+    assert chat._choose_model_arg([]) == "dream-7b-q4"
+
+
 def test_chat_python_fallback_checks_server_binary_before_model_resolution(monkeypatch, tmp_path):
     model_calls = []
 

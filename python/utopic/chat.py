@@ -261,6 +261,41 @@ def _model_arg(args: Sequence[str]) -> Optional[str]:
     return None
 
 
+def _choose_model_arg(args: Sequence[str]) -> Optional[str]:
+    existing = _model_arg(args)
+    if existing or not sys.stdin.isatty():
+        return existing
+
+    catalog = models.list_models()
+    recommended = next((entry for entry in catalog if entry.recommended), catalog[0])
+
+    print("\nAvailable models:")
+    for index, entry in enumerate(catalog, start=1):
+        marker = "*" if entry.recommended else " "
+        status = "downloaded" if _is_nonempty_file(entry.path) else "not downloaded"
+        print(f"{index}. {marker} {entry.id} ({entry.size}, {status})")
+        print(f"   {entry.name}")
+
+    try:
+        answer = input(f"\nChoose a model [{recommended.id}]: ").strip()
+    except EOFError:
+        print()
+        return recommended.id
+    if not answer:
+        return recommended.id
+    try:
+        selected = int(answer)
+    except ValueError:
+        return answer
+    if 1 <= selected <= len(catalog):
+        return catalog[selected - 1].id
+    return answer
+
+
+def _is_nonempty_file(path: Path) -> bool:
+    return path.is_file() and path.stat().st_size > 0
+
+
 def _server_base_url(args: Sequence[str]) -> Optional[str]:
     server = _value_after(args, "--server", "")
     if not server:
@@ -439,7 +474,7 @@ def _python_fallback_launch(argv: Sequence[str]) -> int:
         return _python_chat_loop(existing_server, args)
 
     server_binary = _server_binary()
-    model_path = models.ensure_model(_model_arg(args))
+    model_path = models.ensure_model(_choose_model_arg(args))
     base_url = _local_server_base(args)
     log_dir = installer.cache_root() / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
