@@ -120,7 +120,7 @@ int main(int argc, char ** argv) {
             resp["result"] = {
                 { "protocolVersion", "2024-11-05" },
                 { "capabilities", { { "tools", json::object() } } },
-                { "serverInfo", { { "name", server_name }, { "version", "0.1.0" } } }
+                { "serverInfo", { { "name", server_name }, { "version", project_version } } }
             };
         } else if (method == "tools/list") {
             resp["result"] = { { "tools", json::array({ TOOL_SCHEMA }) } };
