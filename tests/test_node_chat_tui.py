@@ -260,6 +260,32 @@ def test_python_chat_fallback_posts_messages_to_openai_compatible_server(
     ]
 
 
+def test_python_chat_fallback_accepts_full_server_endpoint_with_query(
+    fake_openai_server, monkeypatch, capsys
+):
+    base_url, requests, paths = fake_openai_server
+    lines = iter(["hello", "/exit"])
+
+    monkeypatch.setattr("builtins.input", lambda _prompt="": next(lines))
+
+    assert chat._python_fallback_launch(
+        ["--server", f"{base_url}/v1/chat/completions?ignored=1"]
+    ) == 0
+
+    captured = capsys.readouterr()
+    assert f"OpenAI-compatible URL: {base_url}/v1/chat/completions" in captured.out
+    assert "assistant> hello from fake utopic" in captured.out
+    assert paths == ["/v1/chat/completions"]
+    assert requests == [
+        {
+            "model": "utopic",
+            "messages": [{"role": "user", "content": "hello"}],
+            "max_tokens": 512,
+            "temperature": 0,
+        }
+    ]
+
+
 def test_bundled_chat_accepts_openai_compatible_server_url(fake_openai_server):
     node = shutil.which("node")
     if node is None:

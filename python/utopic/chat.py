@@ -319,9 +319,10 @@ def _server_base_url(args: Sequence[str]) -> Optional[str]:
     server = _value_after(args, "--server", "")
     if not server:
         return None
-    if server.rstrip("/").endswith("/v1/chat/completions"):
-        return server.rstrip("/")[: -len("/v1/chat/completions")]
-    return server.rstrip("/")
+    parsed = urllib.parse.urlsplit(server)
+    if parsed.path.rstrip("/") == "/v1/chat/completions":
+        parsed = parsed._replace(path="", query="", fragment="")
+    return urllib.parse.urlunsplit(parsed).rstrip("/")
 
 
 def _chat_completions_url(base_url: str) -> str:

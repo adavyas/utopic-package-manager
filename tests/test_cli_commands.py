@@ -210,6 +210,15 @@ def test_chat_launch_python_fallback_rejects_invalid_server_urls_before_fallback
     assert f"utopic chat: {message}" in captured.err
 
 
+def test_chat_python_fallback_normalizes_full_server_endpoint_with_query():
+    assert (
+        chat._server_base_url(
+            ["--server", "http://127.0.0.1:8910/v1/chat/completions?ignored=1"]
+        )
+        == "http://127.0.0.1:8910"
+    )
+
+
 def test_chat_launch_python_fallback_runs_setup_for_local_server_when_node_is_missing(monkeypatch, tmp_path):
     setup_calls = []
     fallback_calls = []
