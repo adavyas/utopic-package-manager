@@ -10,6 +10,26 @@ and binary installation all happen later through `utopic setup`.
 
 ```sh
 uv tool install utopic
+utopic chat
+```
+
+If you already installed an older Utopic package:
+
+```sh
+uv tool upgrade utopic
+```
+
+`utopic chat` is the easiest first-run path. It checks whether native binaries
+exist, runs `utopic setup` once if they do not, shows the curated model list,
+pulls the selected GGUF into `~/.cache/utopic/models`, starts the local server,
+and drops you into an Ollama-style terminal chat.
+
+The chat UI is a bundled Node app, so Node.js 18 or newer must be on `PATH` for
+`utopic chat`. The rest of the launchers do not require Node.
+
+If you want to run setup separately:
+
+```sh
 utopic setup
 ```
 
@@ -79,6 +99,57 @@ The package installs these launchers:
 - `utopic-mcp`
 - `utopic-acp`
 
+Show help:
+
+```sh
+utopic --help
+utopic chat --help
+utopic run --help
+utopic models --help
+```
+
+Start the terminal chat UI:
+
+```sh
+utopic chat
+```
+
+Use a model alias or local GGUF path:
+
+```sh
+utopic chat dream-7b-q4
+utopic chat -m /path/to/model.gguf
+```
+
+Inside chat:
+
+```text
+/help
+/clear
+/system You are concise.
+/exit
+```
+
+List or pull curated models:
+
+```sh
+utopic models list
+utopic models pull dream-7b-q4
+utopic models path dream-7b-q4
+```
+
+Start an OpenAI-compatible local server and print the live URL:
+
+```sh
+utopic run dream-7b-q4 --port 8910 -ngl 99
+```
+
+The server endpoint is:
+
+```text
+http://127.0.0.1:8910/v1/chat/completions
+```
+
 Run a one-shot prompt:
 
 ```sh
@@ -125,6 +196,14 @@ BF16, and DiffusionGemma Q4 GGUFs. The repo-local native build loaded the same
 files, but was stale for DiffusionGemma prompt wrapping.
 
 ## Development
+
+Rebuild the bundled chat UI after editing `node/utopic-chat.ts`:
+
+```sh
+npm install
+npm run build:chat
+npm run check:chat
+```
 
 Build a wheel:
 

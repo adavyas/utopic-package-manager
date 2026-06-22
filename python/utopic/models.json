@@ -1,0 +1,42 @@
+[
+  {
+    "id": "dream-7b-q4",
+    "name": "Dream 7B Instruct Q4_K_M",
+    "family": "dream",
+    "filename": "Dream-org_Dream-v0-Instruct-7B-Q4_K_M.gguf",
+    "url": "https://huggingface.co/bartowski/Dream-org_Dream-v0-Instruct-7B-GGUF/resolve/main/Dream-org_Dream-v0-Instruct-7B-Q4_K_M.gguf",
+    "size": "4.36 GiB",
+    "recommended": true,
+    "description": "Recommended local chat model for Apple Silicon and CUDA hosts."
+  },
+  {
+    "id": "llada-8b-q4",
+    "name": "LLaDA 8B Instruct Q4_K_M",
+    "family": "llada",
+    "filename": "LLaDA-8B-Instruct.Q4_K_M.gguf",
+    "url": "https://huggingface.co/mradermacher/LLaDA-8B-Instruct-GGUF/resolve/main/LLaDA-8B-Instruct.Q4_K_M.gguf",
+    "size": "4.8 GiB",
+    "recommended": false,
+    "description": "Discrete diffusion instruct model for local experimentation."
+  },
+  {
+    "id": "diffusiongemma-26b-q4",
+    "name": "DiffusionGemma 26B A4B Instruct Q4_K_M",
+    "family": "diffusiongemma",
+    "filename": "diffusiongemma-26B-A4B-it-Q4_K_M.gguf",
+    "url": "https://huggingface.co/unsloth/diffusiongemma-26B-A4B-it-GGUF/resolve/main/diffusiongemma-26B-A4B-it-Q4_K_M.gguf",
+    "size": "approx. 16 GiB",
+    "recommended": false,
+    "description": "Larger DiffusionGemma GGUF for high-memory CUDA hosts."
+  },
+  {
+    "id": "diffusiongemma-26b-bf16",
+    "name": "DiffusionGemma 26B A4B Instruct BF16",
+    "family": "diffusiongemma",
+    "filename": "diffusiongemma-26B-A4B-it-BF16.gguf",
+    "url": "https://huggingface.co/unsloth/diffusiongemma-26B-A4B-it-GGUF/resolve/main/diffusiongemma-26B-A4B-it-BF16.gguf",
+    "size": "approx. 50 GiB",
+    "recommended": false,
+    "description": "BF16 model for large-memory CUDA hosts."
+  }
+]

@@ -1,0 +1,421 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const fs = require("node:fs");
+const http = require("node:http");
+const https = require("node:https");
+const os = require("node:os");
+const path = require("node:path");
+const readline = require("node:readline");
+const node_child_process_1 = require("node:child_process");
+function printHelp() {
+    console.log(`usage: utopic chat [model-alias|/path/to/model.gguf] [options]
+
+Start an Ollama-style terminal chat backed by the local Utopic server.
+
+Options:
+  -m, --model VALUE     Model alias or GGUF path.
+  --server URL          Connect to an existing OpenAI-compatible Utopic server.
+  --host HOST           Host for an auto-started server. Default: 127.0.0.1
+  --port PORT           Port for an auto-started server. Default: 8910
+  -ngl N                GPU layers for an auto-started server. Default: 99
+  --ctx-size N          Context size for an auto-started server. Default: 4096
+  --max-tokens N        Max response tokens. Default: 512
+  --temperature N       Sampling temperature. Default: 0
+  --no-setup            Skip Python-side first-use setup.
+  -h, --help            Show this help.
+
+Chat commands:
+  /help                 Show chat commands.
+  /clear                Clear this session's conversation.
+  /system TEXT          Set or replace the system prompt.
+  /exit                 Quit.
+
+Examples:
+  utopic chat
+  utopic chat dream-7b-q4
+  utopic chat -m /path/to/model.gguf -ngl 99
+  utopic chat --server http://127.0.0.1:8910
+`);
+}
+function parseArgs(argv) {
+    const options = {
+        model: null,
+        server: null,
+        host: "127.0.0.1",
+        port: "8910",
+        ngl: "99",
+        ctxSize: "4096",
+        maxTokens: 512,
+        temperature: 0,
+        help: false,
+    };
+    const positional = [];
+    for (let i = 0; i < argv.length; i += 1) {
+        const arg = argv[i];
+        const next = () => {
+            if (i + 1 >= argv.length)
+                throw new Error(`expected a value after ${arg}`);
+            i += 1;
+            return argv[i];
+        };
+        if (arg === "-h" || arg === "--help")
+            options.help = true;
+        else if (arg === "-m" || arg === "--model")
+            options.model = next();
+        else if (arg.startsWith("--model="))
+            options.model = arg.split("=", 2)[1];
+        else if (arg === "--server")
+            options.server = next();
+        else if (arg.startsWith("--server="))
+            options.server = arg.split("=", 2)[1];
+        else if (arg === "--host")
+            options.host = next();
+        else if (arg.startsWith("--host="))
+            options.host = arg.split("=", 2)[1];
+        else if (arg === "--port")
+            options.port = next();
+        else if (arg.startsWith("--port="))
+            options.port = arg.split("=", 2)[1];
+        else if (arg === "-ngl")
+            options.ngl = next();
+        else if (arg === "--ctx-size")
+            options.ctxSize = next();
+        else if (arg.startsWith("--ctx-size="))
+            options.ctxSize = arg.split("=", 2)[1];
+        else if (arg === "--max-tokens")
+            options.maxTokens = Number(next());
+        else if (arg.startsWith("--max-tokens="))
+            options.maxTokens = Number(arg.split("=", 2)[1]);
+        else if (arg === "--temperature")
+            options.temperature = Number(next());
+        else if (arg.startsWith("--temperature="))
+            options.temperature = Number(arg.split("=", 2)[1]);
+        else if (arg === "--no-setup")
+            continue;
+        else if (arg.startsWith("-"))
+            throw new Error(`unknown option: ${arg}`);
+        else
+            positional.push(arg);
+    }
+    if (!options.model && positional.length > 0)
+        options.model = positional[0];
+    return options;
+}
+function catalogPath() {
+    return process.env.UTOPIC_MODELS_CATALOG ?? path.resolve(__dirname, "..", "models.json");
+}
+function modelsDir() {
+    return process.env.UTOPIC_MODELS_DIR ?? path.join(os.homedir(), ".cache", "utopic", "models");
+}
+function binDir() {
+    return process.env.UTOPIC_BIN_DIR ?? path.join(os.homedir(), ".cache", "utopic", "bin");
+}
+function serverBinary() {
+    return path.join(binDir(), process.platform === "win32" ? "utopic_server.exe" : "utopic_server");
+}
+function clientHost(host) {
+    return host === "0.0.0.0" || host === "::" || host === "" ? "127.0.0.1" : host;
+}
+function normalizeServerBaseUrl(value) {
+    const parsed = new URL(value);
+    if (parsed.pathname.replace(/\/+$/, "") === "/v1/chat/completions") {
+        parsed.pathname = "/";
+        parsed.search = "";
+        parsed.hash = "";
+    }
+    return parsed.toString().replace(/\/+$/, "");
+}
+function chatCompletionsUrl(baseUrl) {
+    return new URL("/v1/chat/completions", baseUrl).toString();
+}
+function readCatalog() {
+    return JSON.parse(fs.readFileSync(catalogPath(), "utf8"));
+}
+function localModelPath(entry) {
+    return path.join(modelsDir(), entry.filename);
+}
+function isLikelyPath(value) {
+    return value.includes("/") || value.includes("\\") || value.endsWith(".gguf");
+}
+function ask(rl, text) {
+    return new Promise((resolve) => rl.question(text, resolve));
+}
+async function chooseModel(catalog) {
+    const recommended = catalog.find((entry) => entry.recommended) ?? catalog[0];
+    if (!process.stdin.isTTY)
+        return recommended.id;
+    console.log("\nAvailable models:");
+    catalog.forEach((entry, index) => {
+        const marker = entry.recommended ? "*" : " ";
+        const exists = fs.existsSync(localModelPath(entry)) ? "downloaded" : "not downloaded";
+        console.log(`${index + 1}. ${marker} ${entry.id} (${entry.size}, ${exists})`);
+        console.log(`   ${entry.name}`);
+    });
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    try {
+        const answer = (await ask(rl, `\nChoose a model [${recommended.id}]: `)).trim();
+        if (!answer)
+            return recommended.id;
+        const numeric = Number(answer);
+        if (Number.isInteger(numeric) && numeric >= 1 && numeric <= catalog.length) {
+            return catalog[numeric - 1].id;
+        }
+        return answer;
+    }
+    finally {
+        rl.close();
+    }
+}
+async function resolveModel(value) {
+    if (value && isLikelyPath(value))
+        return path.resolve(value);
+    const catalog = readCatalog();
+    const modelId = value ?? await chooseModel(catalog);
+    const entry = catalog.find((item) => item.id === modelId);
+    if (!entry)
+        throw new Error(`unknown model '${modelId}'. Run 'utopic models list' to see aliases.`);
+    const destination = localModelPath(entry);
+    if (fs.existsSync(destination))
+        return destination;
+    console.log(`\nPulling ${entry.name} from Hugging Face`);
+    console.log(entry.url);
+    return download(entry.url, destination);
+}
+function download(url, destination) {
+    fs.mkdirSync(path.dirname(destination), { recursive: true });
+    const partial = `${destination}.partial`;
+    if (fs.existsSync(partial))
+        fs.unlinkSync(partial);
+    return new Promise((resolve, reject) => {
+        const request = https.get(url, (response) => {
+            if (response.statusCode && response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+                response.resume();
+                download(response.headers.location, destination).then(resolve, reject);
+                return;
+            }
+            if (response.statusCode !== 200) {
+                response.resume();
+                reject(new Error(`HTTP ${response.statusCode}`));
+                return;
+            }
+            const total = Number(response.headers["content-length"] ?? "0");
+            let downloaded = 0;
+            const out = fs.createWriteStream(partial);
+            response.on("data", (chunk) => {
+                downloaded += chunk.length;
+                if (total) {
+                    const percent = String(Math.floor((downloaded * 100) / total)).padStart(3, " ");
+                    process.stdout.write(`\rDownloading ${path.basename(destination)}: ${percent}%`);
+                }
+            });
+            response.pipe(out);
+            out.on("finish", () => {
+                out.close(() => {
+                    if (total)
+                        process.stdout.write("\n");
+                    fs.renameSync(partial, destination);
+                    resolve(destination);
+                });
+            });
+            out.on("error", reject);
+        });
+        request.on("error", reject);
+    });
+}
+function waitForHealth(baseUrl, timeoutMs, shouldStop) {
+    const deadline = Date.now() + timeoutMs;
+    const healthUrl = new URL("/health", baseUrl);
+    const client = healthUrl.protocol === "https:" ? https : http;
+    return new Promise((resolve, reject) => {
+        const retry = () => {
+            if (shouldStop?.())
+                return;
+            if (Date.now() > deadline) {
+                reject(new Error(`timed out waiting for ${healthUrl.toString()}`));
+                return;
+            }
+            setTimeout(attempt, 300);
+        };
+        const attempt = () => {
+            if (shouldStop?.())
+                return;
+            const req = client.get(healthUrl, (res) => {
+                res.resume();
+                if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300)
+                    resolve();
+                else
+                    retry();
+            });
+            req.on("error", retry);
+        };
+        attempt();
+    });
+}
+async function startServer(options, modelPath) {
+    const binary = serverBinary();
+    if (!fs.existsSync(binary))
+        throw new Error("Utopic native binaries are missing. Run `utopic setup`, then retry.");
+    const baseUrl = `http://${clientHost(options.host)}:${options.port}`;
+    const logPath = path.join(os.homedir(), ".cache", "utopic", "utopic-server.log");
+    fs.mkdirSync(path.dirname(logPath), { recursive: true });
+    const log = fs.openSync(logPath, "a");
+    const child = (0, node_child_process_1.spawn)(binary, [
+        "-m", modelPath,
+        "--host", options.host,
+        "--port", options.port,
+        "-ngl", options.ngl,
+        "--ctx-size", options.ctxSize,
+    ], { stdio: ["ignore", log, log], detached: false });
+    let waitingForHealth = true;
+    const earlyExit = new Promise((_, reject) => {
+        child.once("error", (error) => {
+            if (waitingForHealth)
+                reject(error);
+        });
+        child.once("exit", (code, signal) => {
+            if (waitingForHealth) {
+                const status = code === null ? `signal ${signal}` : `code ${code}`;
+                reject(new Error(`utopic-server exited before it became healthy (${status}). Logs: ${logPath}`));
+            }
+        });
+    });
+    try {
+        await Promise.race([waitForHealth(baseUrl, 120000, () => !waitingForHealth), earlyExit]);
+    }
+    finally {
+        waitingForHealth = false;
+    }
+    console.log(`\nOpenAI-compatible URL: ${baseUrl}/v1/chat/completions`);
+    console.log(`Server logs: ${logPath}\n`);
+    return { baseUrl, child };
+}
+function requestJson(url, body) {
+    const parsed = new URL(url);
+    const client = parsed.protocol === "https:" ? https : http;
+    const payload = JSON.stringify(body);
+    return new Promise((resolve, reject) => {
+        const req = client.request({
+            method: "POST",
+            hostname: parsed.hostname,
+            port: parsed.port,
+            path: parsed.pathname,
+            headers: {
+                "content-type": "application/json",
+                "content-length": Buffer.byteLength(payload),
+            },
+        }, (res) => {
+            let data = "";
+            res.setEncoding("utf8");
+            res.on("data", (chunk) => { data += chunk; });
+            res.on("end", () => {
+                if (!res.statusCode || res.statusCode < 200 || res.statusCode >= 300) {
+                    reject(new Error(`HTTP ${res.statusCode}: ${data}`));
+                    return;
+                }
+                resolve(JSON.parse(data));
+            });
+        });
+        req.on("error", reject);
+        req.write(payload);
+        req.end();
+    });
+}
+async function chatLoop(baseUrl, options) {
+    const interactive = process.stdin.isTTY;
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout, prompt: interactive ? "utopic> " : "" });
+    const messages = [];
+    console.log("Type /help for commands. Type /exit to quit.\n");
+    if (interactive)
+        rl.prompt();
+    for await (const line of rl) {
+        const input = line.trim();
+        if (!input) {
+            if (interactive)
+                rl.prompt();
+            continue;
+        }
+        if (input === "/exit" || input === "/quit")
+            break;
+        if (input === "/clear") {
+            messages.length = 0;
+            console.log("conversation cleared");
+            if (interactive)
+                rl.prompt();
+            continue;
+        }
+        if (input === "/help") {
+            console.log("/clear        clear conversation history");
+            console.log("/system TEXT  set or replace the system prompt");
+            console.log("/exit         quit");
+            if (interactive)
+                rl.prompt();
+            continue;
+        }
+        if (input.startsWith("/system ")) {
+            const content = input.slice("/system ".length).trim();
+            const existing = messages.find((message) => message.role === "system");
+            if (existing)
+                existing.content = content;
+            else
+                messages.unshift({ role: "system", content });
+            console.log("system prompt updated");
+            if (interactive)
+                rl.prompt();
+            continue;
+        }
+        messages.push({ role: "user", content: input });
+        process.stdout.write("assistant> ");
+        try {
+            const response = await requestJson(chatCompletionsUrl(baseUrl), {
+                model: "utopic",
+                messages,
+                max_tokens: options.maxTokens,
+                temperature: options.temperature,
+            });
+            const content = response.choices?.[0]?.message?.content ?? "";
+            console.log(String(content).trim());
+            messages.push({ role: "assistant", content: String(content) });
+        }
+        catch (error) {
+            messages.pop();
+            console.error(`\nrequest failed: ${error.message}`);
+        }
+        if (interactive)
+            rl.prompt();
+    }
+    rl.close();
+}
+async function main() {
+    const options = parseArgs(process.argv.slice(2));
+    if (options.help) {
+        printHelp();
+        return 0;
+    }
+    let child = null;
+    let baseUrl = options.server;
+    try {
+        if (!baseUrl) {
+            const modelPath = await resolveModel(options.model);
+            const started = await startServer(options, modelPath);
+            baseUrl = started.baseUrl;
+            child = started.child;
+        }
+        else {
+            baseUrl = normalizeServerBaseUrl(baseUrl);
+            await waitForHealth(baseUrl, 10000);
+            console.log(`OpenAI-compatible URL: ${chatCompletionsUrl(baseUrl)}`);
+        }
+        await chatLoop(baseUrl, options);
+        return 0;
+    }
+    finally {
+        if (child && !child.killed)
+            child.kill("SIGTERM");
+    }
+}
+main().then((code) => {
+    process.exitCode = code;
+}).catch((error) => {
+    console.error(`utopic chat: ${error.message}`);
+    process.exitCode = 1;
+});

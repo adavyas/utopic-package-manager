@@ -1,0 +1,16 @@
+{
+  "name": "utopic-package-manager",
+  "private": true,
+  "type": "commonjs",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build:chat": "tsc -p tsconfig.json",
+    "check:chat": "tsc -p tsconfig.json --noEmit && node --check python/utopic/node/utopic-chat.js"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.8.0"
+  }
+}
