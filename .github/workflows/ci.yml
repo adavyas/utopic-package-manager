@@ -74,6 +74,7 @@ jobs:
           import subprocess
           import sys
           import tempfile
+          import textwrap
           import threading
           import venv
           from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -155,6 +156,9 @@ jobs:
                   python = venv_dir / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
                   bin_dir = venv_dir / ("Scripts" if os.name == "nt" else "bin")
                   utopic = bin_dir / ("utopic.exe" if os.name == "nt" else "utopic")
+                  utopic_server = bin_dir / ("utopic-server.exe" if os.name == "nt" else "utopic-server")
+                  utopic_mcp = bin_dir / ("utopic-mcp.exe" if os.name == "nt" else "utopic-mcp")
+                  utopic_acp = bin_dir / ("utopic-acp.exe" if os.name == "nt" else "utopic-acp")
 
                   subprocess.run([str(python), "-m", "pip", "install", str(artifact)], check=True)
 
@@ -166,12 +170,23 @@ jobs:
                       [str(utopic), "--version"],
                       [str(utopic), "doctor", "--help"],
                       [str(utopic), "doctor", "--version"],
+                      [str(utopic), "setup", "--version"],
                       [str(utopic), "chat", "--help"],
                       [str(utopic), "chat", "--version"],
+                      [str(utopic), "models", "--version"],
                       [str(utopic), "models", "list"],
                       [str(utopic), "run", "--help"],
                       [str(utopic), "run", "--no-setup", "--help"],
+                      [str(utopic), "run", "--version"],
+                      [str(utopic), "run", "--no-setup", "--version"],
+                      [str(utopic), "run", "--no-setup"],
                       [str(utopic), "setup", "--dry-run", "--jobs", "1"],
+                      [str(utopic_server), "--help"],
+                      [str(utopic_server), "--version"],
+                      [str(utopic_mcp), "--help"],
+                      [str(utopic_mcp), "--version"],
+                      [str(utopic_acp), "--help"],
+                      [str(utopic_acp), "--version"],
                   ]
 
                   for command in commands:
@@ -182,11 +197,69 @@ jobs:
                           stdout=subprocess.PIPE,
                           stderr=subprocess.PIPE,
                       )
-                      if completed.returncode != 0:
+                      expected = 1 if command[-1] == "--no-setup" else 0
+                      if completed.returncode != expected:
                           print(f"Command failed: {' '.join(command)}", file=sys.stderr)
                           print(completed.stdout, file=sys.stderr)
                           print(completed.stderr, file=sys.stderr)
                           sys.exit(completed.returncode)
+                  bad_jobs_env = dict(smoke_env, UTOPIC_BUILD_JOBS="fast")
+                  completed = subprocess.run(
+                      [str(utopic), "setup", "--dry-run"],
+                      env=bad_jobs_env,
+                      text=True,
+                      stdout=subprocess.PIPE,
+                      stderr=subprocess.PIPE,
+                  )
+                  if completed.returncode != 2 or "UTOPIC_BUILD_JOBS must be a positive integer" not in completed.stderr:
+                      print("Invalid UTOPIC_BUILD_JOBS did not fail cleanly", file=sys.stderr)
+                      print(completed.stdout, file=sys.stderr)
+                      print(completed.stderr, file=sys.stderr)
+                      sys.exit(completed.returncode or 1)
+
+                  completed = subprocess.run(
+                      [str(utopic), "setup", "--dry-run", "--jobs", "2"],
+                      env=bad_jobs_env,
+                      text=True,
+                      stdout=subprocess.PIPE,
+                      stderr=subprocess.PIPE,
+                  )
+                  if completed.returncode != 0:
+                      print("--jobs did not override invalid UTOPIC_BUILD_JOBS", file=sys.stderr)
+                      print(completed.stdout, file=sys.stderr)
+                      print(completed.stderr, file=sys.stderr)
+                      sys.exit(completed.returncode)
+
+                  prompt_probe = textwrap.dedent(r'''
+          from pathlib import Path
+          from utopic import cli
+
+          calls = []
+          cli._ensure_setup = lambda enabled=True, binary_name="utopic": calls.append(("setup", enabled, binary_name))
+          cli.models.ensure_model = lambda value=None: calls.append(("model", value)) or Path("/models/dream.gguf")
+          cli._native.main = lambda name, argv=None: calls.append((name, list(argv or [])))
+
+          code = cli.main(["run", "--model=dream-7b-q4", "--prompt=hello", "--temp=0.1", "--seed=7"])
+          expected = [
+              ("setup", True, "utopic"),
+              ("model", "dream-7b-q4"),
+              ("utopic", ["-m", "/models/dream.gguf", "-p", "hello", "--temp", "0.1", "--seed", "7"]),
+          ]
+          if code not in (0, None) or calls != expected:
+              raise SystemExit(f"unexpected run prompt argv normalization: code={code!r} calls={calls!r}")
+          ''')
+                  completed = subprocess.run(
+                      [str(python), "-c", prompt_probe],
+                      env=smoke_env,
+                      text=True,
+                      stdout=subprocess.PIPE,
+                      stderr=subprocess.PIPE,
+                  )
+                  if completed.returncode != 0:
+                      print("Installed run prompt normalization smoke failed", file=sys.stderr)
+                      print(completed.stdout, file=sys.stderr)
+                      print(completed.stderr, file=sys.stderr)
+                      sys.exit(completed.returncode)
                   smoke_node_free_chat_fallback(utopic, smoke_env)
           PY
 

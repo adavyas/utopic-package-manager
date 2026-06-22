@@ -141,6 +141,13 @@ def test_ci_workflow_runs_on_commits_without_publishing():
     assert "python -m twine check dist/*" in workflow
     assert "Smoke test built distributions" in workflow
     assert "Installed Node-free chat fallback smoke failed" in workflow
+    assert 'utopic_server = bin_dir / ("utopic-server.exe" if os.name == "nt" else "utopic-server")' in workflow
+    assert '[str(utopic), "setup", "--version"]' in workflow
+    assert '[str(utopic), "models", "--version"]' in workflow
+    assert '[str(utopic), "run", "--version"]' in workflow
+    assert '[str(utopic_server), "--help"]' in workflow
+    assert "Invalid UTOPIC_BUILD_JOBS did not fail cleanly" in workflow
+    assert "Installed run prompt normalization smoke failed" in workflow
     assert 'PATH=""' in workflow
     assert '[str(utopic), "--help"]' in workflow
     assert "pypi-publish" not in workflow
