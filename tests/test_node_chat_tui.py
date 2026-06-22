@@ -553,6 +553,66 @@ def test_bundled_chat_downloads_http_model_catalog_entries(tmp_path):
     assert not (models_dir / "http-model.gguf.partial").exists()
 
 
+def test_bundled_chat_redownloads_zero_byte_cached_model(tmp_path):
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not installed")
+
+    try:
+        download_server = ThreadingHTTPServer(("127.0.0.1", 0), ModelDownloadServer)
+    except PermissionError as exc:
+        pytest.skip(f"localhost bind is unavailable in this environment: {exc}")
+    download_thread = threading.Thread(target=download_server.serve_forever, daemon=True)
+    download_thread.start()
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    write_fake_chat_server(node, bin_dir)
+    port = reserve_local_port()
+
+    models_dir = tmp_path / "models"
+    models_dir.mkdir()
+    (models_dir / "http-model.gguf").write_bytes(b"")
+    catalog = tmp_path / "models.json"
+    write_catalog(
+        catalog,
+        "http-model",
+        "http-model.gguf",
+        f"http://127.0.0.1:{download_server.server_port}/model.gguf",
+    )
+
+    try:
+        completed = subprocess.run(
+            [
+                node,
+                str(CHAT_SCRIPT),
+                "http-model",
+                "--host",
+                "127.0.0.1",
+                "--port",
+                str(port),
+            ],
+            input="/exit\n",
+            capture_output=True,
+            text=True,
+            timeout=15,
+            env={
+                **os.environ,
+                "UTOPIC_BIN_DIR": str(bin_dir),
+                "UTOPIC_MODELS_CATALOG": str(catalog),
+                "UTOPIC_MODELS_DIR": str(models_dir),
+            },
+        )
+    finally:
+        download_server.shutdown()
+        download_server.server_close()
+        download_thread.join(timeout=5)
+
+    assert completed.returncode == 0, completed.stderr
+    assert (models_dir / "http-model.gguf").read_bytes() == ModelDownloadServer.body
+    assert not (models_dir / "http-model.gguf.partial").exists()
+
+
 def test_bundled_chat_follows_relative_model_download_redirects(tmp_path):
     node = shutil.which("node")
     if node is None:

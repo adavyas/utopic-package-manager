@@ -238,7 +238,7 @@ async function resolveModel(value: string | null): Promise<string> {
   const entry = catalog.find((item) => item.id === modelId);
   if (!entry) throw new Error(`unknown model '${modelId}'. Run 'utopic models list' to see aliases.`);
   const destination = localModelPath(entry);
-  if (fs.existsSync(destination)) return destination;
+  if (fs.existsSync(destination) && fs.statSync(destination).size > 0) return destination;
 
   console.log(`\nPulling ${entry.name} from Hugging Face`);
   console.log(entry.url);
