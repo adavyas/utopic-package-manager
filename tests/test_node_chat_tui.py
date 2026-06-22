@@ -818,6 +818,36 @@ def test_bundled_chat_reports_empty_catalog(tmp_path):
     assert "utopic chat: Utopic model catalog is empty" in completed.stderr
 
 
+def test_bundled_chat_checks_server_binary_before_model_download(tmp_path):
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not installed")
+
+    catalog = tmp_path / "models.json"
+    models_dir = tmp_path / "models"
+    bin_dir = tmp_path / "missing-bin"
+    write_catalog(catalog, "remote-model", "remote-model.gguf", "http://127.0.0.1:9/model.gguf")
+
+    completed = subprocess.run(
+        [node, str(CHAT_SCRIPT), "remote-model"],
+        capture_output=True,
+        text=True,
+        timeout=15,
+        env={
+            **os.environ,
+            "UTOPIC_BIN_DIR": str(bin_dir),
+            "UTOPIC_MODELS_CATALOG": str(catalog),
+            "UTOPIC_MODELS_DIR": str(models_dir),
+        },
+    )
+
+    assert completed.returncode == 1
+    assert "utopic chat: Utopic native binaries are missing" in completed.stderr
+    assert "ECONNREFUSED" not in completed.stderr
+    assert not (models_dir / "remote-model.gguf").exists()
+    assert not (models_dir / "remote-model.gguf.partial").exists()
+
+
 def test_bundled_chat_reports_incomplete_catalog_entry(tmp_path):
     node = shutil.which("node")
     if node is None:

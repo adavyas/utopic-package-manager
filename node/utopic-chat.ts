@@ -177,6 +177,12 @@ function serverBinary(): string {
   return path.join(binDir(), process.platform === "win32" ? "utopic_server.exe" : "utopic_server");
 }
 
+function requireServerBinary(): string {
+  const binary = serverBinary();
+  if (!fs.existsSync(binary)) throw new Error("Utopic native binaries are missing. Run `utopic setup`, then retry.");
+  return binary;
+}
+
 function serverLogPath(): string {
   return configuredPath("UTOPIC_SERVER_LOG", path.join(cacheRoot(), "utopic-server.log"));
 }
@@ -344,7 +350,7 @@ async function chooseModel(catalog: ModelEntry[]): Promise<string> {
   }
 }
 
-async function resolveModel(value: string | null): Promise<string> {
+async function resolveModel(value: string | null, beforeDownload?: () => void): Promise<string> {
   if (value && isLikelyPath(value)) return resolveLocalPath(value);
 
   const catalog = readCatalog();
@@ -355,6 +361,7 @@ async function resolveModel(value: string | null): Promise<string> {
   if (isNonEmptyFile(destination)) return destination;
 
   validateModelUrl(entry);
+  beforeDownload?.();
   console.log(`\nPulling ${entry.name} from Hugging Face`);
   console.log(entry.url);
   return download(entry.url, destination);
@@ -481,9 +488,7 @@ function waitForHealth(baseUrl: string, timeoutMs: number, shouldStop?: () => bo
   });
 }
 
-async function startServer(options: ChatOptions, modelPath: string): Promise<{ baseUrl: string; child: ChildProcess }> {
-  const binary = serverBinary();
-  if (!fs.existsSync(binary)) throw new Error("Utopic native binaries are missing. Run `utopic setup`, then retry.");
+async function startServer(options: ChatOptions, modelPath: string, binary: string): Promise<{ baseUrl: string; child: ChildProcess }> {
   const baseUrl = `http://${clientHost(options.host)}:${options.port}`;
   const logPath = serverLogPath();
   fs.mkdirSync(path.dirname(logPath), { recursive: true });
@@ -625,8 +630,13 @@ async function main(): Promise<number> {
   let baseUrl = options.server;
   try {
     if (!baseUrl) {
-      const modelPath = await resolveModel(options.model);
-      const started = await startServer(options, modelPath);
+      let serverBinaryPath: string | null = null;
+      const ensureServerBinary = (): string => {
+        serverBinaryPath ??= requireServerBinary();
+        return serverBinaryPath;
+      };
+      const modelPath = await resolveModel(options.model, ensureServerBinary);
+      const started = await startServer(options, modelPath, ensureServerBinary());
       baseUrl = started.baseUrl;
       child = started.child;
     } else {
