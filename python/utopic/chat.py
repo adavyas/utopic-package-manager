@@ -326,9 +326,19 @@ def _server_base_url(args: Sequence[str]) -> Optional[str]:
 
 
 def _chat_completions_url(base_url: str) -> str:
-    if base_url.rstrip("/").endswith("/v1/chat/completions"):
-        return base_url.rstrip("/")
-    return f"{base_url.rstrip('/')}/v1/chat/completions"
+    parsed = urllib.parse.urlsplit(base_url)
+    path = parsed.path.rstrip("/")
+    if path == "/v1/chat/completions":
+        parsed = parsed._replace(query="", fragment="")
+    elif path == "/v1":
+        parsed = parsed._replace(path="/v1/chat/completions", query="", fragment="")
+    else:
+        parsed = parsed._replace(
+            path=f"{path}/v1/chat/completions" if path else "/v1/chat/completions",
+            query="",
+            fragment="",
+        )
+    return urllib.parse.urlunsplit(parsed)
 
 
 def _server_health_url(base_url: str) -> str:

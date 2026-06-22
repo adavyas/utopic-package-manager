@@ -219,6 +219,13 @@ def test_chat_python_fallback_normalizes_full_server_endpoint_with_query():
     )
 
 
+def test_chat_python_fallback_accepts_openai_v1_server_base_url():
+    assert (
+        chat._chat_completions_url("http://127.0.0.1:8910/v1")
+        == "http://127.0.0.1:8910/v1/chat/completions"
+    )
+
+
 def test_chat_launch_python_fallback_runs_setup_for_local_server_when_node_is_missing(monkeypatch, tmp_path):
     setup_calls = []
     fallback_calls = []
