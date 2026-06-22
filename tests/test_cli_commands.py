@@ -743,6 +743,41 @@ def test_model_pull_redownloads_zero_byte_cached_model(monkeypatch, tmp_path):
     assert model_file.read_bytes() == b"model"
 
 
+def test_model_pull_rejects_zero_byte_download(monkeypatch, tmp_path):
+    catalog = tmp_path / "models.json"
+    models_dir = tmp_path / "models"
+    catalog.write_text(
+        """
+[
+  {
+    "id": "example",
+    "name": "Example",
+    "family": "test",
+    "filename": "example.gguf",
+    "url": "https://example.invalid/example.gguf",
+    "size": "1 B",
+    "recommended": true,
+    "description": "Test model"
+  }
+]
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("UTOPIC_MODELS_CATALOG", str(catalog))
+    monkeypatch.setenv("UTOPIC_MODELS_DIR", str(models_dir))
+
+    def empty_download(_url, destination):
+        destination.write_bytes(b"")
+
+    monkeypatch.setattr(models, "_copy_stream_with_progress", empty_download)
+
+    with pytest.raises(RuntimeError, match="Failed to pull example"):
+        models.pull_model("example")
+
+    assert not (models_dir / "example.gguf").exists()
+    assert not (models_dir / "example.gguf.partial").exists()
+
+
 def test_model_list_marks_zero_byte_cached_model_not_downloaded(monkeypatch, tmp_path, capsys):
     catalog = tmp_path / "models.json"
     model_file = tmp_path / "models" / "example.gguf"

@@ -305,6 +305,7 @@ function download(url: string, destination: string): Promise<string> {
           }
           if (total) process.stdout.write("\n");
           try {
+            if (downloaded === 0) throw new Error("downloaded 0 bytes");
             fs.renameSync(partial, destination);
             succeed(destination);
           } catch (renameError) {

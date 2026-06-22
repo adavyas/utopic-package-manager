@@ -92,6 +92,17 @@ class ModelDownloadServer(BaseHTTPRequestHandler):
         return
 
 
+class EmptyDownloadServer(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("content-type", "application/octet-stream")
+        self.send_header("content-length", "0")
+        self.end_headers()
+
+    def log_message(self, *_args):
+        return
+
+
 @pytest.fixture()
 def fake_openai_server():
     FakeOpenAIServer.requests = []
@@ -425,6 +436,50 @@ def test_bundled_chat_removes_partial_model_after_download_failure(tmp_path):
     assert completed.returncode == 1
     assert not (models_dir / "broken.gguf.partial").exists()
     assert not (models_dir / "broken.gguf").exists()
+
+
+def test_bundled_chat_rejects_empty_model_download(tmp_path):
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not installed")
+
+    try:
+        download_server = ThreadingHTTPServer(("127.0.0.1", 0), EmptyDownloadServer)
+    except PermissionError as exc:
+        pytest.skip(f"localhost bind is unavailable in this environment: {exc}")
+    download_thread = threading.Thread(target=download_server.serve_forever, daemon=True)
+    download_thread.start()
+
+    models_dir = tmp_path / "models"
+    catalog = tmp_path / "models.json"
+    write_catalog(
+        catalog,
+        "empty-model",
+        "empty-model.gguf",
+        f"http://127.0.0.1:{download_server.server_port}/model.gguf",
+    )
+
+    try:
+        completed = subprocess.run(
+            [node, str(CHAT_SCRIPT), "empty-model"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            env={
+                **os.environ,
+                "UTOPIC_MODELS_CATALOG": str(catalog),
+                "UTOPIC_MODELS_DIR": str(models_dir),
+            },
+        )
+    finally:
+        download_server.shutdown()
+        download_server.server_close()
+        download_thread.join(timeout=5)
+
+    assert completed.returncode == 1
+    assert "utopic chat: downloaded 0 bytes" in completed.stderr
+    assert not (models_dir / "empty-model.gguf").exists()
+    assert not (models_dir / "empty-model.gguf.partial").exists()
 
 
 def reserve_local_port():
