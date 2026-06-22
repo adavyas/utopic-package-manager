@@ -67,6 +67,20 @@ def test_readme_uses_release_build_commands():
     assert "python -m pip wheel . --no-deps -w dist/" not in readme
 
 
+def test_readme_documents_supported_models_without_prohibited_mentions():
+    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+    catalog_path = REPO_ROOT / "python" / "utopic" / "models.json"
+    catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+
+    assert "## Models" in readme
+    for entry in catalog:
+        assert entry["id"] in readme
+        assert entry["name"] in readme
+    assert "BF16, FP8, F16, F32, Q*/IQ* GGUF weights" in readme
+    assert "LLaDA2.0" not in readme
+    assert "LLaDA 2.0" not in readme
+
+
 def test_release_workflow_smokes_installed_prompt_flag_normalization():
     workflow = (REPO_ROOT / ".github" / "workflows" / "python-publish.yml").read_text(
         encoding="utf-8"

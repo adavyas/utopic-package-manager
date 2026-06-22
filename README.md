@@ -108,6 +108,32 @@ To force Metal on macOS:
 utopic setup --backend metal
 ```
 
+## Models
+
+`utopic chat`, `utopic run`, and `utopic models pull` accept either a local
+GGUF path or a curated model alias. The current curated aliases are:
+
+| Alias | Model | Weight | Notes |
+|---|---|---|---|
+| `dream-7b-q4` | Dream 7B Instruct Q4_K_M | Q4_K_M | Recommended first local chat model. |
+| `llada-8b-q4` | LLaDA 8B Instruct Q4_K_M | Q4_K_M | Discrete diffusion instruct model. |
+| `diffusiongemma-26b-q4` | DiffusionGemma 26B A4B Instruct Q4_K_M | Q4_K_M | Larger CUDA/high-memory model. |
+| `diffusiongemma-26b-bf16` | DiffusionGemma 26B A4B Instruct BF16 | BF16 | Large-memory CUDA model. |
+
+The runtime support is broader than the curated download list. Utopic loads GGUF
+models by architecture family:
+
+| Family | Path | Supported weight classes |
+|---|---|---|
+| LLaDA | masked | BF16, FP8, F16, F32, Q*/IQ* GGUF weights |
+| Dream | masked | BF16, FP8, F16, F32, Q*/IQ* GGUF weights |
+| DiffusionGemma | canvas / entropy-bound | BF16, FP8, F16, F32, Q*/IQ* GGUF weights |
+
+FP8 file names are accepted through common GGUF markers such as `FP8`,
+`F8_E4M3`, `F8_E5M2`, `E4M3`, and `E5M2`. Quantized GGUF weights include common
+`Q8_0`, `Q6_K`, `Q5_*`, `Q4_*`, `Q3_*`, `Q2_K`, `IQ*`, and `NVFP4` markers,
+subject to what the package-managed llama.cpp build can load.
+
 ## Commands
 
 The package installs these launchers:
