@@ -393,7 +393,7 @@ def _run(argv: Sequence[str]) -> int:
     if args and args[0] in ("-h", "--help"):
         _print_run_help()
         return 0
-    if args and args[0] == "--version":
+    if "--version" in args:
         print(f"utopic run {__version__}")
         return 0
 
