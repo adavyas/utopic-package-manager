@@ -965,6 +965,36 @@ def test_model_pull_rejects_catalog_url_without_host(monkeypatch, tmp_path):
     assert not (models_dir / "missing-host.gguf.partial").exists()
 
 
+def test_model_pull_rejects_malformed_catalog_url(monkeypatch, tmp_path):
+    catalog = tmp_path / "models.json"
+    models_dir = tmp_path / "models"
+    catalog.write_text(
+        """
+[
+  {
+    "id": "bad-url",
+    "name": "Bad URL",
+    "family": "test",
+    "filename": "bad-url.gguf",
+    "url": "https://[bad]/bad-url.gguf",
+    "size": "1 B",
+    "recommended": true,
+    "description": "Malformed URL"
+  }
+]
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("UTOPIC_MODELS_CATALOG", str(catalog))
+    monkeypatch.setenv("UTOPIC_MODELS_DIR", str(models_dir))
+
+    with pytest.raises(RuntimeError, match="model URL for 'bad-url' must be a URL"):
+        models.pull_model("bad-url")
+
+    assert not (models_dir / "bad-url.gguf").exists()
+    assert not (models_dir / "bad-url.gguf.partial").exists()
+
+
 def test_model_pull_redownloads_zero_byte_cached_model(monkeypatch, tmp_path):
     catalog = tmp_path / "models.json"
     model_file = tmp_path / "models" / "example.gguf"

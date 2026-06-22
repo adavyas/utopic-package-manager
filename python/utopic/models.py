@@ -46,7 +46,10 @@ def _safe_model_filename(entry: ModelEntry) -> str:
 
 
 def _validate_model_url(entry: ModelEntry) -> None:
-    parsed = urllib.parse.urlsplit(entry.url)
+    try:
+        parsed = urllib.parse.urlsplit(entry.url)
+    except ValueError as exc:
+        raise RuntimeError(f"model URL for '{entry.id}' must be a URL") from exc
     if parsed.scheme not in {"http", "https"}:
         raise RuntimeError(f"unsupported model URL protocol for '{entry.id}': {parsed.scheme or '<missing>'}")
     if not parsed.netloc:
