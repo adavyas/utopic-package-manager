@@ -52,7 +52,10 @@ _MODEL_VALUE_FLAGS = {"-m", "--model"}
 
 def _ensure_setup(enabled: bool = True, binary_name: str = "utopic") -> None:
     if enabled and not installer.native_installation_is_current((binary_name,)):
-        code = installer.setup([])
+        try:
+            code = installer.setup([])
+        except subprocess.CalledProcessError as exc:
+            raise RuntimeError(f"setup command failed: {_format_command(exc.cmd)}") from exc
         if code != 0:
             raise SystemExit(code)
 

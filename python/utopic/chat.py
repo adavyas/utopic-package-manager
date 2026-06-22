@@ -1,5 +1,6 @@
 import math
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -178,6 +179,12 @@ def _node_command(argv: Sequence[str]) -> list[str]:
     return [node, str(script), *argv]
 
 
+def _format_command(command: object) -> str:
+    if isinstance(command, (list, tuple)):
+        return shlex.join(str(part) for part in command)
+    return str(command)
+
+
 def launch(argv: Optional[Sequence[str]] = None) -> int:
     args = list(argv) if argv is not None else sys.argv[1:]
     if _wants_help(args):
@@ -188,7 +195,14 @@ def launch(argv: Optional[Sequence[str]] = None) -> int:
         _validate_value_args(args)
         command = _node_command(args)
         if _wants_setup(args) and not installer.native_installation_is_current(("utopic_server",)):
-            code = installer.setup([])
+            try:
+                code = installer.setup([])
+            except subprocess.CalledProcessError as exc:
+                print(
+                    f"utopic chat: setup command failed: {_format_command(exc.cmd)}",
+                    file=sys.stderr,
+                )
+                return exc.returncode if isinstance(exc.returncode, int) and exc.returncode > 0 else 1
             if code != 0:
                 return code
 

@@ -74,6 +74,27 @@ def test_chat_launch_runs_setup_when_server_cache_is_stale(monkeypatch, tmp_path
     assert captured["command"] == ["/usr/bin/node", str(script), "dream-7b-q4"]
 
 
+def test_chat_launch_reports_setup_subprocess_failures_without_traceback(monkeypatch, tmp_path, capsys):
+    script = tmp_path / "utopic-chat.js"
+    script.write_text("console.log('chat')\n", encoding="utf-8")
+
+    def fail_setup(argv):
+        raise subprocess.CalledProcessError(2, ["cmake", "-B", "/tmp/build"])
+
+    monkeypatch.setattr(chat, "_chat_script", lambda: script)
+    monkeypatch.setattr(chat.shutil, "which", lambda name: "/usr/bin/node" if name == "node" else None)
+    monkeypatch.setattr(chat.installer, "native_installation_is_current", lambda binary_names: False)
+    monkeypatch.setattr(chat.installer, "setup", fail_setup)
+    monkeypatch.setattr(chat.subprocess, "run", lambda command, env, check: pytest.fail("should not launch node"))
+
+    assert chat.launch(["dream-7b-q4"]) == 2
+
+    captured = capsys.readouterr()
+    assert "utopic chat: setup command failed: cmake -B /tmp/build" in captured.err
+    assert "Traceback" not in captured.err
+    assert "CalledProcessError" not in captured.err
+
+
 def test_chat_launch_skips_setup_for_existing_server(monkeypatch, tmp_path):
     script = tmp_path / "utopic-chat.js"
     script.write_text("console.log('chat')\n", encoding="utf-8")
@@ -440,6 +461,22 @@ def test_cli_ensure_setup_skips_current_native_cache(monkeypatch):
     cli._ensure_setup(True, "utopic_server")
 
     assert calls == []
+
+
+def test_cli_run_reports_auto_setup_subprocess_failures_without_traceback(monkeypatch, capsys):
+    def fail_setup(argv):
+        raise subprocess.CalledProcessError(2, ["cmake", "-B", "/tmp/build"])
+
+    monkeypatch.setattr(cli.installer, "native_installation_is_current", lambda binary_names: False)
+    monkeypatch.setattr(cli.installer, "setup", fail_setup)
+    monkeypatch.setattr(cli._native, "main", lambda name, argv: pytest.fail("should not launch native binary"))
+
+    assert cli.main(["run", "-m", "/models/default.gguf", "-p", "hi"]) == 1
+
+    captured = capsys.readouterr()
+    assert "utopic run: setup command failed: cmake -B /tmp/build" in captured.err
+    assert "Traceback" not in captured.err
+    assert "CalledProcessError" not in captured.err
 
 
 def test_cli_setup_reports_subprocess_failures_without_traceback(monkeypatch, capsys):
