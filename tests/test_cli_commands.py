@@ -205,6 +205,17 @@ def test_chat_launch_rejects_missing_option_values_before_setup(monkeypatch, cap
     assert f"utopic chat: {message}" in captured.err
 
 
+def test_cli_version_does_not_run_setup_or_native(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "_ensure_setup", lambda enabled=True, binary_name="utopic": pytest.fail("should not run setup"))
+    monkeypatch.setattr(cli._native, "main", lambda name, argv: pytest.fail("should not launch native binary"))
+
+    assert cli.main(["--version"]) == 0
+
+    captured = capsys.readouterr()
+    assert captured.out == f"utopic {cli.__version__}\n"
+    assert captured.err == ""
+
+
 def test_cli_run_with_prompt_delegates_to_native_one_shot(monkeypatch):
     calls = []
 

@@ -132,6 +132,7 @@ jobs:
                   smoke_env = dict(os.environ, UTOPIC_HOME=str(home))
                   commands = [
                       [str(utopic), "--help"],
+                      [str(utopic), "--version"],
                       [str(utopic), "chat", "--help"],
                       [str(utopic), "models", "list"],
                       [str(utopic), "run", "--no-setup"],

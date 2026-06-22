@@ -107,6 +107,7 @@ Show help:
 
 ```sh
 utopic --help
+utopic --version
 utopic chat --help
 utopic run --help
 utopic models --help

@@ -7,7 +7,7 @@ import urllib.error
 import urllib.request
 from typing import Optional, Sequence
 
-from . import _native, chat, installer, models
+from . import __version__, _native, chat, installer, models
 
 
 _RUN_VALUE_FLAGS = {"--host", "--port", "-ngl", "--ctx-size"}
@@ -347,6 +347,7 @@ Commands:
   models    List, pull, and locate curated GGUF models.
 
 Examples:
+  utopic --version
   utopic chat
   utopic chat dream-7b-q4
   utopic run dream-7b-q4 --port 8910 -ngl 99
@@ -424,6 +425,9 @@ def main(argv: Optional[Sequence[str]] = None) -> Optional[int]:
     args = list(sys.argv[1:] if argv is None else argv)
     if not args or args[0] in ("-h", "--help"):
         _print_top_help()
+        return 0
+    if args[0] == "--version":
+        print(f"utopic {__version__}")
         return 0
 
     command = args[0]
