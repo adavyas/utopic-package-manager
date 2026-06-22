@@ -242,6 +242,16 @@ def test_cli_rejects_unknown_command_before_setup(monkeypatch, capsys):
     assert "Traceback" not in captured.err
 
 
+def test_models_version_does_not_read_catalog(monkeypatch, capsys):
+    monkeypatch.setattr(models, "list_models", lambda: pytest.fail("version should not read model catalog"))
+
+    assert models.main(["--version"]) == 0
+
+    captured = capsys.readouterr()
+    assert captured.out == f"utopic models {cli.__version__}\n"
+    assert captured.err == ""
+
+
 def test_cli_run_with_prompt_delegates_to_native_one_shot(monkeypatch):
     calls = []
 

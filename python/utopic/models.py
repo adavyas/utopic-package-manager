@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Sequence
 
+from . import __version__
 from . import installer
 
 
@@ -218,6 +219,11 @@ def _print_path(model_id: str) -> None:
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
+    args_list = list(argv) if argv is not None else sys.argv[1:]
+    if any(arg == "--version" for arg in args_list):
+        print(f"utopic models {__version__}")
+        return 0
+
     parser = argparse.ArgumentParser(
         prog="utopic models",
         description="List, download, and locate curated Utopic GGUF models.",
@@ -233,7 +239,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     path = subparsers.add_parser("path", help="Print the local path for a model alias.")
     path.add_argument("model", help="Model alias.")
 
-    args = parser.parse_args(list(argv) if argv is not None else None)
+    args = parser.parse_args(args_list)
     command = args.command or "list"
 
     try:
