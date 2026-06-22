@@ -56,6 +56,49 @@ class FakeOpenAIServer(BaseHTTPRequestHandler):
         return
 
 
+class PrefixOpenAIServer(BaseHTTPRequestHandler):
+    requests = []
+    paths = []
+    health_paths = []
+
+    def do_GET(self):
+        self.__class__.health_paths.append(self.path)
+        if self.path in {"/health", "/proxy/health"}:
+            self.send_response(200)
+            self.send_header("content-type", "application/json")
+            self.end_headers()
+            self.wfile.write(b'{"status":"ok"}')
+            return
+        self.send_response(404)
+        self.end_headers()
+
+    def do_POST(self):
+        length = int(self.headers.get("content-length", "0"))
+        raw = self.rfile.read(length)
+        self.__class__.paths.append(self.path)
+        self.__class__.requests.append(json.loads(raw.decode("utf-8")))
+        body = json.dumps(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "hello from prefixed utopic",
+                        }
+                    }
+                ]
+            }
+        ).encode("utf-8")
+        self.send_response(200)
+        self.send_header("content-type", "application/json")
+        self.send_header("content-length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *_args):
+        return
+
+
 class InvalidJSONOpenAIServer(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/health":
@@ -329,6 +372,51 @@ def test_bundled_chat_accepts_openai_compatible_server_url(fake_openai_server):
     assert "hello from fake utopic" in completed.stdout
     assert paths == ["/v1/chat/completions"]
     assert requests == [
+        {
+            "model": "utopic",
+            "messages": [{"role": "user", "content": "hi"}],
+            "max_tokens": 512,
+            "temperature": 0,
+        }
+    ]
+
+
+@pytest.mark.parametrize("server_path", ["/proxy", "/proxy/v1/chat/completions"])
+def test_bundled_chat_preserves_prefixed_openai_server_base_url(server_path):
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not installed")
+    PrefixOpenAIServer.requests = []
+    PrefixOpenAIServer.paths = []
+    PrefixOpenAIServer.health_paths = []
+    try:
+        server = ThreadingHTTPServer(("127.0.0.1", 0), PrefixOpenAIServer)
+    except PermissionError as exc:
+        pytest.skip(f"localhost bind is unavailable in this environment: {exc}")
+
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        server_url = f"http://127.0.0.1:{server.server_port}{server_path}"
+        expected_base_url = f"http://127.0.0.1:{server.server_port}/proxy"
+        completed = subprocess.run(
+            [node, str(CHAT_SCRIPT), "--server", server_url],
+            input="hi\n/exit\n",
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+    assert f"OpenAI-compatible URL: {expected_base_url}/v1/chat/completions" in completed.stdout
+    assert "hello from prefixed utopic" in completed.stdout
+    assert PrefixOpenAIServer.health_paths == ["/proxy/health"]
+    assert PrefixOpenAIServer.paths == ["/proxy/v1/chat/completions"]
+    assert PrefixOpenAIServer.requests == [
         {
             "model": "utopic",
             "messages": [{"role": "user", "content": "hi"}],

@@ -205,16 +205,29 @@ function normalizeServerBaseUrl(value: string): string {
     throw new Error("--server must be a URL");
   }
   httpClientForUrl(parsed, "--server");
-  if (parsed.pathname.replace(/\/+$/, "") === "/v1/chat/completions") {
-    parsed.pathname = "/";
+  const pathname = parsed.pathname.replace(/\/+$/, "");
+  if (pathname.endsWith("/v1/chat/completions")) {
+    parsed.pathname = pathname.slice(0, -"/v1/chat/completions".length) || "/";
     parsed.search = "";
     parsed.hash = "";
   }
   return parsed.toString().replace(/\/+$/, "");
 }
 
+function joinServerPath(baseUrl: string, suffix: string): string {
+  const parsed = new URL(baseUrl);
+  const basePath = parsed.pathname.replace(/\/+$/, "");
+  const suffixPath = suffix.replace(/^\/+/, "");
+  parsed.pathname = basePath ? `${basePath}/${suffixPath}` : `/${suffixPath}`;
+  parsed.search = "";
+  parsed.hash = "";
+  return parsed.toString();
+}
+
 function chatCompletionsUrl(baseUrl: string): string {
-  return new URL("/v1/chat/completions", baseUrl).toString();
+  const pathname = new URL(baseUrl).pathname.replace(/\/+$/, "");
+  if (pathname.endsWith("/v1")) return joinServerPath(baseUrl, "chat/completions");
+  return joinServerPath(baseUrl, "v1/chat/completions");
 }
 
 function readCatalog(): ModelEntry[] {
@@ -464,7 +477,7 @@ function download(url: string, destination: string, redirectsRemaining = 10): Pr
 
 function waitForHealth(baseUrl: string, timeoutMs: number, shouldStop?: () => boolean): Promise<void> {
   const deadline = Date.now() + timeoutMs;
-  const healthUrl = new URL("/health", baseUrl);
+  const healthUrl = new URL(joinServerPath(baseUrl, "health"));
   const client = httpClientForUrl(healthUrl, "--server");
   return new Promise((resolve, reject) => {
     const retry = (): void => {
