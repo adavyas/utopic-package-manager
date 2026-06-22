@@ -188,6 +188,30 @@ def test_build_utopic_clears_stale_cmake_cache_when_source_changes(monkeypatch, 
     assert commands[0][:5] == ["cmake", "-B", build_dir, "-S", new_source]
 
 
+def test_prepare_cmake_build_dir_unlinks_stale_symlinked_cache_without_touching_target(tmp_path):
+    old_source = tmp_path / "old-source"
+    new_source = tmp_path / "new-source"
+    target = tmp_path / "real-build-cache"
+    build_dir = tmp_path / "build" / "utopic"
+
+    old_source.mkdir()
+    new_source.mkdir()
+    target.mkdir()
+    (target / "CMakeCache.txt").write_text(
+        f"CMAKE_HOME_DIRECTORY:INTERNAL={old_source}\n",
+        encoding="utf-8",
+    )
+    target_marker = target / "keep.txt"
+    target_marker.write_text("keep", encoding="utf-8")
+    build_dir.parent.mkdir()
+    build_dir.symlink_to(target, target_is_directory=True)
+
+    installer._prepare_cmake_build_dir(build_dir, new_source, dry_run=False)
+
+    assert not build_dir.exists()
+    assert target_marker.read_text(encoding="utf-8") == "keep"
+
+
 def test_native_installation_is_not_current_without_metadata(monkeypatch, tmp_path):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()

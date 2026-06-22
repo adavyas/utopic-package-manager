@@ -527,7 +527,10 @@ def _prepare_cmake_build_dir(build_dir: Path, source_dir: Path, *, dry_run: bool
         return
     print(f"+ remove stale CMake build directory {build_dir}")
     if not dry_run:
-        shutil.rmtree(build_dir)
+        if build_dir.is_dir() and not build_dir.is_symlink():
+            shutil.rmtree(build_dir)
+        else:
+            build_dir.unlink()
 
 
 def _remove_path(path: Path, *, dry_run: bool) -> None:
