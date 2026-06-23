@@ -29,6 +29,39 @@ def test_auto_backend_prefers_metal_when_available(monkeypatch):
     assert decision.reason == "Metal device available"
 
 
+def test_detect_metal_device_falls_back_to_system_profiler_when_probe_fails(monkeypatch):
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        if command[0] == "/usr/bin/clang++":
+            return subprocess.CompletedProcess(command, 1, "", "compile denied")
+        if command == ["system_profiler", "SPDisplaysDataType"]:
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                """
+Graphics/Displays:
+
+    Apple M4 Pro:
+
+      Chipset Model: Apple M4 Pro
+      Type: GPU
+      Metal: Supported
+""",
+                "",
+            )
+        raise AssertionError(command)
+
+    monkeypatch.setattr(installer.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(installer.shutil, "which", lambda name: "/usr/bin/clang++" if name == "clang++" else None)
+    monkeypatch.setattr(installer.subprocess, "run", fake_run)
+
+    assert installer._detect_metal_device() == "Apple M4 Pro"
+    assert calls[0][0] == "/usr/bin/clang++"
+    assert calls[1] == ["system_profiler", "SPDisplaysDataType"]
+
+
 def test_auto_backend_uses_cuda_when_cuda_compiler_is_available(monkeypatch):
     monkeypatch.setattr(installer, "_detect_metal_device", lambda: None)
     monkeypatch.setattr(installer, "_detect_cuda_architectures", lambda: "80")

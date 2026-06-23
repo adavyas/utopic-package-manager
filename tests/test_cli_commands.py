@@ -1,3 +1,4 @@
+import json
 import os
 import shutil
 import subprocess
@@ -1041,6 +1042,42 @@ def test_cli_doctor_reports_environment_without_running_setup(monkeypatch, tmp_p
     monkeypatch.setattr(cli.installer, "setup", lambda argv: pytest.fail("should not run setup"))
     monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}")
     monkeypatch.setattr(cli.subprocess, "check_output", lambda command, text, stderr: "v20.0.0\n")
+    monkeypatch.setattr(
+        cli.bridge,
+        "ADAPTERS",
+        {
+            "diffusers": object(),
+            "kokoro": object(),
+            "wan": object(),
+        },
+    )
+    checks = {
+        "diffusers": {
+            "engine": "diffusers",
+            "ready": False,
+            "status": "api_mismatch",
+            "install_hint": 'pip install "utopic[image]"',
+            "message": "torch/torchvision versions are incompatible",
+        },
+        "kokoro": {
+            "engine": "kokoro",
+            "ready": False,
+            "status": "missing_dependencies",
+            "install_hint": 'pip install "utopic[tts]"',
+            "missing": ["kokoro"],
+        },
+        "wan": {
+            "engine": "wan",
+            "ready": True,
+            "status": "ready",
+            "install_hint": 'pip install "utopic[video]"',
+        },
+    }
+    monkeypatch.setattr(
+        cli.bridge,
+        "_check_adapter",
+        lambda adapter: checks[next(key for key, value in cli.bridge.ADAPTERS.items() if value is adapter)],
+    )
 
     assert cli.main(["doctor"]) == 0
 
@@ -1055,6 +1092,10 @@ def test_cli_doctor_reports_environment_without_running_setup(monkeypatch, tmp_p
     assert "cmake: /usr/bin/cmake" in captured.out
     assert "git: /usr/bin/git" in captured.out
     assert "Node.js: /usr/bin/node (v20.0.0)" in captured.out
+    assert "Bridge engines:" in captured.out
+    assert "diffusers: api_mismatch - torch/torchvision versions are incompatible" in captured.out
+    assert 'kokoro: missing_dependencies - missing kokoro; pip install "utopic[tts]"' in captured.out
+    assert "wan: ready" in captured.out
     assert captured.err == ""
     assert cache_checks == [cli.installer.BIN_NAMES]
 
@@ -1084,6 +1125,32 @@ def test_cli_doctor_returns_failure_when_required_setup_tools_are_missing(monkey
     assert "Missing required setup tools: cmake, git" in captured.err
 
 
+def test_cli_doctor_bridge_line_collapses_multiline_api_errors():
+    line = cli._bridge_doctor_line(
+        {
+            "engine": "diffusers",
+            "ready": False,
+            "status": "api_mismatch",
+            "message": "first line\nsecond line\nthird line",
+        }
+    )
+
+    assert line == "  diffusers: api_mismatch - first line"
+
+
+def test_cli_doctor_bridge_line_summarizes_generic_diffusers_import_errors():
+    line = cli._bridge_doctor_line(
+        {
+            "engine": "wan",
+            "ready": False,
+            "status": "api_mismatch",
+            "message": "Failed to import diffusers.pipelines.pipeline_utils because of the following error (look up to see its traceback):\nvery long details",
+        }
+    )
+
+    assert line == "  wan: api_mismatch - installed diffusers/transformers/torch stack is incompatible; run utopic-bridge wan --check for details"
+
+
 def test_cli_doctor_help_does_not_probe_environment(monkeypatch, capsys):
     monkeypatch.setattr(cli.installer, "_resolve_backend", lambda requested, arch: pytest.fail("should not probe backend"))
     monkeypatch.setattr(cli.installer, "native_installation_is_current", lambda binary_names: pytest.fail("should not inspect cache"))
@@ -1105,8 +1172,8 @@ def test_cli_run_without_prompt_starts_openai_server(monkeypatch):
     monkeypatch.setattr(
         cli,
         "_run_server",
-        lambda model_path, server_args, host, port: calls.append(
-            ("server", model_path, list(server_args), host, port)
+        lambda model_path, server_args, host, port, native_port: calls.append(
+            ("server", model_path, list(server_args), host, port, native_port)
         )
         or 0,
     )
@@ -1115,7 +1182,7 @@ def test_cli_run_without_prompt_starts_openai_server(monkeypatch):
 
     assert calls == [
         ("setup", True, "utopic_server"),
-        ("server", "/models/dream.gguf", ["--port", "8999", "-ngl", "99"], "127.0.0.1", "8999"),
+        ("server", "/models/dream.gguf", ["-ngl", "99"], "127.0.0.1", "8999", "9000"),
     ]
 
 
@@ -1128,8 +1195,8 @@ def test_cli_run_allows_server_flags_before_positional_model(monkeypatch):
     monkeypatch.setattr(
         cli,
         "_run_server",
-        lambda model_path, server_args, host, port: calls.append(
-            ("server", model_path, list(server_args), host, port)
+        lambda model_path, server_args, host, port, native_port: calls.append(
+            ("server", model_path, list(server_args), host, port, native_port)
         )
         or 0,
     )
@@ -1138,7 +1205,53 @@ def test_cli_run_allows_server_flags_before_positional_model(monkeypatch):
 
     assert calls == [
         ("setup", True, "utopic_server"),
-        ("server", "/models/dream-7b-q4.gguf", ["--port", "8999", "-ngl", "99"], "127.0.0.1", "8999"),
+        ("server", "/models/dream-7b-q4.gguf", ["-ngl", "99"], "127.0.0.1", "8999", "9000"),
+    ]
+
+
+def test_cli_run_bridge_model_starts_gateway_without_native_server(monkeypatch, capsys):
+    calls = []
+    entry = models.ModelEntry(
+        id="qwen-image",
+        name="Qwen-Image",
+        family="qwen-image",
+        filename="qwen-image",
+        url="https://huggingface.co/Qwen/Qwen-Image",
+        size="20B parameters",
+        recommended=False,
+        description="Image model",
+        modality="image",
+        engine="diffusers",
+        runtime="bridge",
+        hardware=("mac-48gb", "gb10", "cuda"),
+        endpoints=("/v1/images/generations", "/v1/responses"),
+        outputs=("image/png",),
+        repo="Qwen/Qwen-Image",
+    )
+
+    monkeypatch.setattr(cli, "_ensure_setup", lambda enabled=True, binary_name="utopic": pytest.fail("bridge run should not build native binaries"))
+    monkeypatch.setattr(cli._native, "binary_path", lambda name: pytest.fail("bridge run should not inspect native binaries"))
+    monkeypatch.setattr(cli, "_run_server", lambda *args: pytest.fail("bridge run should not start native server"))
+    monkeypatch.setattr(cli.models, "get_model", lambda model_id: entry if model_id == "qwen-image" else None)
+    monkeypatch.setattr(cli.models, "pull_model", lambda model_id: calls.append(("pull", model_id)) or Path("/models/qwen-image"))
+    monkeypatch.setattr(
+        cli.gateway,
+        "serve",
+        lambda host, port, native_base_url=None: calls.append(("gateway", host, port, native_base_url)) or None,
+    )
+
+    assert cli.main(["run", "qwen-image", "--host", "0.0.0.0", "--port", "8999"]) == 0
+
+    captured = capsys.readouterr()
+    assert "OpenAI-compatible endpoint: http://127.0.0.1:8999/v1/images/generations" in captured.out
+    assert "OpenAI-compatible endpoint: http://127.0.0.1:8999/v1/responses" in captured.out
+    assert "OpenAI-compatible URL: http://127.0.0.1:8999/v1/chat/completions" not in captured.out
+    assert "MCP endpoint: http://127.0.0.1:8999/mcp" in captured.out
+    assert "Chat with this server:" not in captured.out
+    assert "Native text server:" not in captured.out
+    assert calls == [
+        ("pull", "qwen-image"),
+        ("gateway", "0.0.0.0", 8999, None),
     ]
 
 
@@ -1207,15 +1320,15 @@ def test_cli_run_normalizes_wildcard_host_for_client_url(monkeypatch):
     monkeypatch.setattr(
         cli,
         "_run_server",
-        lambda model_path, server_args, host, port: calls.append(
-            ("server", model_path, list(server_args), host, port)
+        lambda model_path, server_args, host, port, native_port: calls.append(
+            ("server", model_path, list(server_args), host, port, native_port)
         )
         or 0,
     )
 
     assert cli.main(["run", "dream-7b-q4", "--host", "0.0.0.0", "--port", "8999"]) == 0
     assert calls == [
-        ("server", "/models/dream.gguf", ["--host", "0.0.0.0", "--port", "8999"], "0.0.0.0", "8999")
+        ("server", "/models/dream.gguf", [], "0.0.0.0", "8999", "9000")
     ]
     assert cli._server_url("0.0.0.0", "8999") == "http://127.0.0.1:8999/v1/chat/completions"
     assert cli._server_health_url("::", "8999") == "http://127.0.0.1:8999/health"
@@ -1230,8 +1343,8 @@ def test_cli_run_without_arguments_uses_default_model_and_starts_server(monkeypa
     monkeypatch.setattr(
         cli,
         "_run_server",
-        lambda model_path, server_args, host, port: calls.append(
-            ("server", model_path, list(server_args), host, port)
+        lambda model_path, server_args, host, port, native_port: calls.append(
+            ("server", model_path, list(server_args), host, port, native_port)
         )
         or 0,
     )
@@ -1240,8 +1353,81 @@ def test_cli_run_without_arguments_uses_default_model_and_starts_server(monkeypa
 
     assert calls == [
         ("setup", True, "utopic_server"),
-        ("server", "/models/default.gguf", [], "127.0.0.1", "8910"),
+        ("server", "/models/default.gguf", [], "127.0.0.1", "8910", "8911"),
     ]
+
+
+def test_cli_run_allows_explicit_native_backend_port(monkeypatch):
+    calls = []
+
+    monkeypatch.setattr(cli, "_ensure_setup", lambda enabled=True, binary_name="utopic": None)
+    _stub_server_binary(monkeypatch)
+    monkeypatch.setattr(cli.models, "ensure_model", lambda value=None: Path("/models/default.gguf"))
+    monkeypatch.setattr(
+        cli,
+        "_run_server",
+        lambda model_path, server_args, host, port, native_port: calls.append(
+            ("server", model_path, list(server_args), host, port, native_port)
+        )
+        or 0,
+    )
+
+    assert cli.main(["run", "--port", "8999", "--native-port", "9900", "--ctx-size", "2048"]) == 0
+
+    assert calls == [
+        ("server", "/models/default.gguf", ["--ctx-size", "2048"], "127.0.0.1", "8999", "9900"),
+    ]
+
+
+def test_run_server_starts_native_server_then_gateway(monkeypatch, capsys):
+    calls = []
+
+    class FakeProcess:
+        returncode = None
+
+        def poll(self):
+            return None
+
+        def terminate(self):
+            calls.append(("terminate",))
+            self.returncode = -15
+
+        def wait(self, timeout=None):
+            calls.append(("wait", timeout))
+            return self.returncode
+
+        def kill(self):
+            calls.append(("kill",))
+            self.returncode = -9
+
+    fake_process = FakeProcess()
+    monkeypatch.setattr(
+        cli.subprocess,
+        "Popen",
+        lambda command: calls.append(("popen", command)) or fake_process,
+    )
+    monkeypatch.setattr(cli._native, "binary_path", lambda name: Path("/cache/bin/utopic_server"))
+    monkeypatch.setattr(cli, "_wait_for_health", lambda process, url: calls.append(("health", process, url)))
+
+    def fake_gateway_serve(host, port, native_base_url=None):
+        calls.append(("gateway", host, port, native_base_url))
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(cli.gateway, "serve", fake_gateway_serve)
+
+    assert cli._run_server("/models/default.gguf", ["-ngl", "99"], "0.0.0.0", "8999", "9900") == 130
+
+    assert calls == [
+        ("popen", ["/cache/bin/utopic_server", "-m", "/models/default.gguf", "--host", "127.0.0.1", "--port", "9900", "-ngl", "99"]),
+        ("health", fake_process, "http://127.0.0.1:9900/health"),
+        ("gateway", "0.0.0.0", 8999, "http://127.0.0.1:9900"),
+        ("terminate",),
+        ("wait", 5),
+    ]
+    captured = capsys.readouterr()
+    assert "OpenAI-compatible URL: http://127.0.0.1:8999/v1/chat/completions" in captured.out
+    assert "MCP endpoint: http://127.0.0.1:8999/mcp" in captured.out
+    assert "Native text server: http://127.0.0.1:9900" in captured.out
 
 
 def test_cli_run_server_reports_missing_binary_without_traceback(monkeypatch, capsys):
@@ -1337,7 +1523,7 @@ def test_cli_run_server_returns_failure_for_signal_exit(monkeypatch, tmp_path):
     monkeypatch.setattr(cli.subprocess, "Popen", lambda argv: ExitedProcess())
     monkeypatch.setattr(cli.time, "monotonic", lambda: 0)
 
-    assert cli._run_server("/models/dream.gguf", [], "127.0.0.1", "8910") == 1
+    assert cli._run_server("/models/dream.gguf", [], "127.0.0.1", "8910", "8911") == 1
 
 
 def test_cli_run_server_reaps_process_after_health_timeout(monkeypatch, tmp_path):
@@ -1364,7 +1550,7 @@ def test_cli_run_server_reaps_process_after_health_timeout(monkeypatch, tmp_path
     monkeypatch.setattr(cli.subprocess, "Popen", lambda argv: RunningProcess())
     monkeypatch.setattr(cli, "_wait_for_health", lambda process, health_url: (_ for _ in ()).throw(RuntimeError("timed out")))
 
-    assert cli._run_server("/models/dream.gguf", [], "127.0.0.1", "8910") == 143
+    assert cli._run_server("/models/dream.gguf", [], "127.0.0.1", "8910", "8911") == 143
     assert events == ["terminate", ("wait", 5)]
 
 
@@ -1378,29 +1564,60 @@ def test_cli_run_server_prints_openai_url_after_health(monkeypatch, tmp_path, ca
             events.append("poll")
             return None
 
-        def wait(self):
-            events.append("wait")
+        def terminate(self):
+            events.append("terminate")
+            self.returncode = -15
+
+        def wait(self, timeout=None):
+            events.append(("wait", timeout))
             return self.returncode
+
+        def kill(self):
+            events.append("kill")
 
     process = HealthyProcess()
     monkeypatch.setattr(cli._native, "binary_path", lambda name: tmp_path / name)
     monkeypatch.setattr(cli.subprocess, "Popen", lambda argv: events.append(("popen", argv)) or process)
     monkeypatch.setattr(cli, "_wait_for_health", lambda process, health_url: events.append(("health", health_url)))
+    monkeypatch.setattr(
+        cli.gateway,
+        "serve",
+        lambda host, port, native_base_url=None: events.append(("gateway", host, port, native_base_url)),
+    )
 
-    assert cli._run_server("/models/dream.gguf", ["--port", "8999"], "0.0.0.0", "8999") == 0
+    assert cli._run_server("/models/dream.gguf", ["-ngl", "99"], "0.0.0.0", "8999", "9900") == 0
 
     captured = capsys.readouterr()
     assert "OpenAI-compatible URL: http://127.0.0.1:8999/v1/chat/completions" in captured.out
+    assert "OpenAI-compatible models: http://127.0.0.1:8999/v1/models" in captured.out
+    assert "MCP endpoint: http://127.0.0.1:8999/mcp" in captured.out
+    assert "Native text server: http://127.0.0.1:9900" in captured.out
     assert "Chat with this server: utopic chat --server http://127.0.0.1:8999" in captured.out
     assert events == [
-        ("popen", [str(tmp_path / "utopic_server"), "-m", "/models/dream.gguf", "--port", "8999"]),
-        ("health", "http://127.0.0.1:8999/health"),
-        "wait",
+        (
+            "popen",
+            [
+                str(tmp_path / "utopic_server"),
+                "-m",
+                "/models/dream.gguf",
+                "--host",
+                "127.0.0.1",
+                "--port",
+                "9900",
+                "-ngl",
+                "99",
+            ],
+        ),
+        ("health", "http://127.0.0.1:9900/health"),
+        ("gateway", "0.0.0.0", 8999, "http://127.0.0.1:9900"),
+        "poll",
+        "terminate",
+        ("wait", 5),
     ]
 
 
 def test_model_catalog_resolves_hf_download_url():
-    entry = models.get_model("dream-7b-q4")
+    entry = models.get_model("diffusiongemma-26b-a4b-q4")
 
     assert entry is not None
     assert entry.filename.endswith(".gguf")
@@ -1503,6 +1720,42 @@ def test_model_list_reports_wrong_catalog_field_type(monkeypatch, tmp_path, caps
 
     captured = capsys.readouterr()
     assert "utopic models: Invalid model catalog entry 0: id must be a string" in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_model_list_rejects_bridge_catalog_entry_with_unknown_engine(monkeypatch, tmp_path, capsys):
+    catalog = tmp_path / "models.json"
+    catalog.write_text(
+        """
+[
+  {
+    "id": "unknown-bridge",
+    "name": "Unknown Bridge",
+    "family": "unknown",
+    "filename": "unknown-bridge",
+    "url": "https://example.invalid/unknown-bridge",
+    "repo": "example/unknown-bridge",
+    "size": "1 B",
+    "recommended": false,
+    "description": "Unknown bridge engine",
+    "modality": "image",
+    "engine": "not-a-real-engine",
+    "runtime": "bridge",
+    "hardware": ["local"],
+    "endpoints": ["/v1/images/generations"],
+    "outputs": ["image/png"]
+  }
+]
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("UTOPIC_MODELS_CATALOG", str(catalog))
+
+    assert models.main(["list"]) == 1
+
+    captured = capsys.readouterr()
+    assert "utopic models: Invalid model catalog entry 0" in captured.err
+    assert "unknown bridge engine: not-a-real-engine" in captured.err
     assert "Traceback" not in captured.err
 
 
@@ -1745,6 +1998,41 @@ def test_model_pull_redownloads_zero_byte_cached_model(monkeypatch, tmp_path):
     assert model_file.read_bytes() == b"model"
 
 
+def test_model_pull_redownloads_incomplete_cached_model_with_expected_bytes(monkeypatch, tmp_path):
+    catalog = tmp_path / "models.json"
+    model_file = tmp_path / "models" / "example.gguf"
+    model_file.parent.mkdir()
+    model_file.write_bytes(b"partial")
+    catalog.write_text(
+        """
+[
+  {
+    "id": "example",
+    "name": "Example",
+    "family": "test",
+    "filename": "example.gguf",
+    "url": "https://example.invalid/example.gguf",
+    "size": "10 B",
+    "bytes": 10,
+    "recommended": true,
+    "description": "Test model"
+  }
+]
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("UTOPIC_MODELS_CATALOG", str(catalog))
+    monkeypatch.setenv("UTOPIC_MODELS_DIR", str(model_file.parent))
+
+    def download(_url, destination):
+        destination.write_bytes(b"0123456789")
+
+    monkeypatch.setattr(models, "_copy_stream_with_progress", download)
+
+    assert models.pull_model("example") == model_file
+    assert model_file.read_bytes() == b"0123456789"
+
+
 def test_model_pull_rejects_zero_byte_download(monkeypatch, tmp_path):
     catalog = tmp_path / "models.json"
     models_dir = tmp_path / "models"
@@ -1795,6 +2083,39 @@ def test_model_list_marks_zero_byte_cached_model_not_downloaded(monkeypatch, tmp
     "filename": "example.gguf",
     "url": "https://example.invalid/example.gguf",
     "size": "1 B",
+    "recommended": true,
+    "description": "Test model"
+  }
+]
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("UTOPIC_MODELS_CATALOG", str(catalog))
+    monkeypatch.setenv("UTOPIC_MODELS_DIR", str(model_file.parent))
+
+    assert models.main(["list"]) == 0
+
+    captured = capsys.readouterr()
+    assert "not downloaded" in captured.out
+    assert "downloaded" not in captured.out.replace("not downloaded", "")
+
+
+def test_model_list_marks_wrong_size_cached_model_not_downloaded(monkeypatch, tmp_path, capsys):
+    catalog = tmp_path / "models.json"
+    model_file = tmp_path / "models" / "example.gguf"
+    model_file.parent.mkdir()
+    model_file.write_bytes(b"partial")
+    catalog.write_text(
+        """
+[
+  {
+    "id": "example",
+    "name": "Example",
+    "family": "test",
+    "filename": "example.gguf",
+    "url": "https://example.invalid/example.gguf",
+    "size": "10 B",
+    "bytes": 10,
     "recommended": true,
     "description": "Test model"
   }
@@ -1963,3 +2284,395 @@ def test_model_pull_replaces_stale_model_directory(monkeypatch, tmp_path):
 
     assert models.pull_model("example") == model_dir
     assert model_dir.read_bytes() == b"model"
+
+
+def test_bridge_model_pull_prepares_metadata_cache(monkeypatch, tmp_path):
+    catalog = tmp_path / "models.json"
+    models_dir = tmp_path / "models"
+    catalog.write_text(
+        """
+[
+  {
+    "id": "qwen-image",
+    "name": "Qwen-Image",
+    "family": "qwen-image",
+    "filename": "qwen-image",
+    "url": "https://huggingface.co/Qwen/Qwen-Image",
+    "repo": "Qwen/Qwen-Image",
+    "size": "20B parameters",
+    "recommended": true,
+    "description": "Image model",
+    "modality": "image",
+    "engine": "diffusers",
+    "runtime": "bridge",
+    "hardware": ["mac-48gb", "gb10", "cuda"],
+    "endpoints": ["/v1/images/generations", "/v1/responses"],
+    "outputs": ["image/png"]
+  }
+]
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("UTOPIC_MODELS_CATALOG", str(catalog))
+    monkeypatch.setenv("UTOPIC_MODELS_DIR", str(models_dir))
+
+    model_dir = models.pull_model("qwen-image")
+
+    assert model_dir == models_dir / "qwen-image"
+    metadata = json.loads((model_dir / "utopic-model.json").read_text(encoding="utf-8"))
+    assert metadata == {
+        "bridge": {
+            "command": "utopic-bridge diffusers",
+            "environment_variable": "UTOPIC_BRIDGE_DIFFUSERS_COMMAND",
+            "input": "prompt",
+            "install_hint": 'pip install "utopic[image]"',
+            "schema_version": "utopic-bridge/v1",
+        },
+        "endpoints": ["/v1/images/generations", "/v1/responses"],
+        "engine": "diffusers",
+        "hardware": ["mac-48gb", "gb10", "cuda"],
+        "id": "qwen-image",
+        "modality": "image",
+        "name": "Qwen-Image",
+        "outputs": ["image/png"],
+        "repo": "Qwen/Qwen-Image",
+        "runtime": "bridge",
+        "url": "https://huggingface.co/Qwen/Qwen-Image",
+    }
+    assert models.is_model_downloaded(models.get_model("qwen-image"))
+
+
+def test_models_pull_all_prepares_every_catalog_model(monkeypatch, tmp_path, capsys):
+    catalog = tmp_path / "models.json"
+    models_dir = tmp_path / "models"
+    catalog.write_text(
+        """
+[
+  {
+    "id": "diffusiongemma-26b-a4b-q4",
+    "name": "DiffusionGemma Q4",
+    "family": "diffusiongemma",
+    "filename": "diffusiongemma.gguf",
+    "url": "https://example.invalid/diffusiongemma.gguf",
+    "size": "5 B",
+    "recommended": true,
+    "description": "Text model",
+    "bytes": 5,
+    "modality": "text",
+    "engine": "native-gguf",
+    "runtime": "native",
+    "hardware": ["mac-48gb", "gb10", "cuda"],
+    "endpoints": ["/v1/chat/completions", "/v1/responses"],
+    "outputs": ["text"]
+  },
+  {
+    "id": "qwen-image",
+    "name": "Qwen-Image",
+    "family": "qwen-image",
+    "filename": "qwen-image",
+    "url": "https://huggingface.co/Qwen/Qwen-Image",
+    "repo": "Qwen/Qwen-Image",
+    "size": "20B parameters",
+    "recommended": false,
+    "description": "Image model",
+    "modality": "image",
+    "engine": "diffusers",
+    "runtime": "bridge",
+    "hardware": ["mac-48gb", "gb10", "cuda"],
+    "endpoints": ["/v1/images/generations", "/v1/responses"],
+    "outputs": ["image/png"]
+  }
+]
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("UTOPIC_MODELS_CATALOG", str(catalog))
+    monkeypatch.setenv("UTOPIC_MODELS_DIR", str(models_dir))
+
+    def download(_url, destination):
+        destination.write_bytes(b"model")
+
+    monkeypatch.setattr(models, "_copy_stream_with_progress", download)
+
+    assert models.main(["pull", "--all"]) == 0
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {
+        "object": "utopic.model_pull.list",
+        "data": [
+            {
+                "id": "diffusiongemma-26b-a4b-q4",
+                "path": str(models_dir / "diffusiongemma.gguf"),
+                "runtime": "native",
+                "modality": "text",
+            },
+            {
+                "id": "qwen-image",
+                "path": str(models_dir / "qwen-image"),
+                "runtime": "bridge",
+                "modality": "image",
+            },
+        ],
+    }
+    assert (models_dir / "diffusiongemma.gguf").read_bytes() == b"model"
+    assert (models_dir / "qwen-image" / "utopic-model.json").is_file()
+
+
+def test_models_pull_all_rejects_extra_model_argument(capsys):
+    assert models.main(["pull", "--all", "diffusiongemma-26b-a4b-q4"]) == 1
+
+    captured = capsys.readouterr()
+    assert "utopic models: pull accepts either a model alias or --all, not both" in captured.err
+
+
+def test_models_check_reports_ready_bridge_model(monkeypatch, tmp_path, capsys):
+    catalog = tmp_path / "models.json"
+    models_dir = tmp_path / "models"
+    catalog.write_text(
+        """
+[
+  {
+    "id": "qwen-image",
+    "name": "Qwen-Image",
+    "family": "qwen-image",
+    "filename": "qwen-image",
+    "url": "https://huggingface.co/Qwen/Qwen-Image",
+    "repo": "Qwen/Qwen-Image",
+    "size": "20B parameters",
+    "recommended": true,
+    "description": "Image model",
+    "modality": "image",
+    "engine": "diffusers",
+    "runtime": "bridge",
+    "hardware": ["mac-48gb", "gb10", "cuda"],
+    "endpoints": ["/v1/images/generations", "/v1/responses"],
+    "outputs": ["image/png"]
+  }
+]
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("UTOPIC_MODELS_CATALOG", str(catalog))
+    monkeypatch.setenv("UTOPIC_MODELS_DIR", str(models_dir))
+    models.pull_model("qwen-image")
+    monkeypatch.setattr(
+        models.bridge,
+        "_check_adapter",
+        lambda adapter: {
+            "schema_version": "utopic-bridge/v1",
+            "engine": adapter.engine,
+            "status": "ready",
+            "ready": True,
+            "packages": list(adapter.packages),
+            "missing": [],
+            "install_hint": adapter.install_hint,
+            "description": adapter.description,
+        },
+    )
+
+    assert models.main(["check", "qwen-image"]) == 0
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["id"] == "qwen-image"
+    assert payload["runtime"] == "bridge"
+    assert payload["status"] == "ready"
+    assert payload["ready"] is True
+    assert payload["cache"]["prepared"] is True
+    assert payload["cache"]["path"] == str(models_dir / "qwen-image")
+    assert payload["bridge"]["engine"] == "diffusers"
+    assert payload["bridge"]["status"] == "ready"
+    assert payload["bridge"]["ready"] is True
+
+
+def test_models_check_reports_bridge_dependency_gap(monkeypatch, tmp_path, capsys):
+    catalog = tmp_path / "models.json"
+    models_dir = tmp_path / "models"
+    catalog.write_text(
+        """
+[
+  {
+    "id": "kokoro-82m",
+    "name": "Kokoro 82M",
+    "family": "kokoro",
+    "filename": "kokoro-82m",
+    "url": "https://huggingface.co/hexgrad/Kokoro-82M",
+    "repo": "hexgrad/Kokoro-82M",
+    "size": "82M parameters",
+    "recommended": true,
+    "description": "TTS model",
+    "modality": "tts",
+    "engine": "kokoro",
+    "runtime": "bridge",
+    "hardware": ["mac-48gb", "gb10", "cuda"],
+    "endpoints": ["/v1/audio/speech", "/v1/responses"],
+    "outputs": ["audio/wav"]
+  }
+]
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("UTOPIC_MODELS_CATALOG", str(catalog))
+    monkeypatch.setenv("UTOPIC_MODELS_DIR", str(models_dir))
+    monkeypatch.setattr(
+        models.bridge,
+        "_check_adapter",
+        lambda adapter: {
+            "schema_version": "utopic-bridge/v1",
+            "engine": adapter.engine,
+            "status": "missing_dependencies",
+            "ready": False,
+            "packages": list(adapter.packages),
+            "missing": ["kokoro"],
+            "install_hint": adapter.install_hint,
+            "description": adapter.description,
+        },
+    )
+
+    assert models.main(["check", "kokoro-82m"]) == 1
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "not_ready"
+    assert payload["ready"] is False
+    assert payload["cache"]["prepared"] is False
+    assert payload["bridge"]["status"] == "missing_dependencies"
+    assert payload["bridge"]["missing"] == ["kokoro"]
+    assert payload["next_steps"] == [
+        "utopic models pull kokoro-82m",
+        (
+            'pip install "utopic[tts]" && python -m pip install '
+            "https://github.com/explosion/spacy-models/releases/download/"
+            "en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl"
+        ),
+    ]
+
+
+def test_models_check_all_reports_every_model_and_fails_when_any_not_ready(monkeypatch, tmp_path, capsys):
+    catalog = tmp_path / "models.json"
+    models_dir = tmp_path / "models"
+    catalog.write_text(
+        """
+[
+  {
+    "id": "diffusiongemma-26b-a4b-q4",
+    "name": "DiffusionGemma Q4",
+    "family": "diffusiongemma",
+    "filename": "diffusiongemma.gguf",
+    "url": "https://example.invalid/diffusiongemma.gguf",
+    "size": "1 B",
+    "recommended": true,
+    "description": "Text model",
+    "bytes": 5,
+    "modality": "text",
+    "engine": "native-gguf",
+    "runtime": "native",
+    "hardware": ["mac-48gb", "gb10", "cuda"],
+    "endpoints": ["/v1/chat/completions", "/v1/responses"],
+    "outputs": ["text"]
+  },
+  {
+    "id": "kokoro-82m",
+    "name": "Kokoro 82M",
+    "family": "kokoro",
+    "filename": "kokoro-82m",
+    "url": "https://huggingface.co/hexgrad/Kokoro-82M",
+    "repo": "hexgrad/Kokoro-82M",
+    "size": "82M parameters",
+    "recommended": false,
+    "description": "TTS model",
+    "modality": "tts",
+    "engine": "kokoro",
+    "runtime": "bridge",
+    "hardware": ["mac-48gb", "gb10", "cuda"],
+    "endpoints": ["/v1/audio/speech", "/v1/responses"],
+    "outputs": ["audio/wav"]
+  }
+]
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("UTOPIC_MODELS_CATALOG", str(catalog))
+    monkeypatch.setenv("UTOPIC_MODELS_DIR", str(models_dir))
+    model_file = models_dir / "diffusiongemma.gguf"
+    model_file.parent.mkdir(parents=True)
+    model_file.write_bytes(b"model")
+    monkeypatch.setattr(
+        models.bridge,
+        "_check_adapter",
+        lambda adapter: {
+            "schema_version": "utopic-bridge/v1",
+            "engine": adapter.engine,
+            "status": "missing_dependencies",
+            "ready": False,
+            "packages": list(adapter.packages),
+            "missing": ["kokoro"],
+            "install_hint": adapter.install_hint,
+            "description": adapter.description,
+        },
+    )
+
+    assert models.main(["check", "--all"]) == 1
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["object"] == "utopic.model_check.list"
+    assert payload["ready"] is False
+    assert payload["summary"] == {"ready": 1, "not_ready": 1, "total": 2}
+    assert [item["id"] for item in payload["data"]] == [
+        "diffusiongemma-26b-a4b-q4",
+        "kokoro-82m",
+    ]
+    assert payload["data"][0]["ready"] is True
+    assert payload["data"][1]["ready"] is False
+    assert payload["data"][1]["next_steps"] == [
+        "utopic models pull kokoro-82m",
+        (
+            'pip install "utopic[tts]" && python -m pip install '
+            "https://github.com/explosion/spacy-models/releases/download/"
+            "en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl"
+        ),
+    ]
+
+
+def test_models_check_reports_native_model_file_status(monkeypatch, tmp_path, capsys):
+    catalog = tmp_path / "models.json"
+    models_dir = tmp_path / "models"
+    catalog.write_text(
+        """
+[
+  {
+    "id": "diffusiongemma-26b-a4b-q4",
+    "name": "DiffusionGemma Q4",
+    "family": "diffusiongemma",
+    "filename": "diffusiongemma.gguf",
+    "url": "https://example.invalid/diffusiongemma.gguf",
+    "size": "1 B",
+    "recommended": true,
+    "description": "Text model",
+    "bytes": 5,
+    "modality": "text",
+    "engine": "native-gguf",
+    "runtime": "native",
+    "hardware": ["mac-48gb", "gb10", "cuda"],
+    "endpoints": ["/v1/chat/completions", "/v1/responses"],
+    "outputs": ["text"]
+  }
+]
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("UTOPIC_MODELS_CATALOG", str(catalog))
+    monkeypatch.setenv("UTOPIC_MODELS_DIR", str(models_dir))
+    model_file = models_dir / "diffusiongemma.gguf"
+    model_file.parent.mkdir(parents=True)
+    model_file.write_bytes(b"model")
+
+    assert models.main(["check", "diffusiongemma-26b-a4b-q4"]) == 0
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "ready"
+    assert payload["ready"] is True
+    assert payload["cache"] == {
+        "path": str(model_file),
+        "present": True,
+        "size": 5,
+        "expected_size": 5,
+    }

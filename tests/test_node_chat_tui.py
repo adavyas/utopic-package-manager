@@ -56,6 +56,42 @@ class FakeOpenAIServer(BaseHTTPRequestHandler):
         return
 
 
+class StreamingOpenAIServer(BaseHTTPRequestHandler):
+    requests = []
+    paths = []
+
+    def do_GET(self):
+        if self.path == "/health":
+            self.send_response(200)
+            self.send_header("content-type", "application/json")
+            self.end_headers()
+            self.wfile.write(b'{"status":"ok"}')
+            return
+        self.send_response(404)
+        self.end_headers()
+
+    def do_POST(self):
+        length = int(self.headers.get("content-length", "0"))
+        raw = self.rfile.read(length)
+        self.__class__.paths.append(self.path)
+        self.__class__.requests.append(json.loads(raw.decode("utf-8")))
+        self.send_response(200)
+        self.send_header("content-type", "text/event-stream")
+        self.end_headers()
+        chunks = [
+            {"choices": [{"delta": {"content": "hello "}}]},
+            {"choices": [{"delta": {"content": "from stream"}}]},
+        ]
+        for chunk in chunks:
+            self.wfile.write(f"data: {json.dumps(chunk)}\r\n\r\n".encode("utf-8"))
+            self.wfile.flush()
+        self.wfile.write(b"data: [DONE]\r\n\r\n")
+        self.wfile.flush()
+
+    def log_message(self, *_args):
+        return
+
+
 class PrefixOpenAIServer(BaseHTTPRequestHandler):
     requests = []
     paths = []
@@ -229,7 +265,7 @@ def test_bundled_chat_help_runs_without_server():
     )
 
     assert "usage: utopic chat" in completed.stdout
-    assert "utopic chat dream-7b-q4" in completed.stdout
+    assert "utopic chat diffusiongemma-26b-a4b-q4" in completed.stdout
 
 
 def test_bundled_chat_version_runs_without_server():
@@ -269,9 +305,58 @@ def test_bundled_chat_posts_messages_to_openai_compatible_server(fake_openai_ser
     assert requests == [
         {
             "model": "utopic",
-            "messages": [{"role": "user", "content": "hi"}],
+            "messages": [
+                {"role": "system", "content": chat.DEFAULT_SYSTEM_PROMPT},
+                {"role": "user", "content": "hi"},
+            ],
             "max_tokens": 512,
             "temperature": 0,
+        }
+    ]
+
+
+def test_bundled_chat_streams_interactive_responses_with_crlf_sse_boundaries():
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not installed")
+    StreamingOpenAIServer.requests = []
+    StreamingOpenAIServer.paths = []
+    try:
+        server = ThreadingHTTPServer(("127.0.0.1", 0), StreamingOpenAIServer)
+    except PermissionError as exc:
+        pytest.skip(f"localhost bind is unavailable in this environment: {exc}")
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        completed = subprocess.run(
+            [node, str(CHAT_SCRIPT), "--server", base_url],
+            input="hi\n/exit\n",
+            capture_output=True,
+            text=True,
+            timeout=15,
+            env={**os.environ, "UTOPIC_CHAT_FORCE_TTY": "1"},
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+    assert completed.returncode == 0, completed.stderr
+    assert ">>> " in completed.stdout
+    assert "Thinking..." in completed.stdout
+    assert "hello from stream" in completed.stdout
+    assert StreamingOpenAIServer.paths == ["/v1/chat/completions"]
+    assert StreamingOpenAIServer.requests == [
+        {
+            "model": "utopic",
+            "messages": [
+                {"role": "system", "content": chat.DEFAULT_SYSTEM_PROMPT},
+                {"role": "user", "content": "hi"},
+            ],
+            "max_tokens": 512,
+            "temperature": 0,
+            "stream": True,
         }
     ]
 
@@ -291,12 +376,16 @@ def test_python_chat_fallback_posts_messages_to_openai_compatible_server(
 
     captured = capsys.readouterr()
     assert "utopic chat: Node.js was not found; using the built-in Python chat fallback." in captured.out
-    assert "assistant> hello from fake utopic" in captured.out
+    assert "Thinking..." in captured.out
+    assert "hello from fake utopic" in captured.out
     assert paths == ["/v1/chat/completions"]
     assert requests == [
         {
             "model": "utopic",
-            "messages": [{"role": "user", "content": "hello"}],
+            "messages": [
+                {"role": "system", "content": chat.DEFAULT_SYSTEM_PROMPT},
+                {"role": "user", "content": "hello"},
+            ],
             "max_tokens": 7,
             "temperature": 0.2,
         }
@@ -317,12 +406,15 @@ def test_python_chat_fallback_accepts_full_server_endpoint_with_query(
 
     captured = capsys.readouterr()
     assert f"OpenAI-compatible URL: {base_url}/v1/chat/completions" in captured.out
-    assert "assistant> hello from fake utopic" in captured.out
+    assert "hello from fake utopic" in captured.out
     assert paths == ["/v1/chat/completions"]
     assert requests == [
         {
             "model": "utopic",
-            "messages": [{"role": "user", "content": "hello"}],
+            "messages": [
+                {"role": "system", "content": chat.DEFAULT_SYSTEM_PROMPT},
+                {"role": "user", "content": "hello"},
+            ],
             "max_tokens": 512,
             "temperature": 0,
         }
@@ -341,12 +433,15 @@ def test_python_chat_fallback_accepts_openai_v1_server_base_url(
 
     captured = capsys.readouterr()
     assert f"OpenAI-compatible URL: {base_url}/v1/chat/completions" in captured.out
-    assert "assistant> hello from fake utopic" in captured.out
+    assert "hello from fake utopic" in captured.out
     assert paths == ["/v1/chat/completions"]
     assert requests == [
         {
             "model": "utopic",
-            "messages": [{"role": "user", "content": "hello"}],
+            "messages": [
+                {"role": "system", "content": chat.DEFAULT_SYSTEM_PROMPT},
+                {"role": "user", "content": "hello"},
+            ],
             "max_tokens": 512,
             "temperature": 0,
         }
@@ -382,12 +477,15 @@ def test_python_chat_fallback_preserves_prefixed_openai_server_url(
 
     captured = capsys.readouterr()
     assert f"OpenAI-compatible URL: {expected_base_url}/v1/chat/completions" in captured.out
-    assert "assistant> hello from prefixed utopic" in captured.out
+    assert "hello from prefixed utopic" in captured.out
     assert PrefixOpenAIServer.paths == ["/proxy/v1/chat/completions"]
     assert PrefixOpenAIServer.requests == [
         {
             "model": "utopic",
-            "messages": [{"role": "user", "content": "hello"}],
+            "messages": [
+                {"role": "system", "content": chat.DEFAULT_SYSTEM_PROMPT},
+                {"role": "user", "content": "hello"},
+            ],
             "max_tokens": 512,
             "temperature": 0,
         }
@@ -415,7 +513,10 @@ def test_bundled_chat_accepts_openai_compatible_server_url(fake_openai_server):
     assert requests == [
         {
             "model": "utopic",
-            "messages": [{"role": "user", "content": "hi"}],
+            "messages": [
+                {"role": "system", "content": chat.DEFAULT_SYSTEM_PROMPT},
+                {"role": "user", "content": "hi"},
+            ],
             "max_tokens": 512,
             "temperature": 0,
         }
@@ -443,7 +544,10 @@ def test_bundled_chat_accepts_openai_v1_server_base_url(fake_openai_server):
     assert requests == [
         {
             "model": "utopic",
-            "messages": [{"role": "user", "content": "hi"}],
+            "messages": [
+                {"role": "system", "content": chat.DEFAULT_SYSTEM_PROMPT},
+                {"role": "user", "content": "hi"},
+            ],
             "max_tokens": 512,
             "temperature": 0,
         }
@@ -488,7 +592,10 @@ def test_bundled_chat_preserves_prefixed_openai_server_base_url(server_path):
     assert PrefixOpenAIServer.requests == [
         {
             "model": "utopic",
-            "messages": [{"role": "user", "content": "hi"}],
+            "messages": [
+                {"role": "system", "content": chat.DEFAULT_SYSTEM_PROMPT},
+                {"role": "user", "content": "hi"},
+            ],
             "max_tokens": 512,
             "temperature": 0,
         }
@@ -1002,22 +1109,21 @@ process.on("SIGTERM", () => server.close(() => process.exit(0)));
     fake_server.chmod(0o755)
 
 
-def write_catalog(catalog, model_id, filename, url):
+def write_catalog(catalog, model_id, filename, url, expected_bytes=None):
+    entry = {
+        "id": model_id,
+        "name": model_id.replace("-", " ").title(),
+        "family": "test",
+        "filename": filename,
+        "url": url,
+        "size": "19 B",
+        "recommended": True,
+        "description": "Test download",
+    }
+    if expected_bytes is not None:
+        entry["bytes"] = expected_bytes
     catalog.write_text(
-        json.dumps(
-            [
-                {
-                    "id": model_id,
-                    "name": model_id.replace("-", " ").title(),
-                    "family": "test",
-                    "filename": filename,
-                    "url": url,
-                    "size": "19 B",
-                    "recommended": True,
-                    "description": "Test download",
-                }
-            ]
-        ),
+        json.dumps([entry]),
         encoding="utf-8",
     )
 
@@ -1206,6 +1312,68 @@ def test_bundled_chat_downloads_http_model_catalog_entries(tmp_path):
     assert completed.returncode == 0, completed.stderr
     assert "downloaded model works" not in completed.stdout
     assert (models_dir / "http-model.gguf").read_bytes() == ModelDownloadServer.body
+    assert not (models_dir / "http-model.gguf.partial").exists()
+
+
+def test_bundled_chat_redownloads_incomplete_cached_model(tmp_path):
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not installed")
+
+    try:
+        download_server = ThreadingHTTPServer(("127.0.0.1", 0), ModelDownloadServer)
+    except PermissionError as exc:
+        pytest.skip(f"localhost bind is unavailable in this environment: {exc}")
+    download_thread = threading.Thread(target=download_server.serve_forever, daemon=True)
+    download_thread.start()
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    write_fake_chat_server(node, bin_dir)
+    port = reserve_local_port()
+
+    models_dir = tmp_path / "models"
+    models_dir.mkdir()
+    model_file = models_dir / "http-model.gguf"
+    model_file.write_bytes(b"partial")
+    catalog = tmp_path / "models.json"
+    write_catalog(
+        catalog,
+        "http-model",
+        "http-model.gguf",
+        f"http://127.0.0.1:{download_server.server_port}/model.gguf",
+        expected_bytes=len(ModelDownloadServer.body),
+    )
+
+    try:
+        completed = subprocess.run(
+            [
+                node,
+                str(CHAT_SCRIPT),
+                "http-model",
+                "--host",
+                "127.0.0.1",
+                "--port",
+                str(port),
+            ],
+            input="/exit\n",
+            capture_output=True,
+            text=True,
+            timeout=15,
+            env={
+                **os.environ,
+                "UTOPIC_BIN_DIR": str(bin_dir),
+                "UTOPIC_MODELS_CATALOG": str(catalog),
+                "UTOPIC_MODELS_DIR": str(models_dir),
+            },
+        )
+    finally:
+        download_server.shutdown()
+        download_server.server_close()
+        download_thread.join(timeout=5)
+
+    assert completed.returncode == 0, completed.stderr
+    assert model_file.read_bytes() == ModelDownloadServer.body
     assert not (models_dir / "http-model.gguf.partial").exists()
 
 

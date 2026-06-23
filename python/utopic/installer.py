@@ -296,7 +296,7 @@ def _detect_metal_device() -> Optional[str]:
 
     compiler = shutil.which("clang++") or shutil.which("clang")
     if compiler is None:
-        return None
+        return _detect_metal_device_from_system_profiler()
 
     source = """
 #import <Foundation/Foundation.h>
@@ -331,18 +331,38 @@ int main() {
             text=True,
         )
         if compile_result.returncode != 0:
-            return None
+            return _detect_metal_device_from_system_profiler()
 
         run_result = subprocess.run([exe], capture_output=True, text=True)
         if run_result.returncode != 0:
-            return None
+            return _detect_metal_device_from_system_profiler()
 
     for line in run_result.stdout.splitlines():
         if line.startswith("device="):
             device = line.removeprefix("device=").strip()
             if device and device != "null":
                 return device
-    return None
+    return _detect_metal_device_from_system_profiler()
+
+
+def _detect_metal_device_from_system_profiler() -> Optional[str]:
+    try:
+        completed = subprocess.run(
+            ["system_profiler", "SPDisplaysDataType"],
+            capture_output=True,
+            text=True,
+        )
+    except OSError:
+        return None
+    if completed.returncode != 0 or "Metal: Supported" not in completed.stdout:
+        return None
+    for line in completed.stdout.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("Chipset Model:"):
+            device = stripped.split(":", 1)[1].strip()
+            if device:
+                return device
+    return "Metal"
 
 
 def _resolve_backend(requested_backend: str, cuda_architectures: Optional[str]) -> BackendDecision:

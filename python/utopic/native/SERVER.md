@@ -1,18 +1,22 @@
 # Utopic runtime — CLI & OpenAI-compatible server
 
-Local serving for diffusion LMs (LLaDA / Dream / DiffusionGemma) over GGUF, Ollama-style.
-Both frontends share one generation core (`utopic_core.h`): the confidence/convergence gate, the
-entropy-bound path for canvas models, schema-constrained decoding, and the tolerant tool extractor.
+Local serving for DiffusionGemma GGUF text models, Ollama-style. The native CLI
+and server share one generation core (`utopic_core.h`): the confidence /
+convergence gate, entropy-bound canvas decoding, schema-constrained decoding,
+and the tolerant tool extractor.
 
-Supported dLLM GGUF families:
+The higher-level package also installs `utopic-runtime`, a lightweight
+OpenAI-compatible and MCP gateway for the full Utopic catalog:
 
-| Model family | Runtime path | Required weight classes |
+| Modality | Endpoint | Runtime today |
 |---|---|---|
-| LLaDA | masked | BF16, FP8, F16, F32, Q*/IQ* GGUF weights |
-| Dream | masked | BF16, FP8, F16, F32, Q*/IQ* GGUF weights |
-| DiffusionGemma | canvas / entropy-bound | BF16, FP8, F16, F32, Q*/IQ* GGUF weights |
+| text | `/v1/chat/completions`, `/v1/responses` | native GGUF, optionally proxied through `utopic-server` |
+| image | `/v1/images/generations`, `/v1/responses` | bridge |
+| tts | `/v1/audio/speech`, `/v1/responses` | bridge |
+| music | `/v1/audio/generations`, `/v1/responses` | bridge |
+| video | `/v1/videos/generations`, `/v1/responses` | bridge |
 
-See `SUPPORTED_MODELS.md` for exact architecture/name and quantization markers.
+See `SUPPORTED_MODELS.md` for model aliases and quantization markers.
 
 ## Setup
 
@@ -26,6 +30,7 @@ utopic setup
 The package manager installs:
 
 - `utopic` - CLI
+- `utopic-runtime` - unified OpenAI-compatible and MCP gateway
 - `utopic-server` - OpenAI-compatible server
 - `utopic-mcp` - MCP stdio server
 - `utopic-acp` - ACP stdio agent
@@ -60,10 +65,7 @@ c.chat.completions.create(model="local", messages=[{"role":"user","content":"2+2
 
 Supported request fields:
 - `messages` (system/user/assistant; tool/unknown roles fold into user)
-- `stream` (SSE `chat.completion.chunk` deltas + `[DONE]`) - **diffusion-native live streaming**: the
-  masked path (LLaDA/Dream) emits the committed canvas prefix as deltas while it denoises (tokens resolve
-  over steps, not strictly left-to-right; deltas are additive/OpenAI-safe). The entropy-bound path
-  (DiffusionGemma) streams the cleaned answer on completion.
+- `stream` (SSE `chat.completion.chunk` deltas + `[DONE]`) - DiffusionGemma streams its cleaned answer on completion.
 - `temperature`, `max_tokens`, `seed`
 - `tools` (OpenAI function tools) -> injected into the prompt; output harvested into
   `message.tool_calls` (`finish_reason: tool_calls`)
@@ -82,7 +84,6 @@ Supported request fields:
   `reasoning_content` is best-effort; the markers never leak into the answer.
 - Tool-call argument fidelity and schema value fidelity are model-dependent (the structure/typing
   is guaranteed; the values are the model's job).
-- Streaming (masked path) is live: deltas are emitted from inside the denoise loop as the canvas
-  commits, so they arrive during generation. Because diffusion commits out of order, a delta is sent
-  only when the committed prefix extends (additive/OpenAI-safe); non-monotonic mid-step churn isn't
-  shown. The entropy-bound path (DiffusionGemma) streams its cleaned answer on completion.
+- `utopic-runtime --native-base-url http://127.0.0.1:8910` forwards text
+  OpenAI requests to a resident `utopic-server` while exposing image, audio,
+  music, video, model catalog, and MCP routes from one gateway.

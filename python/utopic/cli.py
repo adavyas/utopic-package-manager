@@ -9,11 +9,11 @@ import urllib.error
 import urllib.request
 from typing import Optional, Sequence
 
-from . import __version__, _native, chat, installer, models
+from . import __version__, _native, bridge, chat, gateway, installer, models
 
 
-_RUN_VALUE_FLAGS = {"--host", "--port", "-ngl", "--ctx-size"}
-_PROMPT_VALUE_FLAGS = _RUN_VALUE_FLAGS | {
+_RUN_VALUE_FLAGS = {"--host", "--port", "--native-port", "-ngl", "--ctx-size"}
+_PROMPT_VALUE_FLAGS = (_RUN_VALUE_FLAGS - {"--native-port"}) | {
     "-p",
     "--prompt",
     "-n",
@@ -32,6 +32,7 @@ _PROMPT_VALUE_FLAGS = _RUN_VALUE_FLAGS | {
 }
 _RUN_NUMERIC_FLAGS = {
     "--port": (1, 65535, "an integer from 1 to 65535"),
+    "--native-port": (1, 65535, "an integer from 1 to 65535"),
     "-ngl": (0, None, "a non-negative integer"),
     "--ctx-size": (1, None, "a positive integer"),
 }
@@ -384,6 +385,36 @@ def _server_health_url(host: str, port: str) -> str:
     return f"http://{_client_host(host)}:{port}/health"
 
 
+def _endpoint_url(host: str, port: str, endpoint: str) -> str:
+    return f"{_server_base_url(host, port)}{endpoint}"
+
+
+def _default_native_port(public_port: str) -> str:
+    try:
+        parsed = int(public_port)
+    except ValueError:
+        return "8911"
+    if parsed < 65535:
+        return str(parsed + 1)
+    return str(parsed - 1)
+
+
+def _native_server_args(args: Sequence[str]) -> list[str]:
+    native_args: list[str] = []
+    index = 0
+    while index < len(args):
+        arg = args[index]
+        if arg in {"--host", "--port", "--native-port"}:
+            index += 2
+            continue
+        if any(arg.startswith(flag + "=") for flag in ("--host", "--port", "--native-port")):
+            index += 1
+            continue
+        native_args.append(arg)
+        index += 1
+    return native_args
+
+
 def _wait_for_health(process: subprocess.Popen, health_url: str, timeout_s: float = 120.0) -> None:
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
@@ -404,33 +435,77 @@ def _wait_for_health(process: subprocess.Popen, health_url: str, timeout_s: floa
     raise RuntimeError(f"timed out waiting for {health_url}")
 
 
-def _run_server(model_path: str, server_args: Sequence[str], host: str, port: str) -> int:
-    exe = _native.binary_path("utopic_server")
-    process = subprocess.Popen([str(exe), "-m", str(model_path), *server_args])
+def _stop_process(process: subprocess.Popen) -> None:
+    if process.poll() is not None:
+        return
+    process.terminate()
     try:
-        _wait_for_health(process, _server_health_url(host, port))
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait()
+
+
+def _run_server(
+    model_path: str,
+    server_args: Sequence[str],
+    host: str,
+    port: str,
+    native_port: str,
+) -> int:
+    exe = _native.binary_path("utopic_server")
+    native_host = "127.0.0.1"
+    native_base_url = _server_base_url(native_host, native_port)
+    process = subprocess.Popen(
+        [
+            str(exe),
+            "-m",
+            str(model_path),
+            "--host",
+            native_host,
+            "--port",
+            native_port,
+            *server_args,
+        ]
+    )
+    try:
+        _wait_for_health(process, _server_health_url(native_host, native_port))
         print(f"OpenAI-compatible URL: {_server_url(host, port)}", flush=True)
+        print(f"OpenAI-compatible models: {_server_base_url(host, port)}/v1/models", flush=True)
+        print(f"MCP endpoint: {_server_base_url(host, port)}/mcp", flush=True)
+        print(f"Native text server: {native_base_url}", flush=True)
         print(f"Chat with this server: utopic chat --server {_server_base_url(host, port)}", flush=True)
-        return process.wait()
+        gateway.serve(host, int(port), native_base_url=native_base_url)
+        _stop_process(process)
+        return 0
     except KeyboardInterrupt:
-        process.terminate()
-        try:
-            process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait()
+        _stop_process(process)
         return 130
-    except RuntimeError as exc:
-        if process.poll() is None:
-            process.terminate()
-            try:
-                process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait()
+    except (RuntimeError, OSError) as exc:
+        _stop_process(process)
         print(f"utopic run: {exc}", file=sys.stderr)
         code = process.returncode
         return code if code and code > 0 else 1
+
+
+def _run_gateway_only(host: str, port: str, entry: Optional[models.ModelEntry] = None) -> int:
+    if entry is None or entry.modality == "text":
+        print(f"OpenAI-compatible URL: {_server_url(host, port)}", flush=True)
+    else:
+        for endpoint in entry.endpoints:
+            print(f"OpenAI-compatible endpoint: {_endpoint_url(host, port, endpoint)}", flush=True)
+    print(f"OpenAI-compatible models: {_server_base_url(host, port)}/v1/models", flush=True)
+    print(f"MCP endpoint: {_server_base_url(host, port)}/mcp", flush=True)
+    if entry is None or entry.modality == "text":
+        print(f"Chat with this server: utopic chat --server {_server_base_url(host, port)}", flush=True)
+    try:
+        gateway.serve(host, int(port), native_base_url=None)
+    except KeyboardInterrupt:
+        return 130
+    except OSError as exc:
+        print(f"utopic run: {exc}", file=sys.stderr)
+        return 1
+    return 0
 
 
 def _print_top_help() -> None:
@@ -439,7 +514,8 @@ def _print_top_help() -> None:
 
 Commands:
   chat      Start the bundled chat TUI. Runs setup on first use.
-  run       Start an OpenAI-compatible server, or run one-shot prompts with -p.
+  run       Start the unified OpenAI-compatible and MCP runtime, or run one-shot prompts with -p.
+  gateway   Start the unified multimodal OpenAI-compatible and MCP gateway.
   setup     Build and cache native binaries for this host.
   models    List, pull, and locate curated GGUF models.
   doctor    Print local setup diagnostics without building anything.
@@ -447,8 +523,9 @@ Commands:
 Examples:
   utopic --version
   utopic chat
-  utopic chat dream-7b-q4
-  utopic run dream-7b-q4 --port 8910 -ngl 99
+  utopic chat diffusiongemma-26b-a4b-q4
+  utopic run diffusiongemma-26b-a4b-q4 --port 8910 -ngl 99
+  utopic gateway --port 8911
   utopic doctor
   utopic run -m /path/to/model.gguf -p "Answer with one word: 2+2?" -n 16
 
@@ -462,20 +539,22 @@ def _print_run_help() -> None:
         """usage: utopic run [model-alias|/path/to/model.gguf] [server options]
        utopic run -m model.gguf -p prompt [native one-shot options]
 
-Without -p/--prompt, `utopic run` starts `utopic-server` and prints the local
-OpenAI-compatible URL. With -p/--prompt, it keeps the native one-shot behavior.
+Without -p/--prompt, `utopic run` starts the unified runtime gateway and a
+private native text server behind it, then prints the local OpenAI-compatible
+and MCP URLs. With -p/--prompt, it keeps the native one-shot behavior.
 To chat with a running server, use `utopic chat --server http://127.0.0.1:8910`.
 
 Server options:
   -m, --model VALUE     Model alias or GGUF path. Defaults to the recommended model.
-  --host HOST           Bind host for the local server. Default: 127.0.0.1
-  --port PORT           Bind port for the local server. Default: 8910
+  --host HOST           Bind host for the public runtime gateway. Default: 127.0.0.1
+  --port PORT           Bind port for the public runtime gateway. Default: 8910
+  --native-port PORT    Internal native text server port. Default: PORT+1
   -ngl N                GPU layers to offload. Default: native default
   --ctx-size N          Server context size. Default: native default
   --no-setup            Do not run setup automatically if binaries are missing.
 
 Examples:
-  utopic run dream-7b-q4
+  utopic run diffusiongemma-26b-a4b-q4
   utopic chat --server http://127.0.0.1:8910
   utopic run -m /path/to/model.gguf --port 8910 -ngl 99
   utopic run -m /path/to/model.gguf -p "Hello" -n 128
@@ -503,6 +582,7 @@ Checks:
   - whether cached native binaries are current
   - required setup tools: cmake and git
   - optional chat tool: Node.js
+  - optional bridge engines for image, speech, music, and video
 """
     )
 
@@ -520,6 +600,55 @@ def _node_status() -> str:
     except (OSError, subprocess.CalledProcessError):
         return f"{node} (version check failed)"
     return f"{node} ({version})"
+
+
+def _bridge_doctor_line(payload: dict[str, object]) -> str:
+    engine = str(payload.get("engine") or "unknown")
+    status = str(payload.get("status") or "unknown")
+    if payload.get("ready") is True:
+        return f"  {engine}: ready"
+    message = payload.get("message")
+    if isinstance(message, str) and message:
+        if status == "api_mismatch" and "Failed to import diffusers." in message:
+            return (
+                f"  {engine}: {status} - installed diffusers/transformers/torch stack is "
+                f"incompatible; run utopic-bridge {engine} --check for details"
+            )
+        return f"  {engine}: {status} - {_first_message_line(message)}"
+    missing = payload.get("missing")
+    install_hint = payload.get("install_hint")
+    details: list[str] = []
+    if isinstance(missing, list) and missing:
+        details.append("missing " + ", ".join(str(item) for item in missing))
+    if isinstance(install_hint, str) and install_hint:
+        details.append(install_hint)
+    suffix = f" - {'; '.join(details)}" if details else ""
+    return f"  {engine}: {status}{suffix}"
+
+
+def _first_message_line(message: str) -> str:
+    for line in message.splitlines():
+        stripped = line.strip()
+        if stripped:
+            return stripped
+    return message.strip()
+
+
+def _bridge_doctor_lines() -> list[str]:
+    lines = ["Bridge engines:"]
+    for engine in sorted(bridge.ADAPTERS):
+        adapter = bridge.ADAPTERS[engine]
+        try:
+            payload = bridge._check_adapter(adapter)
+        except Exception as exc:
+            payload = {
+                "engine": engine,
+                "status": "check_failed",
+                "ready": False,
+                "message": str(exc) or exc.__class__.__name__,
+            }
+        lines.append(_bridge_doctor_line(payload))
+    return lines
 
 
 def _doctor(argv: Sequence[str]) -> int:
@@ -566,6 +695,8 @@ def _doctor(argv: Sequence[str]) -> int:
     for name in required_tools:
         print(f"{name}: {tool_paths[name] or 'missing'}")
     print(f"Node.js: {_node_status()}")
+    for line in _bridge_doctor_lines():
+        print(line)
 
     if missing_required:
         print(
@@ -603,12 +734,19 @@ def _run(argv: Sequence[str]) -> int:
         _validate_model_argument_count(args, _RUN_VALUE_FLAGS)
         _validate_server_options(args)
         model_arg, server_args = _extract_model(args)
+        host = _value_after(server_args, "--host", "127.0.0.1")
+        port = _value_after(server_args, "--port", "8910")
+        if model_arg:
+            entry = models.get_model(model_arg)
+            if entry is not None and entry.runtime == "bridge":
+                models.pull_model(entry.id)
+                return _run_gateway_only(host, port, entry)
+
         _ensure_setup(setup_enabled, "utopic_server")
         _native.binary_path("utopic_server")
         model_path = models.ensure_model(model_arg)
-        host = _value_after(server_args, "--host", "127.0.0.1")
-        port = _value_after(server_args, "--port", "8910")
-        return _run_server(str(model_path), server_args, host, port)
+        native_port = _value_after(server_args, "--native-port", _default_native_port(port))
+        return _run_server(str(model_path), _native_server_args(server_args), host, port, native_port)
     except RuntimeError as exc:
         print(f"utopic run: {exc}", file=sys.stderr)
         return 1
@@ -646,6 +784,8 @@ def main(argv: Optional[Sequence[str]] = None) -> Optional[int]:
         raise SystemExit(models.main(rest))
     if command == "run":
         return _run(rest)
+    if command == "gateway":
+        return gateway.main(rest)
     if command == "doctor":
         return _doctor(rest)
 

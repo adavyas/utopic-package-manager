@@ -376,14 +376,14 @@ jobs:
 
           calls = []
           cli._ensure_setup = lambda enabled=True, binary_name="utopic": calls.append(("setup", enabled, binary_name))
-          cli.models.ensure_model = lambda value=None: calls.append(("model", value)) or Path("/models/dream.gguf")
+          cli.models.ensure_model = lambda value=None: calls.append(("model", value)) or Path("/models/diffusiongemma.gguf")
           cli._native.main = lambda name, argv=None: calls.append((name, list(argv or [])))
 
-          code = cli.main(["run", "--model=dream-7b-q4", "--prompt=hello", "--temp=0.1", "--seed=7"])
+          code = cli.main(["run", "--model=diffusiongemma-26b-a4b-q4", "--prompt=hello", "--temp=0.1", "--seed=7"])
           expected = [
               ("setup", True, "utopic"),
-              ("model", "dream-7b-q4"),
-              ("utopic", ["-m", "/models/dream.gguf", "-p", "hello", "--temp", "0.1", "--seed", "7"]),
+              ("model", "diffusiongemma-26b-a4b-q4"),
+              ("utopic", ["-m", "/models/diffusiongemma.gguf", "-p", "hello", "--temp", "0.1", "--seed", "7"]),
           ]
           if code not in (0, None) or calls != expected:
               raise SystemExit(f"unexpected run prompt argv normalization: code={code!r} calls={calls!r}")

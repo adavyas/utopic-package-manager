@@ -49,6 +49,12 @@ NUMBER_VALUE_RULES = {
     "--temperature": (0.0, None, "a non-negative number"),
 }
 MIN_NODE_MAJOR = 18
+DEFAULT_SYSTEM_PROMPT = (
+    "You are a helpful assistant. Answer naturally, directly, and with useful specifics. "
+    "When asked what you can do, give a concise overview with examples across "
+    "writing, research, coding, math, planning, and conversation. Do not claim access to "
+    "the internet, private files, or real-world actions unless the user provides tools or context."
+)
 
 
 CHAT_HELP = """usage: utopic chat [model-alias|/path/to/model.gguf] [options]
@@ -77,7 +83,7 @@ Chat commands:
 
 Examples:
   utopic chat
-  utopic chat dream-7b-q4
+  utopic chat diffusiongemma-26b-a4b-q4
   utopic chat -m /path/to/model.gguf -ngl 99
   utopic chat --server http://127.0.0.1:8910
 """
@@ -295,7 +301,7 @@ def _choose_model_arg(args: Sequence[str]) -> Optional[str]:
     print("\nAvailable models:")
     for index, entry in enumerate(catalog, start=1):
         marker = "*" if entry.recommended else " "
-        status = "downloaded" if _is_nonempty_file(entry.path) else "not downloaded"
+        status = "downloaded" if models.is_model_downloaded(entry) else "not downloaded"
         print(f"{index}. {marker} {entry.id} ({entry.size}, {status})")
         print(f"   {entry.name}")
 
@@ -313,10 +319,6 @@ def _choose_model_arg(args: Sequence[str]) -> Optional[str]:
     if 1 <= selected <= len(catalog):
         return catalog[selected - 1].id
     return answer
-
-
-def _is_nonempty_file(path: Path) -> bool:
-    return path.is_file() and path.stat().st_size > 0
 
 
 def _server_base_url(args: Sequence[str]) -> Optional[str]:
@@ -469,15 +471,15 @@ def _python_chat_loop(
 ) -> int:
     max_tokens = int(_value_after(args, "--max-tokens", "512"))
     temperature = float(_value_after(args, "--temperature", "0"))
-    messages: list[dict[str, str]] = []
+    messages: list[dict[str, str]] = [{"role": "system", "content": DEFAULT_SYSTEM_PROMPT}]
 
     print(f"utopic chat: {fallback_reason}; using the built-in Python chat fallback.")
     print(f"OpenAI-compatible URL: {_chat_completions_url(base_url)}")
-    print("Type /help for commands, /exit to quit.")
+    print("Type /help for commands, /clear to reset, /exit to quit.")
 
     while True:
         try:
-            prompt = input("user> ")
+            prompt = input(">>> ")
         except EOFError:
             print()
             return 0
@@ -491,18 +493,20 @@ def _python_chat_loop(
             continue
         if text == "/clear":
             messages.clear()
-            print("conversation cleared")
+            messages.append({"role": "system", "content": DEFAULT_SYSTEM_PROMPT})
+            print("Conversation cleared.")
             continue
         if text.startswith("/system "):
             system_text = text.removeprefix("/system ").strip()
             messages = [message for message in messages if message["role"] != "system"]
             if system_text:
                 messages.insert(0, {"role": "system", "content": system_text})
-            print("system prompt updated")
+            print("System prompt updated.")
             continue
 
         messages.append({"role": "user", "content": prompt})
         try:
+            print("Thinking...")
             answer = _request_chat_completion(
                 base_url,
                 messages,
@@ -513,7 +517,7 @@ def _python_chat_loop(
             print(f"utopic chat: request failed: {exc}", file=sys.stderr)
             return 1
         messages.append({"role": "assistant", "content": answer})
-        print(f"assistant> {answer}")
+        print(f"{answer}\n")
 
 
 def _python_fallback_launch(

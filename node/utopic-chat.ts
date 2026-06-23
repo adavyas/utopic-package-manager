@@ -6,7 +6,11 @@ import * as path from "node:path";
 import * as readline from "node:readline";
 import { spawn, type ChildProcess } from "node:child_process";
 
-const VERSION = "0.1.7";
+const VERSION = "0.1.8";
+const DEFAULT_SYSTEM_PROMPT =
+  "You are a helpful assistant. Answer naturally, directly, and with useful specifics. " +
+  "When asked what you can do, give a concise overview with examples across writing, research, coding, math, planning, and conversation. " +
+  "Do not claim access to the internet, private files, or real-world actions unless the user provides tools or context.";
 
 type ModelEntry = {
   id: string;
@@ -15,8 +19,16 @@ type ModelEntry = {
   filename: string;
   url: string;
   size: string;
+  bytes?: number;
   recommended: boolean;
   description: string;
+  modality?: "text" | "image" | "tts" | "music" | "video";
+  engine?: string;
+  runtime?: "native" | "bridge";
+  hardware?: string[];
+  endpoints?: string[];
+  outputs?: string[];
+  repo?: string;
 };
 
 type ChatOptions = {
@@ -62,7 +74,7 @@ Chat commands:
 
 Examples:
   utopic chat
-  utopic chat dream-7b-q4
+  utopic chat diffusiongemma-26b-a4b-q4
   utopic chat -m /path/to/model.gguf -ngl 99
   utopic chat --server http://127.0.0.1:8910
 `);
@@ -260,6 +272,27 @@ function validateCatalogEntry(item: unknown, index: number): ModelEntry {
   if (typeof entry.recommended !== "boolean") {
     throw new Error(`Invalid model catalog entry ${index}: recommended must be a boolean`);
   }
+  if (
+    entry.bytes !== undefined &&
+    (!Number.isInteger(entry.bytes) || entry.bytes <= 0)
+  ) {
+    throw new Error(`Invalid model catalog entry ${index}: bytes must be a positive integer`);
+  }
+  for (const field of ["hardware", "endpoints", "outputs"] as const) {
+    const value = entry[field];
+    if (
+      value !== undefined &&
+      (!Array.isArray(value) || value.length === 0 || value.some((part) => typeof part !== "string" || part.length === 0))
+    ) {
+      throw new Error(`Invalid model catalog entry ${index}: ${field} must be a non-empty string list`);
+    }
+  }
+  if (entry.modality !== undefined && !["text", "image", "tts", "music", "video"].includes(entry.modality)) {
+    throw new Error(`Invalid model catalog entry ${index}: modality is not supported`);
+  }
+  if (entry.runtime !== undefined && !["native", "bridge"].includes(entry.runtime)) {
+    throw new Error(`Invalid model catalog entry ${index}: runtime is not supported`);
+  }
   return entry as ModelEntry;
 }
 
@@ -293,6 +326,7 @@ function validateModelUrl(entry: ModelEntry): void {
 }
 
 function localModelPath(entry: ModelEntry): string {
+  if (entry.runtime === "bridge") return path.join(modelsDir(), entry.id);
   return path.join(modelsDir(), safeModelFilename(entry));
 }
 
@@ -307,6 +341,18 @@ function isNonEmptyFile(filePath: string): boolean {
   if (!fs.existsSync(filePath)) return false;
   const stats = fs.statSync(filePath);
   return stats.isFile() && stats.size > 0;
+}
+
+function isInteractiveInput(): boolean {
+  return Boolean(process.stdin.isTTY || process.env.UTOPIC_CHAT_FORCE_TTY === "1");
+}
+
+function isModelDownloaded(entry: ModelEntry): boolean {
+  const filePath = localModelPath(entry);
+  if (entry.runtime === "bridge") return fs.existsSync(path.join(filePath, "utopic-model.json"));
+  if (!isNonEmptyFile(filePath)) return false;
+  if (entry.bytes === undefined) return true;
+  return fs.statSync(filePath).size === entry.bytes;
 }
 
 function isEmptyFile(filePath: string): boolean {
@@ -342,14 +388,15 @@ function ask(rl: readline.Interface, text: string): Promise<string> {
 
 async function chooseModel(catalog: ModelEntry[]): Promise<string> {
   const recommended = catalog.find((entry) => entry.recommended) ?? catalog[0];
-  if (!process.stdin.isTTY) return recommended.id;
+  if (!isInteractiveInput()) return recommended.id;
 
   console.log("\nAvailable models:");
   catalog.forEach((entry, index) => {
     const marker = entry.recommended ? "*" : " ";
-    const modelPath = localModelPath(entry);
-    const exists = isNonEmptyFile(modelPath) ? "downloaded" : "not downloaded";
-    console.log(`${index + 1}. ${marker} ${entry.id} (${entry.size}, ${exists})`);
+    const exists = isModelDownloaded(entry) ? "downloaded" : "not downloaded";
+    const modality = entry.modality ?? "text";
+    const runtime = entry.runtime ?? "native";
+    console.log(`${index + 1}. ${marker} ${entry.id} (${modality}, ${runtime}, ${entry.size}, ${exists})`);
     console.log(`   ${entry.name}`);
   });
 
@@ -374,17 +421,22 @@ async function resolveModel(value: string | null, beforeDownload?: () => void): 
   const modelId = value ?? await chooseModel(catalog);
   const entry = catalog.find((item) => item.id === modelId);
   if (!entry) throw new Error(`unknown model '${modelId}'. Run 'utopic models list' to see aliases.`);
+  if (entry.runtime === "bridge") {
+    throw new Error(
+      `model '${modelId}' uses the ${entry.modality ?? "bridge"} runtime; use the unified Utopic runtime gateway for this modality.`
+    );
+  }
   const destination = localModelPath(entry);
-  if (isNonEmptyFile(destination)) return destination;
+  if (isModelDownloaded(entry)) return destination;
 
   validateModelUrl(entry);
   beforeDownload?.();
   console.log(`\nPulling ${entry.name} from Hugging Face`);
   console.log(entry.url);
-  return download(entry.url, destination);
+  return download(entry.url, destination, 10, entry.bytes);
 }
 
-function download(url: string, destination: string, redirectsRemaining = 10): Promise<string> {
+function download(url: string, destination: string, redirectsRemaining = 10, expectedBytes?: number): Promise<string> {
   fs.mkdirSync(path.dirname(destination), { recursive: true });
   const partial = `${destination}.partial`;
   const removeEmptyDestinationOnFailure = isEmptyFile(destination);
@@ -431,7 +483,7 @@ function download(url: string, destination: string, redirectsRemaining = 10): Pr
           return;
         }
         const nextUrl = new URL(response.headers.location, parsed).toString();
-        download(nextUrl, destination, redirectsRemaining - 1).then(succeed, fail);
+        download(nextUrl, destination, redirectsRemaining - 1, expectedBytes).then(succeed, fail);
         return;
       }
       if (response.statusCode !== 200) {
@@ -464,6 +516,9 @@ function download(url: string, destination: string, redirectsRemaining = 10): Pr
           try {
             if (downloaded === 0) throw new Error("downloaded 0 bytes");
             if (expectedTotal && downloaded !== expectedTotal) throw incompleteDownloadError();
+            if (expectedBytes !== undefined && downloaded !== expectedBytes) {
+              throw new Error(`downloaded ${downloaded} of ${expectedBytes} bytes`);
+            }
             fs.renameSync(partial, destination);
             succeed(destination);
           } catch (renameError) {
@@ -575,11 +630,79 @@ function requestJson(url: string, body: unknown): Promise<any> {
   });
 }
 
+function findSseBoundary(buffer: string): { index: number; length: number } | null {
+  const lf = buffer.indexOf("\n\n");
+  const crlf = buffer.indexOf("\r\n\r\n");
+  if (lf < 0 && crlf < 0) return null;
+  if (lf >= 0 && (crlf < 0 || lf < crlf)) return { index: lf, length: 2 };
+  return { index: crlf, length: 4 };
+}
+
+function requestChatCompletionStream(url: string, body: unknown, onContent: (delta: string) => void): Promise<string> {
+  const parsed = new URL(url);
+  const client = httpClientForUrl(parsed, "request URL");
+  const payload = JSON.stringify({ ...(body as Record<string, unknown>), stream: true });
+  return new Promise((resolve, reject) => {
+    let content = "";
+    let buffer = "";
+    const req = client.request({
+      method: "POST",
+      hostname: parsed.hostname,
+      port: parsed.port,
+      path: parsed.pathname,
+      headers: {
+        "content-type": "application/json",
+        "content-length": Buffer.byteLength(payload),
+        "accept": "text/event-stream",
+      },
+    }, (res: http.IncomingMessage) => {
+      if (!res.statusCode || res.statusCode < 200 || res.statusCode >= 300) {
+        let data = "";
+        res.setEncoding("utf8");
+        res.on("data", (chunk: string) => { data += chunk; });
+        res.on("end", () => reject(new Error(`HTTP ${res.statusCode}: ${data}`)));
+        return;
+      }
+      res.setEncoding("utf8");
+      res.on("data", (chunk: string) => {
+        buffer += chunk;
+        let boundary = findSseBoundary(buffer);
+        while (boundary) {
+          const event = buffer.slice(0, boundary.index);
+          buffer = buffer.slice(boundary.index + boundary.length);
+          boundary = findSseBoundary(buffer);
+          for (const line of event.split(/\r?\n/)) {
+            if (!line.startsWith("data:")) continue;
+            const data = line.slice("data:".length).trimStart();
+            if (!data || data === "[DONE]") continue;
+            try {
+              const parsedEvent = JSON.parse(data);
+              const delta = parsedEvent.choices?.[0]?.delta?.content;
+              if (typeof delta === "string" && delta.length > 0) {
+                content += delta;
+                onContent(delta);
+              }
+            } catch {
+              reject(new Error("invalid SSE chat completion chunk"));
+              req.destroy();
+              return;
+            }
+          }
+        }
+      });
+      res.on("end", () => resolve(content));
+    });
+    req.on("error", reject);
+    req.write(payload);
+    req.end();
+  });
+}
+
 async function chatLoop(baseUrl: string, options: ChatOptions): Promise<void> {
-  const interactive = process.stdin.isTTY;
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout, prompt: interactive ? "utopic> " : "" });
-  const messages: ChatMessage[] = [];
-  console.log("Type /help for commands. Type /exit to quit.\n");
+  const interactive = isInteractiveInput();
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout, prompt: interactive ? ">>> " : "" });
+  const messages: ChatMessage[] = [{ role: "system", content: DEFAULT_SYSTEM_PROMPT }];
+  console.log("Type /help for commands, /clear to reset, /exit to quit.\n");
   if (interactive) rl.prompt();
   for await (const line of rl) {
     const input = line.trim();
@@ -590,14 +713,15 @@ async function chatLoop(baseUrl: string, options: ChatOptions): Promise<void> {
     if (input === "/exit" || input === "/quit") break;
     if (input === "/clear") {
       messages.length = 0;
-      console.log("conversation cleared");
+      messages.push({ role: "system", content: DEFAULT_SYSTEM_PROMPT });
+      console.log("Conversation cleared.");
       if (interactive) rl.prompt();
       continue;
     }
     if (input === "/help") {
-      console.log("/clear        clear conversation history");
-      console.log("/system TEXT  set or replace the system prompt");
-      console.log("/exit         quit");
+      console.log("/clear        Clear conversation history.");
+      console.log("/system TEXT  Set or replace the system prompt.");
+      console.log("/exit         Quit.");
       if (interactive) rl.prompt();
       continue;
     }
@@ -606,25 +730,37 @@ async function chatLoop(baseUrl: string, options: ChatOptions): Promise<void> {
       const existing = messages.find((message) => message.role === "system");
       if (existing) existing.content = content;
       else messages.unshift({ role: "system", content });
-      console.log("system prompt updated");
+      console.log("System prompt updated.");
       if (interactive) rl.prompt();
       continue;
     }
 
     messages.push({ role: "user", content: input });
-    process.stdout.write("assistant> ");
     try {
-      const response = await requestJson(chatCompletionsUrl(baseUrl), {
+      const body = {
         model: "utopic",
         messages,
         max_tokens: options.maxTokens,
         temperature: options.temperature,
-      });
-      const content = response.choices?.[0]?.message?.content ?? "";
-      console.log(String(content).trim());
-      messages.push({ role: "assistant", content: String(content) });
+      };
+      let content = "";
+      if (interactive) {
+        rl.pause();
+        process.stdout.write("Thinking...\n");
+        content = await requestChatCompletionStream(chatCompletionsUrl(baseUrl), body, (delta) => {
+          process.stdout.write(delta);
+        });
+        process.stdout.write("\n\n");
+        rl.resume();
+      } else {
+        const response = await requestJson(chatCompletionsUrl(baseUrl), body);
+        content = String(response.choices?.[0]?.message?.content ?? "").trim();
+        console.log(content);
+      }
+      messages.push({ role: "assistant", content });
     } catch (error) {
       messages.pop();
+      if (interactive) rl.resume();
       console.error(`\nrequest failed: ${(error as Error).message}`);
     }
     if (interactive) rl.prompt();

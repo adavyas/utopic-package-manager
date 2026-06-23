@@ -1,6 +1,7 @@
 import ast
 import json
 import re
+import sys
 from pathlib import Path
 
 from utopic import __version__
@@ -49,6 +50,77 @@ def test_release_version_literals_match_package_version():
     assert re.search(rf'const VERSION = "{re.escape(__version__)}";', chat_ts)
     assert re.search(rf'const VERSION = "{re.escape(__version__)}";', chat_js)
     assert f'project_version = "{__version__}"' in identity
+
+
+def test_gateway_console_script_is_declared():
+    pyproject = (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    setup_tree = ast.parse((REPO_ROOT / "setup.py").read_text(encoding="utf-8"))
+    setup_source = (REPO_ROOT / "setup.py").read_text(encoding="utf-8")
+
+    assert 'utopic-runtime = "utopic.gateway:main"' in pyproject
+    assert 'utopic-bridge = "utopic.bridge:main"' in pyproject
+    assert '"utopic-runtime=utopic.gateway:main"' in setup_source
+    assert '"utopic-bridge=utopic.bridge:main"' in setup_source
+    assert "utopic.gateway:main" in ast.unparse(setup_tree)
+    assert "utopic.bridge:main" in ast.unparse(setup_tree)
+
+
+def test_python_version_range_matches_bridge_dependency_support():
+    if sys.version_info >= (3, 11):
+        import tomllib
+    else:
+        import tomli as tomllib
+
+    pyproject = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    setup_tree = ast.parse((REPO_ROOT / "setup.py").read_text(encoding="utf-8"))
+    setup_call = next(
+        node
+        for node in ast.walk(setup_tree)
+        if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "setup"
+    )
+    setup_python_requires = next(
+        keyword.value.value
+        for keyword in setup_call.keywords
+        if keyword.arg == "python_requires" and isinstance(keyword.value, ast.Constant)
+    )
+
+    assert pyproject["project"]["requires-python"] == ">=3.10,<3.13"
+    assert setup_python_requires == ">=3.10,<3.13"
+
+
+def test_bridge_optional_dependency_extras_are_declared():
+    if sys.version_info >= (3, 11):
+        import tomllib
+    else:
+        import tomli as tomllib
+
+    pyproject = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    setup_source = (REPO_ROOT / "setup.py").read_text(encoding="utf-8")
+    pyproject_extras = pyproject["project"]["optional-dependencies"]
+
+    expected_extras = {"image", "tts", "chatterbox", "music", "video", "bridge", "all"}
+
+    assert expected_extras <= set(pyproject_extras)
+    assert "extras_require" not in setup_source
+    assert "diffusers>=0.35.0" in pyproject_extras["image"]
+    assert "torchvision>=0.21.0" in pyproject_extras["image"]
+    assert "kokoro>=0.9.0" in pyproject_extras["tts"]
+    assert "torchvision>=0.21.0" in pyproject_extras["tts"]
+    assert "chatterbox-tts>=0.1.0" not in pyproject_extras["tts"]
+    assert "chatterbox-tts>=0.1.0" in pyproject_extras["chatterbox"]
+    assert "setuptools<81" in pyproject_extras["chatterbox"]
+    assert "chatterbox-tts>=0.1.0" not in pyproject_extras["bridge"]
+    assert "soundfile>=0.12.0" in pyproject_extras["music"]
+    assert "torchcodec>=0.8.0" in pyproject_extras["music"]
+    assert "imageio>=2.34.0" in pyproject_extras["video"]
+    assert "torchvision>=0.21.0" in pyproject_extras["video"]
+    assert sorted(set(pyproject_extras["image"] + pyproject_extras["tts"] + pyproject_extras["music"] + pyproject_extras["video"])) == pyproject_extras["bridge"]
+    assert pyproject_extras["bridge"] == pyproject_extras["all"]
+    assert all(
+        "git+" not in dependency
+        for dependencies in pyproject_extras.values()
+        for dependency in dependencies
+    )
 
 
 def test_python_module_entrypoint_is_shipped():
@@ -213,7 +285,7 @@ def test_readme_distinguishes_server_mode_from_chat_mode():
 def test_readme_documents_chat_tui_and_node_free_fallback():
     readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
 
-    assert "When Node.js 18 or newer is on `PATH`, `utopic chat` uses the bundled TypeScript/Node TUI." in readme
+    assert "When Node.js 18 or newer is on `PATH`, `utopic chat` uses the bundled TypeScript/Node TUI with a `>>>` prompt and streaming output." in readme
     assert "If Node is missing or older than 18, `utopic chat` falls back to a minimal built-in Python chat loop" in readme
     assert "install Node.js 18 or newer for the richer TUI." in readme
 
@@ -228,11 +300,116 @@ def test_readme_documents_supported_models_without_prohibited_mentions():
         assert entry["id"] in readme
         assert entry["name"] in readme
     assert all(entry["family"] != "diffusiongemma" for entry in catalog)
-    assert "DiffusionGemma is not exposed as a one-command curated download yet" in readme
-    assert "GB10/DGX Spark with" in readme
+    assert any(entry["family"] == "diffusion-gemma" for entry in catalog)
+    assert "DiffusionGemma is exposed as curated aliases" in readme
+    assert "diffusiongemma-26b-a4b-q4" in readme
+    assert "qwen-image" in readme
+    assert "wan2.1-t2v-14b" in readme
+    assert "utopic gateway --port 8911" in readme
+    assert "utopic-bridge/v1" in readme
+    assert "utopic-bridge diffusers" in readme
+    assert "MCP `initialize`, `ping`, `tools/list`, and `tools/call`" in readme
+    assert '"repo": "Qwen/Qwen-Image"' in readme
+    assert "`repo` is the upstream model source" in readme
+    assert "UTOPIC_BRIDGE_DIFFUSERS_COMMAND" in readme
+    assert "By default, the gateway runs the packaged bridge as" in readme
+    assert "`python -m utopic.bridge <engine>`" in readme
+    assert "utopic models check qwen-image" in readme
+    assert "utopic models check --all" in readme
+    assert "utopic_models_check" in readme
+    assert 'uv pip install "utopic[image]"' in readme
+    assert 'uv pip install "utopic[tts]"' in readme
+    assert 'uv pip install "utopic[chatterbox]"' in readme
+    assert 'uv pip install "utopic[music]"' in readme
+    assert "including TorchCodec" in readme
+    assert "ACE-Step currently works best in a Python 3.10 bridge environment" in readme
+    assert "uv pip install git+https://github.com/ace-step/ACE-Step.git" in readme
+    assert 'uv pip install "utopic[video]"' in readme
+    assert 'uv pip install "utopic[bridge]"' in readme
+    assert "utopic run qwen-image" in readme
+    assert "bridge-only models start the gateway without starting a native text server" in readme.lower()
+    assert "utopic-bridge diffusers --check" in readme
+    assert "torch/torchvision versions are incompatible" in readme
+    assert "/v1/utopic/runs/{run_id}/events" in readme
+    assert "GB10/DGX Spark, a 6x RTX 4090 host, and a 4x A100 host." in readme
+    assert "DiffusionGemma Q4_K_M," in readme
+    assert "Q5_K_M, Q6_K, and Q8_0 all pull, size-check, load, fully offload" in readme
+    assert "Q8_0 all pull, size-check, load, fully offload" in readme
+    assert "DiffusionGemma Q4_K_M native C++ smoke tests on GB10/DGX Spark" in readme
+    assert "Q5_K_M, Q6_K, and Q8_0 native C++ smoke tests on 4x A100 CUDA" in readme
+    assert "Q4_K_M also completes native C++" in readme
+    assert "smoke tests on GB10/DGX Spark and 6x RTX 4090 CUDA" in readme
+    assert "Native text generation" in readme
     assert "CUDA compiler/toolkit mismatch" in readme
     assert "LLaDA2.0" not in readme
     assert "LLaDA 2.0" not in readme
+
+
+def test_model_catalog_declares_runtime_schema_for_every_entry():
+    catalog_path = REPO_ROOT / "python" / "utopic" / "models.json"
+    catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+
+    required_fields = {
+        "modality",
+        "engine",
+        "runtime",
+        "hardware",
+        "endpoints",
+        "outputs",
+    }
+    valid_modalities = {"text", "image", "tts", "music", "video"}
+    valid_runtimes = {"native", "bridge"}
+
+    for entry in catalog:
+        assert required_fields <= set(entry), entry["id"]
+        assert entry["modality"] in valid_modalities
+        assert isinstance(entry["engine"], str) and entry["engine"]
+        assert entry["runtime"] in valid_runtimes
+        assert isinstance(entry["hardware"], list) and entry["hardware"]
+        assert all(isinstance(item, str) and item for item in entry["hardware"])
+        assert isinstance(entry["endpoints"], list) and entry["endpoints"]
+        assert all(isinstance(item, str) and item.startswith("/v1/") for item in entry["endpoints"])
+        assert isinstance(entry["outputs"], list) and entry["outputs"]
+        assert all(isinstance(item, str) and item for item in entry["outputs"])
+
+
+def test_catalog_defaults_to_diffusiongemma_and_excludes_legacy_masked_models():
+    catalog_path = REPO_ROOT / "python" / "utopic" / "models.json"
+    catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+
+    recommended = [entry["id"] for entry in catalog if entry["recommended"]]
+    families = {entry["family"] for entry in catalog}
+
+    assert recommended == ["diffusiongemma-26b-a4b-q4"]
+    assert "dream" not in families
+    assert "llada" not in families
+
+
+def test_model_catalog_includes_first_multimodal_model_set():
+    catalog_path = REPO_ROOT / "python" / "utopic" / "models.json"
+    catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+    by_id = {entry["id"]: entry for entry in catalog}
+
+    expected = {
+        "diffusiongemma-26b-a4b-q4": ("text", "native"),
+        "diffusiongemma-26b-a4b-q5": ("text", "native"),
+        "diffusiongemma-26b-a4b-q6": ("text", "native"),
+        "diffusiongemma-26b-a4b-q8": ("text", "native"),
+        "qwen-image": ("image", "bridge"),
+        "flux-1-schnell": ("image", "bridge"),
+        "kokoro-82m": ("tts", "bridge"),
+        "chatterbox": ("tts", "bridge"),
+        "dia-1.6b": ("tts", "bridge"),
+        "ace-step-3.5b": ("music", "bridge"),
+        "wan2.1-t2v-1.3b": ("video", "bridge"),
+        "wan2.1-t2v-14b": ("video", "bridge"),
+        "ltx-video": ("video", "bridge"),
+    }
+
+    for model_id, (modality, runtime) in expected.items():
+        assert model_id in by_id
+        assert by_id[model_id]["modality"] == modality
+        assert by_id[model_id]["runtime"] == runtime
 
 
 def test_release_workflow_smokes_installed_prompt_flag_normalization():
@@ -244,9 +421,9 @@ def test_release_workflow_smokes_installed_prompt_flag_normalization():
     assert '[str(python), "-m", "utopic", "--version"]' in workflow
     assert "import textwrap" in workflow
     assert "prompt_probe = textwrap.dedent" in workflow
-    assert '"--model=dream-7b-q4"' in workflow
+    assert '"--model=diffusiongemma-26b-a4b-q4"' in workflow
     assert '"--prompt=hello"' in workflow
-    assert '["-m", "/models/dream.gguf", "-p", "hello"' in workflow
+    assert '["-m", "/models/diffusiongemma.gguf", "-p", "hello"' in workflow
 
 
 def test_workflows_smoke_installed_doctor_command():
