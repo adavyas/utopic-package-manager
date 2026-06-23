@@ -159,6 +159,8 @@ endpoints, and output artifact type.
 | `diffusiongemma-26b-a4b-q8` | DiffusionGemma 26B-A4B IT Q8_0 | text | native | Near-lossless 8-bit DiffusionGemma weights for GB10 and high-memory CUDA hosts. |
 | `qwen-image` | Qwen-Image | image | bridge | Open-weight image generation model with strong prompt following and text rendering. |
 | `flux-1-schnell` | FLUX.1-schnell | image | bridge | Fast Apache-licensed image generation model for local 1-4 step generation. |
+| `krea-2-raw` | Krea 2 Raw | image | bridge | High-quality Krea text-to-image model through Diffusers Krea2Pipeline; GB10 or high-memory CUDA recommended until Mac generation is validated. |
+| `cosmos3-super` | Cosmos3 Super Text2Image | image | bridge | Agentic high-memory NVIDIA Cosmos3 image model; preflights GPU memory before loading. |
 | `kokoro-82m` | Kokoro 82M | tts | bridge | Tiny, fast open-weight TTS model for local speech synthesis. |
 | `chatterbox` | Chatterbox | tts | bridge | Higher-quality open-weight TTS and voice cloning model. |
 | `dia-1.6b` | Dia 1.6B | tts | bridge | Open-weight dialogue TTS model for expressive multi-speaker speech. |
@@ -171,6 +173,13 @@ The native text path is centered on DiffusionGemma canvas / entropy-bound GGUF
 models. Other modalities use bridge engines today but share the same catalog,
 model cache, OpenAI-compatible gateway, and MCP tool contract that future native
 C++ engines will use.
+
+Large bridge models can declare runtime requirements in the catalog. For
+example, `cosmos3-super` is discoverable through `utopic models list`,
+`/v1/models`, and MCP, but requests fail fast with
+`bridge_model_oom_preflight` on hosts below its GPU-memory requirement instead
+of trying to load the model and crashing inside CUDA, Metal, or Python runtime
+code.
 
 DiffusionGemma is exposed as curated aliases for the practical quantization
 ladder. The BF16 DiffusionGemma file is intentionally not in the default catalog
@@ -321,6 +330,7 @@ Generate local artifacts directly from the same catalog and gateway contract:
 
 ```sh
 utopic generate image qwen-image -p "A crisp product photo of a titanium robot assistant" --size 1024x1024 --steps 30 -o image.png
+utopic generate image krea-2-raw -p "A crisp editorial poster of a glass coastal city" --size 1024x1024 -o krea.png
 utopic generate speech dia-1.6b --input "Utopic is running locally." -o speech.wav
 utopic generate music ace-step-3.5b -p "bright synthwave with warm analog drums" --duration 30 --lyrics "" -o music.wav
 utopic generate video --quality high -p "A cinematic sunrise over a glass coastal city, slow aerial camera move" --size 832x480 --frames 49 --steps 20 --fps 16 -o video.mp4
@@ -504,14 +514,15 @@ Current release smoke coverage:
 | Hardware surface | Apple Silicon, GB10/DGX Spark, RTX 4090 CUDA, and 4x A100 CUDA smoke tests for installed wheel, catalog, MCP tools, bridge diagnostics, and artifact contract |
 | Native text generation | DiffusionGemma Q4_K_M native C++ smoke tests on GB10/DGX Spark, 6x RTX 4090 CUDA, and 4x A100 CUDA; Q5_K_M, Q6_K, and Q8_0 native C++ smoke tests on 4x A100 CUDA, using the package-managed llama.cpp build |
 | Real bridge generation | Qwen-Image PNG on CUDA, Kokoro WAV, Chatterbox WAV, Dia WAV, ACE-Step WAV through the MCP gateway on CUDA, and Wan2.1 1.3B MP4 on CUDA |
-| Heavy bridge models | FLUX.1-schnell and LTX expose stable routes and diagnostics, but can still require Hugging Face access, a complete local model download, and matching local Python engine dependencies before real generation |
+| Heavy bridge models | FLUX.1-schnell, Krea 2 Raw, Cosmos3 Super, and LTX expose stable routes and diagnostics, but can still require Hugging Face access, a complete local model download, sufficient GPU memory, and matching local Python engine dependencies before real generation |
 
 The packaged `utopic-bridge` command provides stable adapter entrypoints and
-dependency diagnostics for `diffusers`, `kokoro`, `chatterbox`, `dia`,
+dependency diagnostics for `diffusers`, `cosmos`, `kokoro`, `chatterbox`, `dia`,
 `ace-step`, `wan`, and `ltx`. The adapters translate the shared Utopic request into
 their local Python engines:
 
-- `diffusers`: Qwen-Image and FLUX image generation.
+- `diffusers`: Qwen-Image, FLUX, and Krea image generation.
+- `cosmos`: Cosmos3 Super diagnostics and external bridge-command handoff.
 - `kokoro`: Kokoro speech synthesis.
 - `chatterbox`: Chatterbox speech synthesis.
 - `dia`: Dia speech synthesis through the Transformers implementation.

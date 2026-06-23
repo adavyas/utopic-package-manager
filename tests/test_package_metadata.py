@@ -397,6 +397,8 @@ def test_model_catalog_includes_first_multimodal_model_set():
         "diffusiongemma-26b-a4b-q8": ("text", "native"),
         "qwen-image": ("image", "bridge"),
         "flux-1-schnell": ("image", "bridge"),
+        "krea-2-raw": ("image", "bridge"),
+        "cosmos3-super": ("image", "bridge"),
         "kokoro-82m": ("tts", "bridge"),
         "chatterbox": ("tts", "bridge"),
         "dia-1.6b": ("tts", "bridge"),
@@ -410,6 +412,10 @@ def test_model_catalog_includes_first_multimodal_model_set():
         assert model_id in by_id
         assert by_id[model_id]["modality"] == modality
         assert by_id[model_id]["runtime"] == runtime
+
+    assert by_id["cosmos3-super"]["requirements"]["min_gpu_memory_gib"] == 96
+    assert by_id["cosmos3-super"]["requirements"]["allow_cpu"] is False
+    assert "mac-48gb" not in by_id["krea-2-raw"]["hardware"]
 
 
 def test_release_workflow_smokes_installed_prompt_flag_normalization():

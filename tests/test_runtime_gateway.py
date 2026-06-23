@@ -55,6 +55,14 @@ def test_gateway_models_endpoint_exposes_multimodal_runtime_metadata():
         "outputs": ["image/png"],
         "progress_events": ["queued", "loading", "generating", "completed", "failed"],
     }
+    assert by_id["krea-2-raw"]["modality"] == "image"
+    assert by_id["krea-2-raw"]["engine"] == "diffusers"
+    assert by_id["krea-2-raw"]["repo"] == "krea/Krea-2-Raw"
+    assert by_id["cosmos3-super"]["modality"] == "image"
+    assert by_id["cosmos3-super"]["engine"] == "cosmos"
+    assert by_id["cosmos3-super"]["repo"] == "nvidia/Cosmos3-Super-Text2Image"
+    assert by_id["cosmos3-super"]["requirements"]["min_gpu_memory_gib"] == 96
+    assert by_id["cosmos3-super"]["requirements"]["allow_cpu"] is False
 
 
 def test_gateway_models_endpoint_exposes_bridge_activation_for_all_bridge_models():
@@ -66,6 +74,8 @@ def test_gateway_models_endpoint_exposes_bridge_activation_for_all_bridge_models
     assert {item["id"] for item in bridge_models} >= {
         "qwen-image",
         "flux-1-schnell",
+        "krea-2-raw",
+        "cosmos3-super",
         "kokoro-82m",
         "chatterbox",
         "dia-1.6b",
@@ -87,6 +97,37 @@ def test_gateway_models_endpoint_exposes_bridge_activation_for_all_bridge_models
     assert by_id["ltx-video"]["repo"] == "Lightricks/LTX-Video"
     assert by_id["ltx-video"]["bridge"]["command"] == "utopic-bridge ltx"
     assert by_id["ltx-video"]["bridge"]["environment_variable"] == "UTOPIC_BRIDGE_LTX_COMMAND"
+    assert by_id["cosmos3-super"]["bridge"]["command"] == "utopic-bridge cosmos"
+    assert by_id["cosmos3-super"]["bridge"]["environment_variable"] == "UTOPIC_BRIDGE_COSMOS_COMMAND"
+
+
+def test_gateway_cosmos_returns_oom_preflight_before_starting_bridge(monkeypatch):
+    monkeypatch.setattr(
+        gateway,
+        "_detect_runtime_capacity",
+        lambda: {
+            "backend": "metal",
+            "device": "Apple M4 Pro",
+            "gpu_memory_gib": 40.0,
+        },
+        raising=False,
+    )
+    monkeypatch.setattr(gateway, "_bridge_command", lambda entry: pytest.fail("bridge should not start"))
+
+    status, payload = decode(
+        gateway.handle_openai_request(
+            "POST",
+            "/v1/images/generations",
+            {"model": "cosmos3-super", "prompt": "a glass city at sunrise"},
+        )
+    )
+
+    assert status == 507
+    assert payload["error"]["code"] == "bridge_model_oom_preflight"
+    assert payload["error"]["model"] == "cosmos3-super"
+    assert payload["error"]["required_gpu_memory_gib"] == 96
+    assert payload["error"]["detected"]["device"] == "Apple M4 Pro"
+    assert "requires at least 96 GiB GPU memory" in payload["error"]["message"]
 
 
 def test_gateway_image_generation_reports_packaged_bridge_dependency_gap():
@@ -215,7 +256,7 @@ def test_every_bridge_catalog_model_has_openai_and_mcp_runtime_surface():
         request = {"model": entry.id, **request_by_modality[entry.modality]}
         status, payload = decode(gateway.handle_openai_request("POST", modality_endpoint, request))
 
-        assert status in {501, 502}, entry.id
+        assert status in {501, 502, 507}, entry.id
         assert payload["error"]["model"] == entry.id
         assert payload["error"]["modality"] == entry.modality
         assert payload["error"]["engine"] == entry.engine
@@ -228,7 +269,7 @@ def test_every_bridge_catalog_model_has_openai_and_mcp_runtime_surface():
         }
         status, payload = decode(gateway.handle_openai_request("POST", "/v1/responses", responses_request))
 
-        assert status in {501, 502}, entry.id
+        assert status in {501, 502, 507}, entry.id
         assert payload["error"]["model"] == entry.id
         assert payload["error"]["modality"] == entry.modality
         assert payload["error"]["engine"] == entry.engine

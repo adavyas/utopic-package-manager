@@ -151,6 +151,9 @@ def handle_openai_request(
         )
     runtime_request = _normalize_request_for_runtime(path, entry, request)
     if entry.runtime == "bridge":
+        preflight = _bridge_runtime_preflight(entry)
+        if preflight is not None:
+            return preflight
         command = _bridge_command(entry)
         if command is None:
             return _bridge_not_installed(entry, path)
@@ -341,6 +344,7 @@ def _bridge_contract(entry: models.ModelEntry, endpoint: str) -> dict[str, Any]:
         "outputs": list(entry.outputs),
         "cache_path": str(entry.path),
         "repo": entry.repo,
+        "requirements": entry.requirements or {},
         "environment_variable": _bridge_command_env_var(entry),
         "request_schema": {
             "endpoint": endpoint,
@@ -361,6 +365,166 @@ def _bridge_contract(entry: models.ModelEntry, endpoint: str) -> dict[str, Any]:
             "message": "human-readable status",
         },
     }
+
+
+def _bridge_runtime_preflight(entry: models.ModelEntry) -> Optional[tuple[int, dict[str, str], bytes]]:
+    requirements = entry.requirements or {}
+    minimum = requirements.get("min_gpu_memory_gib")
+    allow_cpu = requirements.get("allow_cpu", True)
+    if minimum is None and allow_cpu is not False:
+        return None
+    if not isinstance(minimum, (int, float)) or isinstance(minimum, bool):
+        return None
+
+    detected = _detect_runtime_capacity()
+    detected_memory = detected.get("gpu_memory_gib")
+    has_enough_gpu = (
+        isinstance(detected_memory, (int, float))
+        and not isinstance(detected_memory, bool)
+        and detected_memory >= float(minimum)
+    )
+    if has_enough_gpu:
+        return None
+    if allow_cpu is not False and detected.get("backend") == "cpu":
+        return None
+
+    detected_text = _detected_runtime_text(detected)
+    return _json(
+        507,
+        {
+            "error": {
+                "message": (
+                    f"model {entry.id} requires at least {minimum:g} GiB GPU memory; "
+                    f"detected {detected_text}. This model is too large for this host."
+                ),
+                "code": "bridge_model_oom_preflight",
+                "model": entry.id,
+                "modality": entry.modality,
+                "engine": entry.engine,
+                "required_gpu_memory_gib": minimum,
+                "detected": detected,
+                "next_steps": [
+                    "Use GB10 or high-memory CUDA infrastructure.",
+                    "Choose a smaller image model such as krea-2-raw, qwen-image, or flux-1-schnell.",
+                ],
+            }
+        },
+    )
+
+
+def _detected_runtime_text(detected: dict[str, Any]) -> str:
+    device = detected.get("device") if isinstance(detected.get("device"), str) else "unknown device"
+    memory = detected.get("gpu_memory_gib")
+    if isinstance(memory, (int, float)) and not isinstance(memory, bool):
+        return f"{device} with {memory:.1f} GiB GPU memory"
+    return device
+
+
+def _detect_runtime_capacity() -> dict[str, Any]:
+    configured_memory = _float_env("UTOPIC_GPU_MEMORY_GIB")
+    if configured_memory is not None:
+        return {
+            "backend": os.environ.get("UTOPIC_RUNTIME_BACKEND", "configured"),
+            "device": os.environ.get("UTOPIC_RUNTIME_DEVICE", "configured runtime"),
+            "gpu_memory_gib": configured_memory,
+        }
+
+    cuda = _detect_cuda_capacity()
+    if cuda is not None:
+        return cuda
+
+    if sys.platform == "darwin":
+        memory = _darwin_unified_memory_gib()
+        return {
+            "backend": "metal",
+            "device": _darwin_device_name(),
+            "gpu_memory_gib": memory * 0.84 if memory is not None else None,
+            "unified_memory_gib": memory,
+        }
+
+    return {"backend": "cpu", "device": "CPU", "gpu_memory_gib": None}
+
+
+def _float_env(name: str) -> Optional[float]:
+    value = os.environ.get(name)
+    if not value:
+        return None
+    try:
+        return float(value)
+    except ValueError:
+        return None
+
+
+def _detect_cuda_capacity() -> Optional[dict[str, Any]]:
+    try:
+        result = subprocess.run(
+            [
+                "nvidia-smi",
+                "--query-gpu=name,memory.total",
+                "--format=csv,noheader,nounits",
+            ],
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=2,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0 or not result.stdout.strip():
+        return None
+    names: list[str] = []
+    total_mib = 0.0
+    for line in result.stdout.splitlines():
+        parts = [part.strip() for part in line.split(",")]
+        if len(parts) < 2:
+            continue
+        names.append(parts[0])
+        try:
+            total_mib += float(parts[1])
+        except ValueError:
+            continue
+    if total_mib <= 0:
+        return None
+    return {
+        "backend": "cuda",
+        "device": ", ".join(names) if names else "CUDA",
+        "gpu_memory_gib": total_mib / 1024.0,
+        "gpu_count": len(names),
+    }
+
+
+def _darwin_unified_memory_gib() -> Optional[float]:
+    try:
+        result = subprocess.run(
+            ["sysctl", "-n", "hw.memsize"],
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=2,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    try:
+        return int(result.stdout.strip()) / (1024.0 ** 3)
+    except ValueError:
+        return None
+
+
+def _darwin_device_name() -> str:
+    try:
+        result = subprocess.run(
+            ["sysctl", "-n", "machdep.cpu.brand_string"],
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=2,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return "Apple Silicon"
+    name = result.stdout.strip()
+    return name or "Apple Silicon"
 
 
 def _run_bridge(
@@ -860,6 +1024,7 @@ def _model_payload(entry: models.ModelEntry) -> dict[str, Any]:
         "hardware": list(entry.hardware),
         "endpoints": list(entry.endpoints),
         "outputs": list(entry.outputs),
+        "requirements": entry.requirements or {},
         "repo": entry.repo,
         "url": entry.url,
         "description": entry.description,

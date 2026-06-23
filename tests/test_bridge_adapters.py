@@ -20,7 +20,7 @@ def test_bridge_check_reports_missing_dependencies(monkeypatch, capsys):
         "packages": ["diffusers", "torch", "torchvision"],
         "missing": ["diffusers"],
         "install_hint": 'pip install "utopic[image]"',
-        "description": "Qwen-Image and FLUX image generation through Diffusers.",
+        "description": "Qwen-Image, FLUX, and Krea image generation through Diffusers.",
     }
 
 

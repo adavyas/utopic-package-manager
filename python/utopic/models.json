@@ -102,6 +102,45 @@
     "outputs": ["image/png"]
   },
   {
+    "id": "krea-2-raw",
+    "name": "Krea 2 Raw",
+    "family": "krea",
+    "filename": "krea-2-raw",
+    "url": "https://huggingface.co/krea/Krea-2-Raw",
+    "repo": "krea/Krea-2-Raw",
+    "size": "35.68 GiB artifacts",
+    "recommended": false,
+    "description": "High-quality Krea text-to-image model through Diffusers Krea2Pipeline; GB10 or high-memory CUDA recommended until Mac generation is validated.",
+    "modality": "image",
+    "engine": "diffusers",
+    "runtime": "bridge",
+    "hardware": ["gb10", "cuda"],
+    "endpoints": ["/v1/images/generations", "/v1/responses"],
+    "outputs": ["image/png"]
+  },
+  {
+    "id": "cosmos3-super",
+    "name": "Cosmos3 Super Text2Image",
+    "family": "cosmos3",
+    "filename": "cosmos3-super",
+    "url": "https://huggingface.co/nvidia/Cosmos3-Super-Text2Image",
+    "repo": "nvidia/Cosmos3-Super-Text2Image",
+    "size": "64.6B BF16 parameters",
+    "recommended": false,
+    "description": "Agentic high-memory NVIDIA Cosmos3 Super text-to-image model; requires GB10 or high-memory CUDA infrastructure.",
+    "modality": "image",
+    "engine": "cosmos",
+    "runtime": "bridge",
+    "hardware": ["gb10", "high-memory-cuda"],
+    "requirements": {
+      "min_gpu_memory_gib": 96,
+      "preferred_gpu_memory_gib": 128,
+      "allow_cpu": false
+    },
+    "endpoints": ["/v1/images/generations", "/v1/responses"],
+    "outputs": ["image/png"]
+  },
+  {
     "id": "kokoro-82m",
     "name": "Kokoro 82M",
     "family": "kokoro",

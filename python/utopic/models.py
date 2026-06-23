@@ -38,6 +38,7 @@ class ModelEntry:
     endpoints: tuple[str, ...] = ("/v1/chat/completions",)
     outputs: tuple[str, ...] = ("text",)
     repo: Optional[str] = None
+    requirements: Optional[dict[str, object]] = None
 
     @property
     def path(self) -> Path:
@@ -135,6 +136,11 @@ def _validate_catalog_entry(item: object, index: int) -> ModelEntry:
     repo = item.get("repo")
     if repo is not None and not isinstance(repo, str):
         raise RuntimeError(f"Invalid model catalog entry {index}: repo must be a string")
+    requirements = item.get("requirements")
+    if requirements is not None and not isinstance(requirements, dict):
+        raise RuntimeError(f"Invalid model catalog entry {index}: requirements must be an object")
+    if isinstance(requirements, dict):
+        _validate_requirements(requirements, index)
     if modality not in VALID_MODALITIES:
         raise RuntimeError(f"Invalid model catalog entry {index}: modality must be one of {sorted(VALID_MODALITIES)}")
     if runtime not in VALID_RUNTIMES:
@@ -161,7 +167,20 @@ def _validate_catalog_entry(item: object, index: int) -> ModelEntry:
         endpoints=tuple(endpoints),
         outputs=tuple(outputs),
         repo=repo,
+        requirements=dict(requirements) if isinstance(requirements, dict) else None,
     )
+
+
+def _validate_requirements(requirements: dict[str, object], index: int) -> None:
+    for key in ("min_gpu_memory_gib", "preferred_gpu_memory_gib"):
+        value = requirements.get(key)
+        if value is not None and not (
+            isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0
+        ):
+            raise RuntimeError(f"Invalid model catalog entry {index}: requirements.{key} must be a positive number")
+    allow_cpu = requirements.get("allow_cpu")
+    if allow_cpu is not None and not isinstance(allow_cpu, bool):
+        raise RuntimeError(f"Invalid model catalog entry {index}: requirements.allow_cpu must be a boolean")
 
 
 def _string_field(item: dict[str, object], field: str, default: str, index: int) -> str:
@@ -268,7 +287,7 @@ def _bridge_input_key(entry: ModelEntry) -> str:
 
 def _bridge_model_metadata(entry: ModelEntry) -> dict[str, object]:
     adapter = bridge.ADAPTERS.get(entry.engine)
-    return {
+    payload: dict[str, object] = {
         "bridge": {
             "command": f"utopic-bridge {entry.engine}",
             "environment_variable": _bridge_command_env_var(entry),
@@ -287,6 +306,9 @@ def _bridge_model_metadata(entry: ModelEntry) -> dict[str, object]:
         "runtime": entry.runtime,
         "url": entry.url,
     }
+    if entry.requirements:
+        payload["requirements"] = entry.requirements
+    return payload
 
 
 def pull_model(model_id: str, *, force: bool = False) -> Path:
@@ -392,6 +414,7 @@ def _native_model_check(entry: ModelEntry) -> dict[str, object]:
         "engine": entry.engine,
         "status": "ready" if ready else "missing_model_file",
         "ready": ready,
+        "requirements": entry.requirements or {},
         "cache": {
             "path": str(path),
             "present": present,
@@ -434,6 +457,7 @@ def _bridge_model_check(entry: ModelEntry) -> dict[str, object]:
         "engine": entry.engine,
         "status": "ready" if ready else "not_ready",
         "ready": ready,
+        "requirements": entry.requirements or {},
         "cache": {
             "path": str(entry.path),
             "prepared": prepared,

@@ -11,6 +11,8 @@ and metadata contract that future native engines will use.
 | DiffusionGemma | text | native GGUF / canvas entropy-bound | Curated Q4_K_M/Q5_K_M/Q6_K/Q8_0 aliases plus local GGUF paths |
 | Qwen-Image | image | bridge | Cataloged behind `/v1/images/generations` and MCP image generation |
 | FLUX.1-schnell | image | bridge | Cataloged behind `/v1/images/generations` and MCP image generation |
+| Krea 2 Raw | image | bridge | Cataloged behind `/v1/images/generations` and MCP image generation |
+| Cosmos3 Super Text2Image | image | bridge | Cataloged with GPU-memory preflight before bridge execution |
 | Kokoro / Chatterbox / Dia | tts | bridge | Cataloged behind `/v1/audio/speech` and MCP speech generation |
 | ACE-Step | music | bridge | Cataloged behind `/v1/audio/generations` and MCP music generation |
 | Wan2.1 T2V / LTX-Video | video | bridge | Cataloged behind `/v1/videos/generations` and MCP video generation |

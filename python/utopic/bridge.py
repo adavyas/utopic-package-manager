@@ -24,7 +24,16 @@ ADAPTERS = {
         engine="diffusers",
         packages=("diffusers", "torch", "torchvision"),
         install_hint='pip install "utopic[image]"',
-        description="Qwen-Image and FLUX image generation through Diffusers.",
+        description="Qwen-Image, FLUX, and Krea image generation through Diffusers.",
+    ),
+    "cosmos": BridgeAdapter(
+        engine="cosmos",
+        packages=("cosmos", "torch"),
+        install_hint=(
+            "Install the NVIDIA Cosmos runtime for this Python environment and "
+            "set UTOPIC_BRIDGE_COSMOS_COMMAND to a compatible local bridge command."
+        ),
+        description="NVIDIA Cosmos3 Super image generation bridge.",
     ),
     "kokoro": BridgeAdapter(
         engine="kokoro",
@@ -75,7 +84,8 @@ Run a packaged Utopic bridge adapter. The adapter reads one utopic-bridge/v1
 JSON request from stdin and writes one JSON response to stdout.
 
 Known engines:
-  diffusers   Qwen-Image and FLUX image generation
+  diffusers   Qwen-Image, FLUX, and Krea image generation
+  cosmos      Cosmos3 Super image generation
   kokoro      Kokoro TTS
   chatterbox  Chatterbox TTS
   dia         Dia TTS
@@ -124,6 +134,9 @@ def main(argv: Optional[list[str]] = None, *, stdin: Optional[str] = None) -> in
         return 0
     if adapter.engine == "diffusers":
         _print_run_result(adapter, request, _run_diffusers)
+        return 0
+    if adapter.engine == "cosmos":
+        _print_run_result(adapter, request, _run_cosmos)
         return 0
     if adapter.engine == "kokoro":
         _print_run_result(adapter, request, _run_kokoro)
@@ -449,6 +462,20 @@ def _run_diffusers(request: dict[str, Any]) -> dict[str, object]:
             "device": device or "cpu",
         },
     }
+
+
+def _run_cosmos(request: dict[str, Any]) -> dict[str, object]:
+    return _error(
+        "cosmos",
+        (
+            "cosmos bridge dependencies are installed, but direct Cosmos3 generation "
+            "is not implemented in this wheel yet. Use an external Cosmos/SGLang "
+            "bridge command through UTOPIC_BRIDGE_COSMOS_COMMAND."
+        ),
+        "bridge_adapter_not_implemented",
+        ADAPTERS["cosmos"].install_hint,
+        request=request,
+    )
 
 
 def _run_kokoro(request: dict[str, Any]) -> dict[str, object]:
@@ -824,6 +851,8 @@ def _diffusers_pipeline_class(diffusers_module: object, model_id: str) -> object
         return getattr(diffusers_module, "QwenImagePipeline")
     if model_id.startswith("flux") and hasattr(diffusers_module, "FluxPipeline"):
         return getattr(diffusers_module, "FluxPipeline")
+    if model_id.startswith("krea-2") and hasattr(diffusers_module, "Krea2Pipeline"):
+        return getattr(diffusers_module, "Krea2Pipeline")
     return getattr(diffusers_module, "DiffusionPipeline")
 
 
