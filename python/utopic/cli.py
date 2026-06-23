@@ -1,3 +1,5 @@
+import argparse
+import json
 import math
 import os
 import shlex
@@ -7,7 +9,8 @@ import sys
 import time
 import urllib.error
 import urllib.request
-from typing import Optional, Sequence
+from pathlib import Path
+from typing import Any, Optional, Sequence
 
 from . import __version__, _native, bridge, chat, gateway, installer, models
 
@@ -515,6 +518,7 @@ def _print_top_help() -> None:
 Commands:
   chat      Start the bundled chat TUI. Runs setup on first use.
   run       Start the unified OpenAI-compatible and MCP runtime, or run one-shot prompts with -p.
+  generate  Generate image, speech, music, or video artifacts.
   gateway   Start the unified multimodal OpenAI-compatible and MCP gateway.
   setup     Build and cache native binaries for this host.
   models    List, pull, and locate curated GGUF models.
@@ -525,6 +529,7 @@ Examples:
   utopic chat
   utopic chat diffusiongemma-26b-a4b-q4
   utopic run diffusiongemma-26b-a4b-q4 --port 8910 -ngl 99
+  utopic generate video --quality high -p "cinematic glass city sunrise" -o video.mp4
   utopic gateway --port 8911
   utopic doctor
   utopic run -m /path/to/model.gguf -p "Answer with one word: 2+2?" -n 16
@@ -532,6 +537,42 @@ Examples:
 Run `utopic <command> --help` for command-specific help.
 """
     )
+
+
+_GENERATE_ENDPOINTS = {
+    "image": "/v1/images/generations",
+    "speech": "/v1/audio/speech",
+    "music": "/v1/audio/generations",
+    "video": "/v1/videos/generations",
+}
+
+_GENERATE_MODALITY = {
+    "image": "image",
+    "speech": "tts",
+    "music": "music",
+    "video": "video",
+}
+
+_GENERATE_QUALITY_MODELS = {
+    "fast": {
+        "image": "flux-1-schnell",
+        "speech": "kokoro-82m",
+        "music": "ace-step-3.5b",
+        "video": "wan2.1-t2v-1.3b",
+    },
+    "balanced": {
+        "image": "qwen-image",
+        "speech": "kokoro-82m",
+        "music": "ace-step-3.5b",
+        "video": "wan2.1-t2v-1.3b",
+    },
+    "high": {
+        "image": "qwen-image",
+        "speech": "dia-1.6b",
+        "music": "ace-step-3.5b",
+        "video": "wan2.1-t2v-14b",
+    },
+}
 
 
 def _print_run_help() -> None:
@@ -566,6 +607,230 @@ def _format_command(command: object) -> str:
     if isinstance(command, (list, tuple)):
         return shlex.join(str(part) for part in command)
     return str(command)
+
+
+def _generate(argv: Sequence[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="utopic generate",
+        description="Generate local image, speech, music, or video artifacts.",
+    )
+    parser.add_argument("--version", action="store_true", help="Show version.")
+    subparsers = parser.add_subparsers(dest="kind")
+
+    image = subparsers.add_parser("image", help="Generate an image artifact.")
+    _add_prompt_generate_args(image)
+    _add_generation_common_args(image)
+    image.add_argument("--size", help="Image size, for example 1024x1024.")
+    image.add_argument("--steps", type=int, help="Diffusion steps.")
+    image.add_argument("--guidance-scale", type=float, help="Classifier-free guidance scale.")
+    image.add_argument("--true-cfg-scale", type=float, help="Qwen-Image true CFG scale.")
+    image.add_argument("--negative-prompt", help="Negative prompt.")
+
+    speech = subparsers.add_parser(
+        "speech",
+        aliases=["tts"],
+        help="Generate a speech audio artifact.",
+    )
+    speech.add_argument("model", nargs="?", help="TTS model alias.")
+    speech.add_argument("--input", required=True, help="Text to speak.")
+    _add_generation_common_args(speech)
+    speech.add_argument("--voice", help="Voice name.")
+    speech.add_argument("--sample-rate", type=int, help="Output sample rate when supported.")
+
+    music = subparsers.add_parser("music", help="Generate a music audio artifact.")
+    _add_prompt_generate_args(music)
+    _add_generation_common_args(music)
+    music.add_argument("--duration", type=float, help="Requested audio duration in seconds.")
+    music.add_argument("--lyrics", help="Lyrics text. Use an empty string for instrumental output.")
+    music.add_argument("--sample-rate", type=int, help="Output sample rate metadata when supported.")
+    music.add_argument("--steps", type=int, help="Generation steps when supported.")
+    music.add_argument("--guidance-scale", type=float, help="Guidance scale when supported.")
+
+    video = subparsers.add_parser("video", help="Generate a video artifact.")
+    _add_prompt_generate_args(video)
+    _add_generation_common_args(video)
+    video.add_argument("--size", help="Video size, for example 832x480.")
+    video.add_argument("--frames", type=int, help="Number of frames.")
+    video.add_argument("--fps", type=int, help="Frames per second.")
+    video.add_argument("--steps", type=int, help="Diffusion steps.")
+    video.add_argument("--guidance-scale", type=float, help="Classifier-free guidance scale.")
+    video.add_argument("--negative-prompt", help="Negative prompt.")
+
+    try:
+        args = parser.parse_args(list(argv))
+    except SystemExit as exc:
+        return exc.code if isinstance(exc.code, int) else 1
+
+    if args.version:
+        print(f"utopic generate {__version__}")
+        return 0
+    if args.kind is None:
+        parser.print_help()
+        return 0
+
+    try:
+        request = _generate_request(args)
+        model_id = str(request["model"])
+        models.pull_model(model_id)
+        status, _headers, body = gateway.handle_openai_request(
+            "POST",
+            _GENERATE_ENDPOINTS[_canonical_generate_kind(args.kind)],
+            request,
+        )
+        payload = json.loads(body.decode("utf-8"))
+        if status >= 400:
+            raise RuntimeError(_gateway_error_message(payload))
+        _print_generate_result(payload, output=args.output)
+        return 0
+    except (OSError, RuntimeError, json.JSONDecodeError) as exc:
+        print(f"utopic generate: {exc}", file=sys.stderr)
+        return 1
+
+
+def _add_prompt_generate_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("model", nargs="?", help="Model alias.")
+    parser.add_argument("-p", "--prompt", required=True, help="Prompt text.")
+
+
+def _add_generation_common_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--quality",
+        choices=("fast", "balanced", "high"),
+        default="balanced",
+        help="Default model preset when no model is provided.",
+    )
+    parser.add_argument("-o", "--output", help="Copy the first generated artifact to this path.")
+    parser.add_argument("--seed", type=int, help="Random seed when supported.")
+    parser.add_argument(
+        "--param",
+        action="append",
+        default=[],
+        metavar="KEY=JSON",
+        help="Pass an extra bridge parameter. Values are parsed as JSON when possible.",
+    )
+
+
+def _canonical_generate_kind(kind: str) -> str:
+    return "speech" if kind == "tts" else kind
+
+
+def _generate_request(args: argparse.Namespace) -> dict[str, Any]:
+    kind = _canonical_generate_kind(str(args.kind))
+    model_id = args.model or _default_generate_model(kind, args.quality)
+    entry = models.get_model(model_id)
+    if entry is None:
+        raise RuntimeError(f"unknown model: {model_id}")
+    expected_modality = _GENERATE_MODALITY[kind]
+    if entry.modality != expected_modality:
+        raise RuntimeError(
+            f"model {entry.id} is {entry.modality}, but `utopic generate {kind}` requires {expected_modality}"
+        )
+    if entry.runtime != "bridge":
+        raise RuntimeError(
+            f"model {entry.id} is a native text model; use `utopic run` or `utopic chat`"
+        )
+
+    request: dict[str, Any] = {"model": entry.id}
+    if kind == "speech":
+        request["input"] = args.input
+    else:
+        request["prompt"] = args.prompt
+    _add_optional_generate_parameters(args, request)
+    for value in args.param:
+        key, parsed = _parse_generate_param(value)
+        request[key] = parsed
+    return request
+
+
+def _default_generate_model(kind: str, quality: str) -> str:
+    preferred = _GENERATE_QUALITY_MODELS.get(quality, {}).get(kind)
+    if preferred and models.get_model(preferred) is not None:
+        return preferred
+    expected_modality = _GENERATE_MODALITY[kind]
+    for entry in models.list_models():
+        if entry.modality == expected_modality and entry.runtime == "bridge":
+            return entry.id
+    raise RuntimeError(f"no catalog model supports `utopic generate {kind}`")
+
+
+def _add_optional_generate_parameters(args: argparse.Namespace, request: dict[str, Any]) -> None:
+    for attr, key in (
+        ("size", "size"),
+        ("seed", "seed"),
+        ("voice", "voice"),
+        ("fps", "fps"),
+        ("lyrics", "lyrics"),
+        ("duration", "duration"),
+        ("sample_rate", "sample_rate"),
+        ("guidance_scale", "guidance_scale"),
+        ("true_cfg_scale", "true_cfg_scale"),
+        ("negative_prompt", "negative_prompt"),
+    ):
+        value = getattr(args, attr, None)
+        if value is not None:
+            request[key] = value
+    steps = getattr(args, "steps", None)
+    if steps is not None:
+        request["num_inference_steps"] = steps
+    frames = getattr(args, "frames", None)
+    if frames is not None:
+        request["num_frames"] = frames
+
+
+def _parse_generate_param(value: str) -> tuple[str, Any]:
+    if "=" not in value:
+        raise RuntimeError("--param must be KEY=JSON")
+    key, raw = value.split("=", 1)
+    if not key:
+        raise RuntimeError("--param must include a non-empty key")
+    try:
+        return key, json.loads(raw)
+    except json.JSONDecodeError:
+        return key, raw
+
+
+def _gateway_error_message(payload: dict[str, Any]) -> str:
+    error = payload.get("error")
+    if isinstance(error, dict):
+        message = error.get("message")
+        if isinstance(message, str) and message:
+            return message
+    return json.dumps(payload, sort_keys=True)
+
+
+def _print_generate_result(payload: dict[str, Any], *, output: Optional[str]) -> None:
+    artifacts = payload.get("artifacts")
+    if not isinstance(artifacts, list) or not artifacts:
+        raise RuntimeError("gateway returned no artifacts")
+    first_path: Optional[Path] = None
+    for index, artifact in enumerate(artifacts):
+        if not isinstance(artifact, dict):
+            continue
+        artifact_type = str(artifact.get("type") or "application/octet-stream")
+        path_value = artifact.get("path")
+        if not isinstance(path_value, str) or not path_value:
+            continue
+        path = Path(path_value).expanduser()
+        display_path = path
+        if index == 0 and output:
+            display_path = _copy_generated_artifact(path, Path(output).expanduser())
+        if first_path is None:
+            first_path = display_path
+        print(f"Generated {artifact_type}: {display_path}")
+    if first_path is None:
+        raise RuntimeError("gateway returned artifacts without local paths")
+    progress_url = payload.get("progress_url")
+    if isinstance(progress_url, str) and progress_url:
+        print(f"Progress: {progress_url}")
+
+
+def _copy_generated_artifact(source: Path, destination: Path) -> Path:
+    if destination.exists() and destination.is_dir():
+        destination = destination / source.name
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if source.resolve() != destination.resolve():
+        shutil.copyfile(source, destination)
+    return destination
 
 
 def _print_doctor_help() -> None:
@@ -784,6 +1049,8 @@ def main(argv: Optional[Sequence[str]] = None) -> Optional[int]:
         raise SystemExit(models.main(rest))
     if command == "run":
         return _run(rest)
+    if command == "generate":
+        return _generate(rest)
     if command == "gateway":
         return gateway.main(rest)
     if command == "doctor":

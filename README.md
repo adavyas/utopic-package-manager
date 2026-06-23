@@ -207,6 +207,7 @@ utopic --help
 utopic --version
 utopic chat --help
 utopic run --help
+utopic generate --help
 utopic gateway --help
 utopic-runtime --help
 utopic-bridge --help
@@ -315,6 +316,21 @@ uv pip install "utopic[music]"
 uv pip install git+https://github.com/ace-step/ACE-Step.git
 utopic-bridge ace-step --check
 ```
+
+Generate local artifacts directly from the same catalog and gateway contract:
+
+```sh
+utopic generate image qwen-image -p "A crisp product photo of a titanium robot assistant" --size 1024x1024 --steps 30 -o image.png
+utopic generate speech dia-1.6b --input "Utopic is running locally." -o speech.wav
+utopic generate music ace-step-3.5b -p "bright synthwave with warm analog drums" --duration 30 --lyrics "" -o music.wav
+utopic generate video --quality high -p "A cinematic sunrise over a glass coastal city, slow aerial camera move" --size 832x480 --frames 49 --steps 20 --fps 16 -o video.mp4
+```
+
+`utopic generate video --quality high` selects the higher-quality
+`wan2.1-t2v-14b` catalog entry when no explicit video model is provided.
+`--quality fast` selects the smaller `wan2.1-t2v-1.3b` model. The `speech`
+subcommand also accepts the `tts` alias. Use `--param KEY=JSON` to pass an
+engine-specific bridge option that is not exposed as a first-class CLI flag yet.
 
 Start the local runtime and print the live OpenAI-compatible and MCP URLs:
 

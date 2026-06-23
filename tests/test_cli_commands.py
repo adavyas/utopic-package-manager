@@ -1255,6 +1255,171 @@ def test_cli_run_bridge_model_starts_gateway_without_native_server(monkeypatch, 
     ]
 
 
+def test_cli_generate_video_high_quality_invokes_gateway_and_copies_artifact(
+    monkeypatch, tmp_path, capsys
+):
+    source = tmp_path / "run" / "outputs" / "video.mp4"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"mp4")
+    output = tmp_path / "final.mp4"
+    calls = []
+
+    def fake_handle(method, endpoint, body):
+        calls.append(("gateway", method, endpoint, body))
+        return (
+            200,
+            {"content-type": "application/json"},
+            json.dumps(
+                {
+                    "object": "utopic.artifact.response",
+                    "id": "run_test",
+                    "progress_url": "/v1/utopic/runs/run_test/events",
+                    "artifacts": [
+                        {
+                            "type": "video/mp4",
+                            "path": str(source),
+                            "metadata": {},
+                        }
+                    ],
+                }
+            ).encode("utf-8"),
+        )
+
+    monkeypatch.setattr(
+        cli.models,
+        "pull_model",
+        lambda model_id: calls.append(("pull", model_id)) or tmp_path / model_id,
+    )
+    monkeypatch.setattr(cli.gateway, "handle_openai_request", fake_handle)
+
+    assert (
+        cli.main(
+            [
+                "generate",
+                "video",
+                "-p",
+                "cinematic glass city sunrise",
+                "--quality",
+                "high",
+                "--size",
+                "832x480",
+                "--frames",
+                "49",
+                "--steps",
+                "20",
+                "--fps",
+                "16",
+                "--guidance-scale",
+                "5.5",
+                "--output",
+                str(output),
+            ]
+        )
+        == 0
+    )
+
+    assert output.read_bytes() == b"mp4"
+    assert calls == [
+        ("pull", "wan2.1-t2v-14b"),
+        (
+            "gateway",
+            "POST",
+            "/v1/videos/generations",
+            {
+                "model": "wan2.1-t2v-14b",
+                "prompt": "cinematic glass city sunrise",
+                "size": "832x480",
+                "num_frames": 49,
+                "num_inference_steps": 20,
+                "fps": 16,
+                "guidance_scale": 5.5,
+            },
+        ),
+    ]
+    captured = capsys.readouterr()
+    assert f"Generated video/mp4: {output}" in captured.out
+    assert "Progress: /v1/utopic/runs/run_test/events" in captured.out
+
+
+@pytest.mark.parametrize(
+    ("args", "endpoint", "expected"),
+    [
+        (
+            ["image", "qwen-image", "-p", "a tiny robot", "--size", "1024x1024", "--steps", "30"],
+            "/v1/images/generations",
+            {
+                "model": "qwen-image",
+                "prompt": "a tiny robot",
+                "size": "1024x1024",
+                "num_inference_steps": 30,
+            },
+        ),
+        (
+            ["speech", "kokoro-82m", "--input", "hello", "--voice", "af_heart"],
+            "/v1/audio/speech",
+            {"model": "kokoro-82m", "input": "hello", "voice": "af_heart"},
+        ),
+        (
+            ["tts", "dia-1.6b", "--input", "hello", "--sample-rate", "44100"],
+            "/v1/audio/speech",
+            {"model": "dia-1.6b", "input": "hello", "sample_rate": 44100},
+        ),
+        (
+            ["music", "ace-step-3.5b", "-p", "bright synthwave", "--duration", "30", "--lyrics", ""],
+            "/v1/audio/generations",
+            {
+                "model": "ace-step-3.5b",
+                "prompt": "bright synthwave",
+                "duration": 30.0,
+                "lyrics": "",
+            },
+        ),
+        (
+            ["video", "wan2.1-t2v-1.3b", "-p", "a calm ocean", "--frames", "41"],
+            "/v1/videos/generations",
+            {"model": "wan2.1-t2v-1.3b", "prompt": "a calm ocean", "num_frames": 41},
+        ),
+    ],
+)
+def test_cli_generate_supports_all_bridge_modalities(monkeypatch, tmp_path, args, endpoint, expected):
+    source = tmp_path / "artifact.bin"
+    source.write_bytes(b"artifact")
+    calls = []
+
+    def fake_handle(method, path, body):
+        calls.append(("gateway", method, path, body))
+        return (
+            200,
+            {"content-type": "application/json"},
+            json.dumps(
+                {
+                    "object": "utopic.artifact.response",
+                    "artifacts": [
+                        {
+                            "type": "application/octet-stream",
+                            "path": str(source),
+                            "metadata": {},
+                        }
+                    ],
+                }
+            ).encode("utf-8"),
+        )
+
+    monkeypatch.setattr(
+        cli.models,
+        "pull_model",
+        lambda model_id: calls.append(("pull", model_id)) or tmp_path / model_id,
+    )
+    monkeypatch.setattr(cli.gateway, "handle_openai_request", fake_handle)
+
+    assert cli.main(["generate", *args]) == 0
+
+    assert calls == [
+        ("pull", expected["model"]),
+        ("gateway", "POST", endpoint, expected),
+    ]
+
+
 def test_cli_run_rejects_unknown_server_options_before_setup(monkeypatch, capsys):
     monkeypatch.setattr(cli, "_ensure_setup", lambda enabled=True, binary_name="utopic": pytest.fail("should not run setup"))
     monkeypatch.setattr(cli.models, "ensure_model", lambda value=None: pytest.fail("should not resolve a model"))
