@@ -98,7 +98,7 @@ jobs:
                   def do_POST(self) -> None:
                       length = int(self.headers.get("content-length", "0"))
                       payload = json.loads(self.rfile.read(length) or b"{}")
-                      if self.path != "/v1/chat/completions" or payload.get("messages") != [{"role": "user", "content": "hello"}]:
+                      if self.path != "/v1/chat/completions" or payload.get("messages", [])[-1:] != [{"role": "user", "content": "hello"}]:
                           self.send_response(400)
                           self.end_headers()
                           return
@@ -159,7 +159,7 @@ jobs:
                   def do_POST(self) -> None:
                       length = int(self.headers.get("content-length", "0"))
                       payload = json.loads(self.rfile.read(length) or b"{}")
-                      if self.path != "/v1/chat/completions" or payload.get("messages") != [{"role": "user", "content": "hello"}]:
+                      if self.path != "/v1/chat/completions" or payload.get("messages", [])[-1:] != [{"role": "user", "content": "hello"}]:
                           self.send_response(400)
                           self.end_headers()
                           return
@@ -238,7 +238,7 @@ jobs:
                   def do_POST(self) -> None:
                       length = int(self.headers.get("content-length", "0"))
                       payload = json.loads(self.rfile.read(length) or b"{}")
-                      if self.path != "/v1/chat/completions" or payload.get("messages") != [{"role": "user", "content": "hello"}]:
+                      if self.path != "/v1/chat/completions" or payload.get("messages", [])[-1:] != [{"role": "user", "content": "hello"}]:
                           self.send_response(400)
                           self.end_headers()
                           return

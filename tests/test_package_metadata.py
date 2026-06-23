@@ -289,6 +289,8 @@ def test_workflows_smoke_installed_openai_v1_server_base_url():
         assert 'f"http://127.0.0.1:{server.server_port}/v1"' in workflow
         assert 'self.path != "/health"' in workflow
         assert 'self.path != "/v1/chat/completions"' in workflow
+        assert 'payload.get("messages", [])[-1:] != [{"role": "user", "content": "hello"}]' in workflow
+        assert 'payload.get("messages") != [{"role": "user", "content": "hello"}]' not in workflow
         assert "openai-v1 server-base ok" in workflow
 
 
