@@ -2,7 +2,7 @@
 
 Utopic's packaged model catalog is intentionally DiffusionGemma-first for text
 and uses one runtime schema for all local modalities. Native text models are
-GGUF files driven by the C++ runtime. Image, TTS, music, and video entries are
+GGUF files driven by the C++ runtime. Image, TTS, music, video, and misc entries are
 bridge runtimes today, but they share the same cache, OpenAI endpoint, MCP tool,
 and metadata contract that future native engines will use.
 

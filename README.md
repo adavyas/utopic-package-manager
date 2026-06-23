@@ -31,7 +31,7 @@ uv tool install utopic==0.1.8
 ```
 
 Utopic currently targets Python 3.10 through 3.12. That range matches the
-native launcher and the optional image, speech, music, and video bridge engines.
+native launcher and the optional image, speech, music, video, and misc bridge engines.
 If your system `python3` is newer, let uv manage the tool Python or create a
 3.12 virtual environment for project-local installs.
 
@@ -168,6 +168,7 @@ endpoints, and output artifact type.
 | `wan2.1-t2v-1.3b` | Wan2.1 T2V 1.3B | video | bridge | Small open-weight text-to-video model; laptop-plausible at modest resolution. |
 | `wan2.1-t2v-14b` | Wan2.1 T2V 14B | video | bridge | Higher-quality open-weight text-to-video model; GB10 or high-memory CUDA recommended. |
 | `ltx-video` | LTX-Video | video | bridge | Optional LTX video bridge; license and runtime differ from Wan. |
+| `zuna` | ZUNA | misc | bridge | Open-weight EEG and signal foundation model exposed as a generic file-in/file-out artifact workflow. |
 
 The native text path is centered on DiffusionGemma canvas / entropy-bound GGUF
 models. Other modalities use bridge engines today but share the same catalog,
@@ -267,7 +268,7 @@ utopic models pull --all
 ```
 
 This downloads every native GGUF catalog file and prepares bridge metadata
-directories for image, TTS, music, and video models. It is intentionally
+directories for image, TTS, music, video, and misc artifact models. It is intentionally
 opt-in because the DiffusionGemma quantization ladder is large. For most users,
 pull the single text model or bridge model they plan to run first.
 
@@ -281,7 +282,7 @@ qwen-image` or the relevant `pip install ...` command.
 
 `utopic doctor` prints the detected backend, native binary cache state, required
 setup tools, Node.js status, and one compact bridge-engine readiness line for
-each image, TTS, music, and video adapter. For detailed bridge import errors,
+each image, TTS, music, video, and misc adapter. For detailed bridge import errors,
 run the matching `utopic-bridge <engine> --check` command.
 
 Install bridge dependencies by modality when you want non-text generation:
@@ -292,7 +293,7 @@ uv pip install --python ~/.venvs/utopic/bin/python "utopic[tts]"     # Kokoro an
 uv pip install --python ~/.venvs/utopic/bin/python "utopic[chatterbox]" # Chatterbox, isolated because it pins Diffusers
 uv pip install --python ~/.venvs/utopic/bin/python "utopic[music]"   # Shared music audio stack, including TorchCodec
 uv pip install --python ~/.venvs/utopic/bin/python "utopic[video]"   # Wan and LTX video through Diffusers
-uv pip install --python ~/.venvs/utopic/bin/python "utopic[bridge]"  # Image, Kokoro/Dia, music, and video bridge groups
+uv pip install --python ~/.venvs/utopic/bin/python "utopic[bridge]"  # Image, Kokoro/Dia, music, and video bridge groups; misc artifact bridge has no extra dependencies
 ```
 
 Kokoro also needs the spaCy English model in the same Python environment:
@@ -334,6 +335,7 @@ utopic generate image krea-2-raw -p "A crisp editorial poster of a glass coastal
 utopic generate speech dia-1.6b --input "Utopic is running locally." -o speech.wav
 utopic generate music ace-step-3.5b -p "bright synthwave with warm analog drums" --duration 30 --lyrics "" -o music.wav
 utopic generate video --quality high -p "A cinematic sunrise over a glass coastal city, slow aerial camera move" --size 832x480 --frames 49 --steps 20 --fps 16 -o video.mp4
+utopic generate misc zuna --artifact /path/to/input.bin -o output.bin
 ```
 
 `utopic generate video --quality high` selects the higher-quality
@@ -357,6 +359,7 @@ http://127.0.0.1:8910/v1/images/generations
 http://127.0.0.1:8910/v1/audio/speech
 http://127.0.0.1:8910/v1/audio/generations
 http://127.0.0.1:8910/v1/videos/generations
+http://127.0.0.1:8910/v1/utopic/misc/generations
 http://127.0.0.1:8910/v1/models
 http://127.0.0.1:8910/mcp
 ```
@@ -404,11 +407,12 @@ POST http://127.0.0.1:8911/v1/images/generations
 POST http://127.0.0.1:8911/v1/audio/speech
 POST http://127.0.0.1:8911/v1/audio/generations
 POST http://127.0.0.1:8911/v1/videos/generations
+POST http://127.0.0.1:8911/v1/utopic/misc/generations
 POST http://127.0.0.1:8911/mcp
 ```
 
 The `/mcp` route speaks JSON-RPC over HTTP for MCP `initialize`, `ping`, `tools/list`, and `tools/call`. The listed tools cover text chat, image
-generation, speech, music, video, and model cache operations, all routed through
+generation, speech, music, video, misc artifacts, and model cache operations, all routed through
 the same runtime boundary as the OpenAI-compatible endpoints.
 
 Bridge engines use the same `utopic-bridge/v1` contract that future native C++
@@ -461,14 +465,14 @@ GET /v1/utopic/runs/{run_id}/events
 
 `/v1/responses` is normalized at the gateway boundary. Text requests are
 translated to native chat-completions input and wrapped back into a
-Responses-style object. Image, TTS, music, and video requests translate
-Responses `input` text into the bridge `prompt` or `input` field and return a
+Responses-style object. Image, TTS, music, video, and misc requests translate
+Responses `input` text into the bridge `prompt`, `input`, or `artifact` field and return a
 Responses-style artifact message, while the modality-specific endpoints return
 the richer `utopic.artifact.response` object.
 
 By default, the gateway runs the packaged bridge as
 `python -m utopic.bridge <engine>`, so a normal install can dispatch to image,
-TTS, music, and video bridge adapters without extra shell wiring. Optional
+TTS, music, video, and misc bridge adapters without extra shell wiring. Optional
 engine packages still need to be installed for real generation.
 
 Engine-specific environment variables override the packaged bridge when you
@@ -483,6 +487,7 @@ export UTOPIC_BRIDGE_DIA_COMMAND="utopic-bridge dia"
 export UTOPIC_BRIDGE_ACE_STEP_COMMAND="utopic-bridge ace-step"
 export UTOPIC_BRIDGE_WAN_COMMAND="utopic-bridge wan"
 export UTOPIC_BRIDGE_LTX_COMMAND="utopic-bridge ltx"
+export UTOPIC_BRIDGE_ARTIFACT_COMMAND="utopic-bridge artifact"
 ```
 
 `GET /v1/models` also exposes the bridge activation metadata for every bridge
@@ -497,6 +502,7 @@ models:
 utopic-bridge diffusers --check
 utopic-bridge kokoro --check
 utopic-bridge wan --check
+utopic-bridge artifact --check
 ```
 
 The check prints JSON with `ready`, `status`, `missing`, `install_hint`, and any
@@ -514,11 +520,11 @@ Current release smoke coverage:
 | Hardware surface | Apple Silicon, GB10/DGX Spark, RTX 4090 CUDA, and 4x A100 CUDA smoke tests for installed wheel, catalog, MCP tools, bridge diagnostics, and artifact contract |
 | Native text generation | DiffusionGemma Q4_K_M native C++ smoke tests on GB10/DGX Spark, 6x RTX 4090 CUDA, and 4x A100 CUDA; Q5_K_M, Q6_K, and Q8_0 native C++ smoke tests on 4x A100 CUDA, using the package-managed llama.cpp build |
 | Real bridge generation | Qwen-Image PNG on CUDA, Kokoro WAV, Chatterbox WAV, Dia WAV, ACE-Step WAV through the MCP gateway on CUDA, and Wan2.1 1.3B MP4 on CUDA |
-| Heavy bridge models | FLUX.1-schnell, Krea 2 Raw, Cosmos3 Super, and LTX expose stable routes and diagnostics, but can still require Hugging Face access, a complete local model download, sufficient GPU memory, and matching local Python engine dependencies before real generation |
+| Heavy bridge models | FLUX.1-schnell, Krea 2 Raw, Cosmos3 Super, LTX, and ZUNA expose stable routes and diagnostics, but can still require Hugging Face access, a complete local model download, sufficient GPU memory, and matching local Python engine dependencies before real generation |
 
 The packaged `utopic-bridge` command provides stable adapter entrypoints and
 dependency diagnostics for `diffusers`, `cosmos`, `kokoro`, `chatterbox`, `dia`,
-`ace-step`, `wan`, and `ltx`. The adapters translate the shared Utopic request into
+`ace-step`, `wan`, `ltx`, and `artifact`. The adapters translate the shared Utopic request into
 their local Python engines:
 
 - `diffusers`: Qwen-Image, FLUX, and Krea image generation.
@@ -530,6 +536,7 @@ their local Python engines:
   package.
 - `wan`: Wan text-to-video generation through Diffusers.
 - `ltx`: LTX-Video generation through Diffusers.
+- `artifact`: generic misc file-in/file-out artifact bridge, including the ZUNA catalog entry.
 
 If an optional engine package is missing, the gateway returns a structured
 `bridge_dependency_missing` response with an install hint. If a fast-moving
@@ -537,7 +544,7 @@ upstream package changes its Python API, the gateway returns
 `bridge_adapter_api_mismatch` instead of crashing. Bridge failures include
 `run_id`, `progress_url`, and any progress events already emitted by the
 adapter, so OpenAI clients and MCP hosts can still show useful diagnostics for
-long image, speech, music, or video jobs. These bridge commands can be replaced
+long image, speech, music, video, or misc jobs. These bridge commands can be replaced
 by future native C++ engines without changing the OpenAI endpoint, MCP tool,
 cache, progress, or artifact contract.
 
@@ -548,6 +555,7 @@ The MCP endpoint exposes the same runtime through tools:
 - `utopic_speak`
 - `utopic_generate_music`
 - `utopic_generate_video`
+- `utopic_generate_misc`
 - `utopic_models_list`
 - `utopic_models_check`
 - `utopic_models_pull`

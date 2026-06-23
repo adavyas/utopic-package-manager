@@ -113,6 +113,41 @@ def test_acestep_bridge_declares_torchcodec_dependency():
     assert "torchcodec" in bridge.ADAPTERS["ace-step"].packages
 
 
+def test_artifact_bridge_copies_input_artifact(tmp_path, capsys):
+    source = tmp_path / "source.eeg"
+    source.write_bytes(b"zuna-signal")
+    output_dir = tmp_path / "outputs"
+    progress_path = tmp_path / "progress.jsonl"
+    request = {
+        "schema_version": "utopic-bridge/v1",
+        "model": "zuna",
+        "engine": "artifact",
+        "modality": "misc",
+        "input": {"artifact": str(source)},
+        "parameters": {"artifact_type": "application/octet-stream"},
+        "metadata": {"outputs": ["application/octet-stream"]},
+        "output_dir": str(output_dir),
+        "progress_path": str(progress_path),
+    }
+
+    assert bridge.ADAPTERS["artifact"].packages == ()
+    assert bridge.main(["artifact"], stdin=json.dumps(request)) == 0
+    payload = json.loads(capsys.readouterr().out)
+
+    assert payload["schema_version"] == "utopic-bridge/v1"
+    assert payload["engine"] == "artifact"
+    assert payload["artifacts"][0]["type"] == "application/octet-stream"
+    output_path = Path(payload["artifacts"][0]["path"])
+    assert output_path.parent == output_dir
+    assert output_path.read_bytes() == b"zuna-signal"
+    assert payload["artifacts"][0]["metadata"]["source"] == str(source)
+    progress = [
+        json.loads(line)
+        for line in progress_path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert [event["event"] for event in progress] == ["loading", "generating", "completed"]
+
+
 def test_safe_run_preserves_import_error_message_without_module_name(tmp_path):
     def runner(_request):
         raise ImportError("Please install `soundfile` to save audio files.")

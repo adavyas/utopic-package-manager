@@ -47,7 +47,7 @@ class ModelEntry:
         return models_dir() / _safe_model_filename(self)
 
 
-VALID_MODALITIES = {"text", "image", "tts", "music", "video"}
+VALID_MODALITIES = {"text", "image", "tts", "music", "video", "misc"}
 VALID_RUNTIMES = {"native", "bridge"}
 
 
@@ -282,6 +282,8 @@ def _bridge_command_env_var(entry: ModelEntry) -> str:
 
 
 def _bridge_input_key(entry: ModelEntry) -> str:
+    if entry.modality == "misc":
+        return "artifact"
     return "input" if entry.modality == "tts" else "prompt"
 
 

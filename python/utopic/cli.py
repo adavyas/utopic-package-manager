@@ -518,7 +518,7 @@ def _print_top_help() -> None:
 Commands:
   chat      Start the bundled chat TUI. Runs setup on first use.
   run       Start the unified OpenAI-compatible and MCP runtime, or run one-shot prompts with -p.
-  generate  Generate image, speech, music, or video artifacts.
+  generate  Generate image, speech, music, video, or misc artifacts.
   gateway   Start the unified multimodal OpenAI-compatible and MCP gateway.
   setup     Build and cache native binaries for this host.
   models    List, pull, and locate curated GGUF models.
@@ -530,6 +530,7 @@ Examples:
   utopic chat diffusiongemma-26b-a4b-q4
   utopic run diffusiongemma-26b-a4b-q4 --port 8910 -ngl 99
   utopic generate video --quality high -p "cinematic glass city sunrise" -o video.mp4
+  utopic generate misc zuna --artifact /path/to/input.bin -o output.bin
   utopic gateway --port 8911
   utopic doctor
   utopic run -m /path/to/model.gguf -p "Answer with one word: 2+2?" -n 16
@@ -544,6 +545,7 @@ _GENERATE_ENDPOINTS = {
     "speech": "/v1/audio/speech",
     "music": "/v1/audio/generations",
     "video": "/v1/videos/generations",
+    "misc": "/v1/utopic/misc/generations",
 }
 
 _GENERATE_MODALITY = {
@@ -551,6 +553,7 @@ _GENERATE_MODALITY = {
     "speech": "tts",
     "music": "music",
     "video": "video",
+    "misc": "misc",
 }
 
 _GENERATE_QUALITY_MODELS = {
@@ -559,18 +562,21 @@ _GENERATE_QUALITY_MODELS = {
         "speech": "kokoro-82m",
         "music": "ace-step-3.5b",
         "video": "wan2.1-t2v-1.3b",
+        "misc": "zuna",
     },
     "balanced": {
         "image": "qwen-image",
         "speech": "kokoro-82m",
         "music": "ace-step-3.5b",
         "video": "wan2.1-t2v-1.3b",
+        "misc": "zuna",
     },
     "high": {
         "image": "qwen-image",
         "speech": "dia-1.6b",
         "music": "ace-step-3.5b",
         "video": "wan2.1-t2v-14b",
+        "misc": "zuna",
     },
 }
 
@@ -612,7 +618,7 @@ def _format_command(command: object) -> str:
 def _generate(argv: Sequence[str]) -> int:
     parser = argparse.ArgumentParser(
         prog="utopic generate",
-        description="Generate local image, speech, music, or video artifacts.",
+        description="Generate local image, speech, music, video, or misc artifacts.",
     )
     parser.add_argument("--version", action="store_true", help="Show version.")
     subparsers = parser.add_subparsers(dest="kind")
@@ -655,6 +661,12 @@ def _generate(argv: Sequence[str]) -> int:
     video.add_argument("--steps", type=int, help="Diffusion steps.")
     video.add_argument("--guidance-scale", type=float, help="Classifier-free guidance scale.")
     video.add_argument("--negative-prompt", help="Negative prompt.")
+
+    misc = subparsers.add_parser("misc", help="Run a misc file-in/file-out artifact model.")
+    misc.add_argument("model", nargs="?", help="Misc model alias.")
+    misc.add_argument("--artifact", "--input-file", dest="artifact", required=True, help="Input artifact path.")
+    _add_generation_common_args(misc)
+    misc.add_argument("--artifact-type", help="Output MIME type metadata.")
 
     try:
         args = parser.parse_args(list(argv))
@@ -733,6 +745,8 @@ def _generate_request(args: argparse.Namespace) -> dict[str, Any]:
     request: dict[str, Any] = {"model": entry.id}
     if kind == "speech":
         request["input"] = args.input
+    elif kind == "misc":
+        request["artifact"] = args.artifact
     else:
         request["prompt"] = args.prompt
     _add_optional_generate_parameters(args, request)
@@ -765,6 +779,7 @@ def _add_optional_generate_parameters(args: argparse.Namespace, request: dict[st
         ("guidance_scale", "guidance_scale"),
         ("true_cfg_scale", "true_cfg_scale"),
         ("negative_prompt", "negative_prompt"),
+        ("artifact_type", "artifact_type"),
     ):
         value = getattr(args, attr, None)
         if value is not None:
@@ -847,7 +862,7 @@ Checks:
   - whether cached native binaries are current
   - required setup tools: cmake and git
   - optional chat tool: Node.js
-  - optional bridge engines for image, speech, music, and video
+  - optional bridge engines for image, speech, music, video, and misc artifacts
 """
     )
 

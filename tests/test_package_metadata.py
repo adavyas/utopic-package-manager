@@ -376,7 +376,7 @@ def test_model_catalog_declares_runtime_schema_for_every_entry():
         "endpoints",
         "outputs",
     }
-    valid_modalities = {"text", "image", "tts", "music", "video"}
+    valid_modalities = {"text", "image", "tts", "music", "video", "misc"}
     valid_runtimes = {"native", "bridge"}
 
     for entry in catalog:

@@ -75,6 +75,12 @@ ADAPTERS = {
         install_hint='pip install "utopic[video]"',
         description="LTX-Video bridge through Diffusers.",
     ),
+    "artifact": BridgeAdapter(
+        engine="artifact",
+        packages=(),
+        install_hint="",
+        description="Generic local file-in/file-out bridge for misc artifacts.",
+    ),
 }
 
 
@@ -92,6 +98,7 @@ Known engines:
   ace-step    ACE-Step music generation
   wan         Wan video generation
   ltx         LTX-Video generation
+  artifact    Generic misc artifact passthrough
 """
 
 
@@ -155,6 +162,9 @@ def main(argv: Optional[list[str]] = None, *, stdin: Optional[str] = None) -> in
         return 0
     if adapter.engine == "ltx":
         _print_run_result(adapter, request, _run_ltx)
+        return 0
+    if adapter.engine == "artifact":
+        _print_run_result(adapter, request, _run_artifact)
         return 0
     print(
         json.dumps(
@@ -252,6 +262,9 @@ def _validate_bridge_request(adapter: BridgeAdapter, request: object) -> Optiona
     if request["modality"] == "tts":
         if not isinstance(input_value.get("input"), str) or not input_value.get("input"):
             return "input.input must be a non-empty string"
+    elif request["modality"] == "misc":
+        if not isinstance(input_value.get("artifact"), str) or not input_value.get("artifact"):
+            return "input.artifact must be a non-empty string"
     elif not isinstance(input_value.get("prompt"), str) or not input_value.get("prompt"):
         return "input.prompt must be a non-empty string"
     parameters = request.get("parameters", {})
@@ -406,6 +419,49 @@ def _looks_like_huggingface_auth_error(message: str) -> bool:
             or "please log in" in lowered
         )
     )
+
+
+def _run_artifact(request: dict[str, Any]) -> dict[str, object]:
+    output_dir = Path(str(request.get("output_dir") or ".")).expanduser()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    progress_path = Path(str(request.get("progress_path") or output_dir / "progress.jsonl")).expanduser()
+    progress_path.parent.mkdir(parents=True, exist_ok=True)
+    source = Path(_artifact_input_from_request(request)).expanduser()
+    if not source.is_file():
+        raise RuntimeError(f"artifact input does not exist: {source}")
+    parameters = request.get("parameters") if isinstance(request.get("parameters"), dict) else {}
+    metadata = request.get("metadata") if isinstance(request.get("metadata"), dict) else {}
+    _write_progress(progress_path, "loading", 0.1, "loading input artifact")
+    destination = output_dir / _safe_output_artifact_name(source.name)
+    _write_progress(progress_path, "generating", 0.5, "copying artifact")
+    destination.write_bytes(source.read_bytes())
+    _write_progress(progress_path, "completed", 1.0, "artifact saved")
+    artifact_type = parameters.get("artifact_type") if isinstance(parameters.get("artifact_type"), str) else ""
+    if not artifact_type:
+        outputs = metadata.get("outputs")
+        if isinstance(outputs, list) and outputs and isinstance(outputs[0], str):
+            artifact_type = outputs[0]
+    if not artifact_type:
+        artifact_type = "application/octet-stream"
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "engine": "artifact",
+        "artifacts": [
+            {
+                "type": artifact_type,
+                "path": str(destination),
+                "metadata": {
+                    "engine": "artifact",
+                    "source": str(source),
+                },
+            }
+        ],
+        "metadata": {
+            "schema_version": SCHEMA_VERSION,
+            "engine": "artifact",
+            "source": str(source),
+        },
+    }
 
 
 def _run_diffusers(request: dict[str, Any]) -> dict[str, object]:
@@ -1057,6 +1113,24 @@ def _text_input_from_request(request: dict[str, Any]) -> str:
     if isinstance(input_value, str):
         return input_value
     return ""
+
+
+def _artifact_input_from_request(request: dict[str, Any]) -> str:
+    input_value = request.get("input")
+    if isinstance(input_value, dict):
+        value = input_value.get("artifact") or input_value.get("input_file") or input_value.get("path")
+        if isinstance(value, str):
+            return value
+    if isinstance(input_value, str):
+        return input_value
+    return ""
+
+
+def _safe_output_artifact_name(name: str) -> str:
+    candidate = Path(name).name
+    if not candidate or candidate in {".", ".."}:
+        return "artifact.bin"
+    return candidate
 
 
 def _write_progress(path: Path, event: str, progress: float, message: str) -> None:

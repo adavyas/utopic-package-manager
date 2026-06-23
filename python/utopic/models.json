@@ -258,5 +258,22 @@
     "hardware": ["mac-48gb", "gb10", "cuda"],
     "endpoints": ["/v1/videos/generations", "/v1/responses"],
     "outputs": ["video/mp4"]
+  },
+  {
+    "id": "zuna",
+    "name": "ZUNA",
+    "family": "zuna",
+    "filename": "zuna",
+    "url": "https://huggingface.co/Zyphra/ZUNA",
+    "repo": "Zyphra/ZUNA",
+    "size": "380M parameters",
+    "recommended": false,
+    "description": "Open-weight EEG and signal foundation model cataloged as a misc artifact workflow. Uses the generic local file-in/file-out bridge until a dedicated native runner is available.",
+    "modality": "misc",
+    "engine": "artifact",
+    "runtime": "bridge",
+    "hardware": ["mac-48gb", "gb10", "cuda"],
+    "endpoints": ["/v1/utopic/misc/generations", "/v1/responses"],
+    "outputs": ["application/octet-stream"]
   }
 ]

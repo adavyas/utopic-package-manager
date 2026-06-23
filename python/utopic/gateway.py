@@ -39,6 +39,7 @@ Endpoints:
   POST /v1/audio/speech
   POST /v1/audio/generations
   POST /v1/videos/generations
+  POST /v1/utopic/misc/generations
   POST /mcp
 """
 
@@ -50,6 +51,7 @@ OPENAI_TOOL_BY_ENDPOINT = {
     "/v1/audio/speech": "utopic_speak",
     "/v1/audio/generations": "utopic_generate_music",
     "/v1/videos/generations": "utopic_generate_video",
+    "/v1/utopic/misc/generations": "utopic_generate_misc",
 }
 
 
@@ -88,6 +90,11 @@ MCP_TOOLS = [
         "name": "utopic_generate_video",
         "description": "Generate video with a local Utopic video model.",
         "inputSchema": _schema(["prompt"], {"model": "string", "prompt": "string", "size": "string"}),
+    },
+    {
+        "name": "utopic_generate_misc",
+        "description": "Run a local Utopic misc artifact model.",
+        "inputSchema": _schema(["artifact"], {"model": "string", "artifact": "string", "artifact_type": "string"}),
     },
     {
         "name": "utopic_models_list",
@@ -272,6 +279,7 @@ def _mcp_tool_call(
         "utopic_speak": "/v1/audio/speech",
         "utopic_generate_music": "/v1/audio/generations",
         "utopic_generate_video": "/v1/videos/generations",
+        "utopic_generate_misc": "/v1/utopic/misc/generations",
     }
     endpoint = endpoint_by_tool.get(name)
     if endpoint is None:
@@ -553,7 +561,7 @@ def _run_bridge(
         "parameters": {
             key: value
             for key, value in request.items()
-            if key not in {"model", "prompt", "input", "messages"}
+            if key not in {"model", "prompt", "input", "messages", "artifact", "input_file"}
         },
         "model_cache_path": str(entry.path),
         "output_dir": str(output_dir),
@@ -732,6 +740,11 @@ def _normalize_request_for_runtime(
     if entry.modality == "tts":
         normalized["input"] = text
         return normalized
+    if entry.modality == "misc":
+        if isinstance(request.get("artifact"), str) and request.get("artifact"):
+            return normalized
+        normalized["artifact"] = text
+        return normalized
     normalized["prompt"] = text
     return normalized
 
@@ -789,6 +802,8 @@ def _responses_content_text(value: object) -> str:
 
 
 def _input_key_for_modality(modality: str) -> str:
+    if modality == "misc":
+        return "artifact"
     return "input" if modality == "tts" else "prompt"
 
 

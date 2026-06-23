@@ -1420,6 +1420,78 @@ def test_cli_generate_supports_all_bridge_modalities(monkeypatch, tmp_path, args
     ]
 
 
+def test_cli_generate_misc_invokes_gateway_and_copies_artifact(monkeypatch, tmp_path, capsys):
+    source = tmp_path / "source.eeg"
+    source.write_bytes(b"source")
+    generated = tmp_path / "run" / "outputs" / "zuna.bin"
+    generated.parent.mkdir(parents=True)
+    generated.write_bytes(b"generated")
+    output = tmp_path / "final.bin"
+    calls = []
+
+    def fake_handle(method, path, body):
+        calls.append(("gateway", method, path, body))
+        return (
+            200,
+            {"content-type": "application/json"},
+            json.dumps(
+                {
+                    "object": "utopic.artifact.response",
+                    "id": "run_misc",
+                    "progress_url": "/v1/utopic/runs/run_misc/events",
+                    "artifacts": [
+                        {
+                            "type": "application/octet-stream",
+                            "path": str(generated),
+                            "metadata": {},
+                        }
+                    ],
+                }
+            ).encode("utf-8"),
+        )
+
+    monkeypatch.setattr(
+        cli.models,
+        "pull_model",
+        lambda model_id: calls.append(("pull", model_id)) or tmp_path / model_id,
+    )
+    monkeypatch.setattr(cli.gateway, "handle_openai_request", fake_handle)
+
+    assert (
+        cli.main(
+            [
+                "generate",
+                "misc",
+                "zuna",
+                "--artifact",
+                str(source),
+                "--artifact-type",
+                "application/octet-stream",
+                "--output",
+                str(output),
+            ]
+        )
+        == 0
+    )
+
+    assert output.read_bytes() == b"generated"
+    assert calls == [
+        ("pull", "zuna"),
+        (
+            "gateway",
+            "POST",
+            "/v1/utopic/misc/generations",
+            {
+                "model": "zuna",
+                "artifact": str(source),
+                "artifact_type": "application/octet-stream",
+            },
+        ),
+    ]
+    captured = capsys.readouterr()
+    assert f"Generated application/octet-stream: {output}" in captured.out
+
+
 def test_cli_run_rejects_unknown_server_options_before_setup(monkeypatch, capsys):
     monkeypatch.setattr(cli, "_ensure_setup", lambda enabled=True, binary_name="utopic": pytest.fail("should not run setup"))
     monkeypatch.setattr(cli.models, "ensure_model", lambda value=None: pytest.fail("should not resolve a model"))

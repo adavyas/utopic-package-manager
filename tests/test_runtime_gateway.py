@@ -63,6 +63,12 @@ def test_gateway_models_endpoint_exposes_multimodal_runtime_metadata():
     assert by_id["cosmos3-super"]["repo"] == "nvidia/Cosmos3-Super-Text2Image"
     assert by_id["cosmos3-super"]["requirements"]["min_gpu_memory_gib"] == 96
     assert by_id["cosmos3-super"]["requirements"]["allow_cpu"] is False
+    assert by_id["zuna"]["modality"] == "misc"
+    assert by_id["zuna"]["engine"] == "artifact"
+    assert by_id["zuna"]["runtime"] == "bridge"
+    assert by_id["zuna"]["repo"] == "Zyphra/ZUNA"
+    assert "/v1/utopic/misc/generations" in by_id["zuna"]["endpoints"]
+    assert by_id["zuna"]["bridge"]["input"] == "artifact"
 
 
 def test_gateway_models_endpoint_exposes_bridge_activation_for_all_bridge_models():
@@ -83,14 +89,15 @@ def test_gateway_models_endpoint_exposes_bridge_activation_for_all_bridge_models
         "wan2.1-t2v-1.3b",
         "wan2.1-t2v-14b",
         "ltx-video",
+        "zuna",
     }
     for item in bridge_models:
         assert item["bridge"]["schema_version"] == "utopic-bridge/v1"
         assert item["bridge"]["engine"] == item["engine"]
         assert item["bridge"]["command"] == f"utopic-bridge {item['engine']}"
         assert item["bridge"]["environment_variable"].startswith("UTOPIC_BRIDGE_")
-        assert item["bridge"]["install_hint"]
-        assert item["bridge"]["input"] in {"prompt", "input"}
+        assert item["bridge"]["install_hint"] or item["engine"] == "artifact"
+        assert item["bridge"]["input"] in {"prompt", "input", "artifact"}
         assert item["bridge"]["outputs"] == item["outputs"]
 
     by_id = {item["id"]: item for item in bridge_models}
@@ -236,12 +243,14 @@ def test_every_bridge_catalog_model_has_openai_and_mcp_runtime_surface():
         "tts": "utopic_speak",
         "music": "utopic_generate_music",
         "video": "utopic_generate_video",
+        "misc": "utopic_generate_misc",
     }
     request_by_modality = {
         "image": {"prompt": "a small ceramic cup"},
         "tts": {"input": "hello from utopic"},
         "music": {"prompt": "quiet piano"},
         "video": {"prompt": "waves rolling onto a beach"},
+        "misc": {"artifact": "/tmp/input.bin"},
     }
 
     bridge_models = [entry for entry in gateway.models.list_models() if entry.runtime == "bridge"]
@@ -265,7 +274,8 @@ def test_every_bridge_catalog_model_has_openai_and_mcp_runtime_surface():
         responses_request = {
             "model": entry.id,
             "input": request_by_modality[entry.modality].get("prompt")
-            or request_by_modality[entry.modality]["input"],
+            or request_by_modality[entry.modality].get("input")
+            or request_by_modality[entry.modality]["artifact"],
         }
         status, payload = decode(gateway.handle_openai_request("POST", "/v1/responses", responses_request))
 
@@ -381,6 +391,58 @@ print(json.dumps({
         "object": "list",
         "data": payload["progress"],
     }
+
+
+def test_gateway_misc_generation_invokes_artifact_bridge(tmp_path, monkeypatch):
+    source = tmp_path / "sample.eeg"
+    source.write_bytes(b"zuna-input")
+    captured_path = tmp_path / "captured.json"
+    script = tmp_path / "fake_artifact_bridge.py"
+    script.write_text(
+        f"""
+import json
+import pathlib
+import sys
+
+request = json.loads(sys.stdin.read())
+pathlib.Path({str(captured_path)!r}).write_text(json.dumps(request), encoding="utf-8")
+out_dir = pathlib.Path(request["output_dir"])
+out_dir.mkdir(parents=True, exist_ok=True)
+artifact = out_dir / "zuna.bin"
+artifact.write_bytes(pathlib.Path(request["input"]["artifact"]).read_bytes())
+print(json.dumps({{
+    "artifacts": [{{"type": "application/octet-stream", "path": str(artifact), "metadata": {{"engine": "artifact"}}}}],
+    "metadata": {{"schema_version": "utopic-bridge/v1", "engine": "artifact"}}
+}}))
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("UTOPIC_HOME", str(tmp_path / "cache"))
+    monkeypatch.setenv("UTOPIC_BRIDGE_ARTIFACT_COMMAND", f"{sys.executable} {script}")
+
+    status, payload = decode(
+        gateway.handle_openai_request(
+            "POST",
+            "/v1/utopic/misc/generations",
+            {
+                "model": "zuna",
+                "artifact": str(source),
+                "artifact_type": "application/octet-stream",
+            },
+        )
+    )
+
+    assert status == 200
+    assert payload["object"] == "utopic.artifact.response"
+    assert payload["model"] == "zuna"
+    assert payload["modality"] == "misc"
+    assert payload["engine"] == "artifact"
+    assert payload["artifacts"][0]["type"] == "application/octet-stream"
+    assert Path(payload["artifacts"][0]["path"]).read_bytes() == b"zuna-input"
+    captured = json.loads(captured_path.read_text(encoding="utf-8"))
+    assert captured["endpoint"] == "/v1/utopic/misc/generations"
+    assert captured["input"] == {"artifact": str(source)}
+    assert captured["parameters"] == {"artifact_type": "application/octet-stream"}
 
 
 def test_gateway_image_generation_supports_b64_json_response_format(tmp_path, monkeypatch):
@@ -975,6 +1037,7 @@ def test_gateway_mcp_lists_and_dispatches_multimodal_tools():
         "utopic_speak",
         "utopic_generate_music",
         "utopic_generate_video",
+        "utopic_generate_misc",
         "utopic_models_list",
         "utopic_models_check",
         "utopic_models_pull",
@@ -1183,10 +1246,20 @@ with pathlib.Path({str(captured_path)!r}).open("a", encoding="utf-8") as handle:
     handle.write(json.dumps(request) + "\\n")
 out_dir = pathlib.Path(request["output_dir"])
 out_dir.mkdir(parents=True, exist_ok=True)
-artifact = out_dir / ("speech.wav" if request["modality"] == "tts" else "music.wav")
-artifact.write_bytes(b"wav")
+if request["modality"] == "misc":
+    artifact = out_dir / "artifact.bin"
+    artifact_type = "application/octet-stream"
+    artifact.write_bytes(pathlib.Path(request["input"]["artifact"]).read_bytes())
+elif request["modality"] == "tts":
+    artifact = out_dir / "speech.wav"
+    artifact_type = "audio/wav"
+    artifact.write_bytes(b"wav")
+else:
+    artifact = out_dir / "music.wav"
+    artifact_type = "audio/wav"
+    artifact.write_bytes(b"wav")
 print(json.dumps({{
-    "artifacts": [{{"type": "audio/wav", "path": str(artifact), "metadata": {{"tool": request["engine"]}}}}],
+    "artifacts": [{{"type": artifact_type, "path": str(artifact), "metadata": {{"tool": request["engine"]}}}}],
     "metadata": {{"schema_version": "utopic-bridge/v1", "engine": request["engine"]}}
 }}))
 """.strip(),
@@ -1195,6 +1268,9 @@ print(json.dumps({{
     monkeypatch.setenv("UTOPIC_HOME", str(tmp_path / "cache"))
     monkeypatch.setenv("UTOPIC_BRIDGE_KOKORO_COMMAND", f"{sys.executable} {script}")
     monkeypatch.setenv("UTOPIC_BRIDGE_ACE_STEP_COMMAND", f"{sys.executable} {script}")
+    monkeypatch.setenv("UTOPIC_BRIDGE_ARTIFACT_COMMAND", f"{sys.executable} {script}")
+    misc_source = tmp_path / "source.bin"
+    misc_source.write_bytes(b"misc")
 
     for request_id, name, arguments in [
         (
@@ -1206,6 +1282,11 @@ print(json.dumps({{
             11,
             "utopic_generate_music",
             {"model": "ace-step-3.5b", "prompt": "ambient piano from mcp"},
+        ),
+        (
+            12,
+            "utopic_generate_misc",
+            {"model": "zuna", "artifact": str(misc_source)},
         ),
     ]:
         status, payload = decode(
@@ -1224,7 +1305,7 @@ print(json.dumps({{
         assert payload["result"]["isError"] is False
         tool_payload = json.loads(payload["result"]["content"][0]["text"])
         assert tool_payload["object"] == "utopic.artifact.response"
-        assert tool_payload["artifacts"][0]["type"] == "audio/wav"
+        assert tool_payload["artifacts"][0]["type"] in {"audio/wav", "application/octet-stream"}
 
     captured = [
         json.loads(line)
@@ -1233,6 +1314,8 @@ print(json.dumps({{
     assert captured[0]["endpoint"] == "/v1/audio/speech"
     assert captured[0]["input"] == {"input": "hello from mcp"}
     assert captured[0]["parameters"]["voice"] == "af_heart"
+    assert captured[2]["endpoint"] == "/v1/utopic/misc/generations"
+    assert captured[2]["input"] == {"artifact": str(misc_source)}
     assert captured[1]["endpoint"] == "/v1/audio/generations"
     assert captured[1]["input"] == {"prompt": "ambient piano from mcp"}
 
