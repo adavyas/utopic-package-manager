@@ -88,6 +88,23 @@ def test_python_version_range_matches_bridge_dependency_support():
     assert setup_python_requires == ">=3.10,<3.13"
 
 
+def test_github_workflows_use_supported_python_versions():
+    workflows = [
+        REPO_ROOT / ".github" / "workflows" / "ci.yml",
+        REPO_ROOT / ".github" / "workflows" / "python-publish.yml",
+    ]
+
+    for workflow_path in workflows:
+        workflow = workflow_path.read_text(encoding="utf-8")
+        assert 'python-version: "3.x"' not in workflow
+        assert '- "3.9"' not in workflow
+        assert '- "3.13"' not in workflow
+        assert '- "3.10"' in workflow
+        assert '- "3.11"' in workflow
+        assert '- "3.12"' in workflow
+        assert 'python-version: "3.12"' in workflow
+
+
 def test_bridge_optional_dependency_extras_are_declared():
     if sys.version_info >= (3, 11):
         import tomllib
