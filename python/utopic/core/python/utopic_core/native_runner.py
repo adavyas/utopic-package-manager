@@ -3,6 +3,7 @@ import os
 import subprocess
 import tempfile
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -113,8 +114,8 @@ def _runner_request(
     }
     if cache_path is not None:
         options["model_cache_path"] = cache_path
-    if entry.runtime == "native":
-        options["model_path"] = str(entry.path)
+        if entry.runtime == "native":
+            options["model_path"] = cache_path
     if entry.expected_vram_gib is not None:
         options["expected_vram_gib"] = entry.expected_vram_gib
     if entry.expected_ram_gib is not None:
@@ -144,7 +145,7 @@ def _runner_request(
         "model": entry.id,
         "input": runner_input,
         "options": options,
-        "output_dir": str(_runs_dir()),
+        "output_dir": str(_allocate_output_dir()),
     }
 
 
@@ -219,6 +220,14 @@ def _runs_dir() -> Path:
         return models.installer.cache_root() / "runs"
     except RuntimeError:
         return Path(tempfile.gettempdir()) / "utopic" / "runs"
+
+
+def _allocate_output_dir() -> Path:
+    root = _runs_dir()
+    root.mkdir(parents=True, exist_ok=True)
+    output_dir = root / ("run_" + uuid.uuid4().hex)
+    output_dir.mkdir()
+    return output_dir
 
 
 def _runner_timeout_seconds() -> int:

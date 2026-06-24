@@ -86,9 +86,41 @@ def test_runner_request_emits_stable_contract_for_artifact_generation():
     assert payload["output_dir"]
 
 
+def test_runner_request_allocates_unique_output_dir_per_invocation(monkeypatch, tmp_path):
+    runs_dir = tmp_path / "runs"
+    entry = models.ModelEntry(
+        id="unit-text",
+        name="Unit Text",
+        family="unit",
+        filename="unit-text.gguf",
+        url="https://example.invalid/unit-text.gguf",
+        size="1 GiB",
+        recommended=True,
+        description="unit",
+        modality="text",
+        engine="native-text",
+        runtime="native",
+        runner="utopic_runner",
+        native_status="ready",
+    )
+    monkeypatch.setenv("UTOPIC_RUNS_DIR", str(runs_dir))
+
+    first = native_runner._runner_request(entry, "chat", {"messages": []}, {})
+    second = native_runner._runner_request(entry, "chat", {"messages": []}, {})
+
+    first_output = Path(first["output_dir"])
+    second_output = Path(second["output_dir"])
+    assert first_output != second_output
+    assert first_output.parent == runs_dir
+    assert second_output.parent == runs_dir
+    assert first_output.is_dir()
+    assert second_output.is_dir()
+
+
 def test_generation_uses_catalog_runner_binary(monkeypatch, tmp_path):
     runner_path = tmp_path / "image_runner"
     runner_path.write_text("runner", encoding="utf-8")
+    monkeypatch.setenv("UTOPIC_MODELS_DIR", str(tmp_path / "models"))
     entry = models.ModelEntry(
         id="unit-image",
         name="Unit Image",
