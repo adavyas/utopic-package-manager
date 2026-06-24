@@ -2758,6 +2758,12 @@ def test_planned_model_pull_prepares_metadata_cache(monkeypatch, tmp_path):
         "modality": "image",
         "name": "Qwen-Image",
         "native_status": "planned",
+        "oom_policy": {
+            "action": "fail_before_runner",
+            "allow_cpu": False,
+            "min_gpu_memory_gib": None,
+            "min_ram_gib": None,
+        },
         "outputs": ["image/png"],
         "repo": "Qwen/Qwen-Image",
         "runner": "utopic-runner",

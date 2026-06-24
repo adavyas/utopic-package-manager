@@ -19,6 +19,18 @@ def decode(response):
     return status, json.loads(body.decode("utf-8"))
 
 
+def _use_roomy_test_gpu(monkeypatch):
+    monkeypatch.setenv("UTOPIC_GPU_MEMORY_GIB", "256")
+    monkeypatch.setenv("UTOPIC_RUNTIME_BACKEND", "cuda")
+    monkeypatch.setenv("UTOPIC_RUNTIME_DEVICE", "unit-test-gpu")
+
+
+def _use_small_test_gpu(monkeypatch, *, backend: str = "cuda", device: str = "unit-test-gpu"):
+    monkeypatch.setenv("UTOPIC_GPU_MEMORY_GIB", "40")
+    monkeypatch.setenv("UTOPIC_RUNTIME_BACKEND", backend)
+    monkeypatch.setenv("UTOPIC_RUNTIME_DEVICE", device)
+
+
 def test_gateway_module_entrypoint_prints_help():
     env = {**os.environ, "PYTHONPATH": str(REPO_ROOT / "python")}
     result = subprocess.run(
@@ -103,16 +115,7 @@ def test_gateway_models_endpoint_keeps_planned_models_native_only(monkeypatch):
 
 
 def test_gateway_cosmos_returns_oom_preflight(monkeypatch):
-    monkeypatch.setattr(
-        gateway,
-        "_detect_runtime_capacity",
-        lambda: {
-            "backend": "metal",
-            "device": "Apple M4 Pro",
-            "gpu_memory_gib": 40.0,
-        },
-        raising=False,
-    )
+    _use_small_test_gpu(monkeypatch, backend="metal", device="Apple M4 Pro")
 
     status, payload = decode(
         gateway.handle_openai_request(
@@ -130,7 +133,26 @@ def test_gateway_cosmos_returns_oom_preflight(monkeypatch):
     assert "requires at least 96 GiB GPU memory" in payload["error"]["message"]
 
 
-def test_gateway_image_generation_reports_native_runner_not_ready_by_default():
+def test_gateway_uses_expected_vram_for_planned_model_oom_preflight(monkeypatch):
+    _use_small_test_gpu(monkeypatch)
+
+    status, payload = decode(
+        gateway.handle_openai_request(
+            "POST",
+            "/v1/images/generations",
+            {"model": "qwen-image", "prompt": "a precise product photo of a glass teapot"},
+        )
+    )
+
+    assert status == 507
+    assert payload["error"]["code"] == "oom"
+    assert payload["error"]["model"] == "qwen-image"
+    assert payload["error"]["required_gpu_memory_gib"] == 48
+    assert payload["error"]["oom_policy"]["action"] == "fail_before_runner"
+
+
+def test_gateway_image_generation_reports_native_runner_not_ready_by_default(monkeypatch):
+    _use_roomy_test_gpu(monkeypatch)
     request = {
         "model": "qwen-image",
         "prompt": "a precise product photo of a glass teapot",
@@ -206,6 +228,7 @@ def test_gateway_native_artifact_model_routes_to_native_runner(monkeypatch):
 
 
 def test_gateway_does_not_use_packaged_bridge_command_by_default_for_bridge_models(monkeypatch):
+    _use_roomy_test_gpu(monkeypatch)
     monkeypatch.delenv("UTOPIC_BRIDGE_DIFFUSERS_COMMAND", raising=False)
     monkeypatch.delenv("UTOPIC_BRIDGE_COMMAND", raising=False)
 
@@ -225,7 +248,8 @@ def test_gateway_does_not_use_packaged_bridge_command_by_default_for_bridge_mode
     assert payload["error"]["native_status"] == "planned"
 
 
-def test_gateway_exposes_openai_routes_for_each_bridge_modality():
+def test_gateway_exposes_openai_routes_for_each_bridge_modality(monkeypatch):
+    _use_roomy_test_gpu(monkeypatch)
     cases = [
         (
             "/v1/images/generations",
@@ -702,7 +726,8 @@ def test_gateway_mcp_chat_prompt_normalizes_to_native_openai_messages(monkeypatc
     }
 
 
-def test_gateway_mcp_lists_and_dispatches_multimodal_tools():
+def test_gateway_mcp_lists_and_dispatches_multimodal_tools(monkeypatch):
+    _use_roomy_test_gpu(monkeypatch)
     status, payload = decode(
         gateway.handle_mcp_request({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
     )
@@ -1030,6 +1055,7 @@ def test_gateway_mcp_initialize_and_ping():
 
 
 def test_gateway_mcp_dispatches_planned_tools_to_native_readiness_runtime(tmp_path, monkeypatch):
+    _use_roomy_test_gpu(monkeypatch)
     monkeypatch.setenv("UTOPIC_EXPERIMENTAL_BRIDGE", "1")
     monkeypatch.setenv("UTOPIC_BRIDGE_KOKORO_COMMAND", "python -m should_not_run")
     monkeypatch.setenv("UTOPIC_BRIDGE_ACE_STEP_COMMAND", "python -m should_not_run")

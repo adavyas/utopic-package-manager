@@ -25,6 +25,8 @@ def test_catalog_entries_expose_native_readiness_metadata():
         assert set(entry.supported_backends).issubset(models.VALID_BACKENDS)
         assert entry.expected_vram_gib is not None
         assert entry.expected_ram_gib is not None
+        assert entry.oom_policy["min_gpu_memory_gib"] == entry.expected_vram_gib
+        assert entry.oom_policy["action"] == "fail_before_runner"
         assert entry.runner == "utopic-runner"
         if entry.native_status == "ready":
             assert entry.runtime == "native"
@@ -46,6 +48,8 @@ def test_model_payload_exposes_native_readiness_fields():
     assert "metal" in payload["supported_backends"]
     assert payload["expected_vram_gib"] > 0
     assert payload["expected_ram_gib"] > 0
+    assert payload["oom_policy"]["min_gpu_memory_gib"] == payload["expected_vram_gib"]
+    assert payload["oom_policy"]["action"] == "fail_before_runner"
 
 
 def test_planned_model_payload_hides_experimental_bridge_metadata_by_default(monkeypatch):
@@ -85,6 +89,9 @@ def test_planned_model_cache_metadata_hides_bridge_command_by_default(monkeypatc
 def test_planned_model_check_defaults_to_native_runner_readiness(monkeypatch, tmp_path):
     monkeypatch.delenv("UTOPIC_EXPERIMENTAL_BRIDGE", raising=False)
     monkeypatch.setenv("UTOPIC_MODELS_DIR", str(tmp_path))
+    monkeypatch.setenv("UTOPIC_GPU_MEMORY_GIB", "256")
+    monkeypatch.setenv("UTOPIC_RUNTIME_BACKEND", "cuda")
+    monkeypatch.setenv("UTOPIC_RUNTIME_DEVICE", "unit-test-gpu")
     entry = next(entry for entry in models.list_models() if entry.runtime == "planned_native")
 
     payload = models.model_check(entry.id)
@@ -113,6 +120,26 @@ def test_large_planned_model_check_reports_oom_preflight(monkeypatch, tmp_path):
     assert payload["detected"]["backend"] == "cuda"
     assert "too large for this host" in payload["message"]
     assert payload["next_steps"]
+
+
+def test_planned_model_without_explicit_requirements_uses_expected_vram_for_oom_preflight(monkeypatch, tmp_path):
+    monkeypatch.delenv("UTOPIC_EXPERIMENTAL_BRIDGE", raising=False)
+    monkeypatch.setenv("UTOPIC_MODELS_DIR", str(tmp_path))
+    monkeypatch.setenv("UTOPIC_GPU_MEMORY_GIB", "40")
+    monkeypatch.setenv("UTOPIC_RUNTIME_BACKEND", "cuda")
+    monkeypatch.setenv("UTOPIC_RUNTIME_DEVICE", "unit-test-gpu")
+
+    entry = models.get_model("qwen-image")
+    assert entry is not None
+    assert not entry.requirements
+
+    payload = models.model_check(entry.id)
+
+    assert payload["ready"] is False
+    assert payload["status"] == "native_runner_oom_preflight"
+    assert payload["required_gpu_memory_gib"] == entry.expected_vram_gib
+    assert payload["requirements"]["min_gpu_memory_gib"] == entry.expected_vram_gib
+    assert payload["oom_policy"]["action"] == "fail_before_runner"
 
 
 def test_model_capacity_detects_cuda_without_env(monkeypatch):

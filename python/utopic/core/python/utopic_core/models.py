@@ -58,6 +58,10 @@ class ModelEntry:
         if not self.native_status:
             object.__setattr__(self, "native_status", "ready" if self.runtime == "native" else "planned")
 
+    @property
+    def oom_policy(self) -> dict[str, object]:
+        return oom_policy(self)
+
 
 @dataclass(frozen=True)
 class LocalTextEntry:
@@ -84,6 +88,10 @@ class LocalTextEntry:
     outputs: tuple[str, ...] = ("text",)
     repo: Optional[str] = None
     requirements: Optional[dict[str, object]] = None
+
+    @property
+    def oom_policy(self) -> dict[str, object]:
+        return oom_policy(self)
 
 
 VALID_MODALITIES = {"text", "image", "tts", "music", "video", "misc"}
@@ -244,6 +252,27 @@ def _validate_requirements(requirements: dict[str, object], index: int) -> None:
         raise RuntimeError(f"Invalid model catalog entry {index}: requirements.allow_cpu must be a boolean")
 
 
+def effective_requirements(entry: ModelEntry | LocalTextEntry) -> dict[str, object]:
+    requirements = dict(entry.requirements or {})
+    if "min_gpu_memory_gib" not in requirements and entry.expected_vram_gib is not None:
+        requirements["min_gpu_memory_gib"] = entry.expected_vram_gib
+    if "min_ram_gib" not in requirements and entry.expected_ram_gib is not None:
+        requirements["min_ram_gib"] = entry.expected_ram_gib
+    if "allow_cpu" not in requirements:
+        requirements["allow_cpu"] = entry.runtime == "native" and entry.modality == "text"
+    return requirements
+
+
+def oom_policy(entry: ModelEntry | LocalTextEntry) -> dict[str, object]:
+    requirements = effective_requirements(entry)
+    return {
+        "action": "fail_before_runner",
+        "min_gpu_memory_gib": requirements.get("min_gpu_memory_gib"),
+        "min_ram_gib": requirements.get("min_ram_gib"),
+        "allow_cpu": requirements.get("allow_cpu"),
+    }
+
+
 def _string_field(item: dict[str, object], field: str, default: str, index: int) -> str:
     value = item.get(field, default)
     if not isinstance(value, str) or not value:
@@ -370,6 +399,7 @@ def _planned_model_metadata(entry: ModelEntry) -> dict[str, object]:
         "outputs": list(entry.outputs),
         "repo": entry.repo,
         "runtime": entry.runtime,
+        "oom_policy": entry.oom_policy,
         "url": entry.url,
     }
     if entry.expected_vram_gib is not None:
@@ -490,9 +520,10 @@ def _native_model_check(entry: ModelEntry) -> dict[str, object]:
         "supported_backends": list(entry.supported_backends),
         "expected_vram_gib": entry.expected_vram_gib,
         "expected_ram_gib": entry.expected_ram_gib,
+        "oom_policy": entry.oom_policy,
         "status": "ready" if ready else "missing_model_file",
         "ready": ready,
-        "requirements": entry.requirements or {},
+        "requirements": effective_requirements(entry),
         "cache": {
             "path": str(path),
             "present": present,
@@ -519,9 +550,10 @@ def _planned_model_check(entry: ModelEntry) -> dict[str, object]:
         "supported_backends": list(entry.supported_backends),
         "expected_vram_gib": entry.expected_vram_gib,
         "expected_ram_gib": entry.expected_ram_gib,
+        "oom_policy": entry.oom_policy,
         "status": "native_runner_not_ready",
         "ready": False,
-        "requirements": entry.requirements or {},
+        "requirements": effective_requirements(entry),
         "cache": {
             "path": str(entry.path),
             "prepared": is_model_downloaded(entry),
@@ -534,7 +566,7 @@ def _planned_model_check(entry: ModelEntry) -> dict[str, object]:
 
 
 def _model_capacity_preflight(entry: ModelEntry) -> Optional[dict[str, object]]:
-    requirements = entry.requirements or {}
+    requirements = effective_requirements(entry)
     minimum = requirements.get("min_gpu_memory_gib")
     allow_cpu = requirements.get("allow_cpu", True)
     if minimum is None and allow_cpu is not False:
@@ -565,6 +597,7 @@ def _model_capacity_preflight(entry: ModelEntry) -> Optional[dict[str, object]]:
         "supported_backends": list(entry.supported_backends),
         "expected_vram_gib": entry.expected_vram_gib,
         "expected_ram_gib": entry.expected_ram_gib,
+        "oom_policy": entry.oom_policy,
         "status": "native_runner_oom_preflight",
         "ready": False,
         "requirements": requirements,

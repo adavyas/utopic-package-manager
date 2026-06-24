@@ -638,7 +638,7 @@ def _default_model_for_endpoint(path: str) -> str:
 
 
 def _native_runtime_preflight(entry: models.ModelEntry) -> Optional[tuple[int, dict[str, str], bytes]]:
-    requirements = entry.requirements or {}
+    requirements = models.effective_requirements(entry)
     minimum = requirements.get("min_gpu_memory_gib")
     allow_cpu = requirements.get("allow_cpu", True)
     if minimum is None and allow_cpu is not False:
@@ -672,6 +672,7 @@ def _native_runtime_preflight(entry: models.ModelEntry) -> Optional[tuple[int, d
                 "modality": entry.modality,
                 "engine": entry.engine,
                 "required_gpu_memory_gib": minimum,
+                "oom_policy": entry.oom_policy,
                 "detected": detected,
                 "next_steps": [
                     "Use GB10 or high-memory CUDA infrastructure.",
@@ -1367,10 +1368,11 @@ def _model_payload(entry: models.ModelEntry) -> dict[str, Any]:
         "supported_backends": list(entry.supported_backends),
         "expected_vram_gib": entry.expected_vram_gib,
         "expected_ram_gib": entry.expected_ram_gib,
+        "oom_policy": entry.oom_policy,
         "hardware": list(entry.hardware),
         "endpoints": list(entry.endpoints),
         "outputs": list(entry.outputs),
-        "requirements": entry.requirements or {},
+        "requirements": models.effective_requirements(entry),
         "repo": entry.repo,
         "url": entry.url,
         "description": entry.description,

@@ -160,6 +160,8 @@ def test_runner_request_emits_stable_contract_for_artifact_generation():
     assert payload["options"]["endpoint"] == "/v1/images/generations"
     assert payload["options"]["runner"] == "utopic-runner"
     assert payload["options"]["requirements"] == {"min_gpu_memory_gib": 96, "allow_cpu": False}
+    assert payload["options"]["oom_policy"]["min_gpu_memory_gib"] == 96
+    assert payload["options"]["oom_policy"]["action"] == "fail_before_runner"
     assert payload["options"]["size"] == "1024x1024"
     assert isinstance(payload["output_dir"], str)
     assert payload["output_dir"]

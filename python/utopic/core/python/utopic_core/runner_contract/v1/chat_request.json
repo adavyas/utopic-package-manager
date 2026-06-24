@@ -28,6 +28,15 @@
     ],
     "model_cache_path": "$MODEL_PATH",
     "model_path": "$MODEL_PATH",
+    "requirements": {
+      "allow_cpu": true
+    },
+    "oom_policy": {
+      "action": "fail_before_runner",
+      "min_gpu_memory_gib": null,
+      "min_ram_gib": null,
+      "allow_cpu": true
+    },
     "max_tokens": 16
   },
   "output_dir": "$OUTPUT_DIR",
