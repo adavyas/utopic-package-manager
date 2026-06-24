@@ -473,16 +473,18 @@ Responses `input` text into the bridge `prompt`, `input`, or `artifact` field an
 Responses-style artifact message, while the modality-specific endpoints return
 the richer `utopic.artifact.response` object.
 
-By default, the gateway runs the packaged bridge as
-`python -m utopic.bridge <engine>`, so a normal install can dispatch to image,
-TTS, music, video, and misc bridge adapters without extra shell wiring. Optional
-engine packages still need to be installed for real generation.
+The gateway does not run Python bridge adapters by default. Planned image, TTS,
+music, video, and misc models route through the native runner contract and
+return native runner readiness errors until their C++ runners exist. This keeps
+production generation local-native by default and prevents a normal install from
+silently falling back to Torch or Diffusers.
 
-Engine-specific environment variables override the packaged bridge when you
-want to point a model family at a custom bridge binary, script, or future native
-engine. For example:
+Bridge adapters are an explicit experimental escape hatch. To run one, set
+`UTOPIC_EXPERIMENTAL_BRIDGE=1` and provide either a generic bridge command or an
+engine-specific command that points at the adapter you want to test:
 
 ```sh
+export UTOPIC_EXPERIMENTAL_BRIDGE=1
 export UTOPIC_BRIDGE_DIFFUSERS_COMMAND="utopic-bridge diffusers"
 export UTOPIC_BRIDGE_KOKORO_COMMAND="utopic-bridge kokoro"
 export UTOPIC_BRIDGE_CHATTERBOX_COMMAND="utopic-bridge chatterbox"
@@ -493,10 +495,12 @@ export UTOPIC_BRIDGE_LTX_COMMAND="utopic-bridge ltx"
 export UTOPIC_BRIDGE_ARTIFACT_COMMAND="utopic-bridge artifact"
 ```
 
-`GET /v1/models` also exposes the bridge activation metadata for every bridge
-model so clients and MCP hosts can discover the exact `utopic-bridge <engine>`
-command, environment variable, install hint, input key, output types, and
-progress event names without first attempting a generation request.
+With the experimental gate disabled, `GET /v1/models` exposes native readiness
+metadata only. With `UTOPIC_EXPERIMENTAL_BRIDGE=1`, it also exposes bridge
+activation metadata so clients and MCP hosts can discover the exact
+`utopic-bridge <engine>` command, environment variable, install hint, input key,
+output types, and progress event names without first attempting a generation
+request.
 
 Check an optional bridge engine before downloading or running heavyweight
 models:

@@ -229,6 +229,15 @@ def test_readme_pinned_install_example_matches_package_version():
     assert "utopic==0.1.3" not in readme
 
 
+def test_readme_describes_bridges_as_explicit_experimental_only():
+    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert "By default, the gateway runs the packaged bridge" not in readme
+    assert "UTOPIC_EXPERIMENTAL_BRIDGE=1" in readme
+    assert "native runner readiness" in readme
+    assert "does not run Python bridge adapters by default" in readme
+
+
 def test_chat_check_script_rejects_stale_bundled_javascript():
     package_json = json.loads((REPO_ROOT / "package.json").read_text(encoding="utf-8"))
     check_script = package_json["scripts"]["check:chat"]
@@ -440,8 +449,10 @@ def test_readme_documents_supported_models_without_prohibited_mentions():
     assert '"repo": "Qwen/Qwen-Image"' in readme
     assert "`repo` is the upstream model source" in readme
     assert "UTOPIC_BRIDGE_DIFFUSERS_COMMAND" in readme
-    assert "By default, the gateway runs the packaged bridge as" in readme
-    assert "`python -m utopic.bridge <engine>`" in readme
+    assert "does not run Python bridge adapters by default" in readme
+    assert "native runner readiness errors" in readme
+    assert "until their C++ runners exist" in readme
+    assert "UTOPIC_EXPERIMENTAL_BRIDGE=1" in readme
     assert "utopic models check qwen-image" in readme
     assert "utopic models check --all" in readme
     assert "utopic_models_check" in readme

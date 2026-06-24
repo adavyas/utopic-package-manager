@@ -637,7 +637,7 @@ Commands:
   chat      Start the bundled chat TUI. Runs setup on first use.
   run       Start the unified OpenAI-compatible and MCP runtime, or run one-shot prompts with -p.
   serve     Alias for `utopic run` in server mode.
-  generate  Generate image, speech, music, video, or misc artifacts.
+  generate  Request image, speech, music, video, or misc artifacts through native runners.
   gateway   Start the unified multimodal OpenAI-compatible and MCP gateway.
   mcp       Start the MCP stdio server. Use --runtime for the Python gateway tools.
   setup     Build and cache native binaries for this host.
@@ -650,8 +650,8 @@ Examples:
   utopic chat diffusiongemma-26b-a4b-q4
   utopic run diffusiongemma-26b-a4b-q4 --port 8910 -ngl 99
   utopic serve diffusiongemma-26b-a4b-q4 --port 8910 -ngl 99
-  utopic generate video --quality high -p "cinematic glass city sunrise" -o video.mp4
-  utopic generate misc zuna --artifact /path/to/input.bin -o output.bin
+  utopic generate video --quality high -p "cinematic glass city sunrise"
+  utopic generate misc zuna --artifact /path/to/input.bin
   utopic gateway --port 8911
   utopic mcp --runtime
   utopic doctor
@@ -740,12 +740,16 @@ def _format_command(command: object) -> str:
 def _generate(argv: Sequence[str]) -> int:
     parser = argparse.ArgumentParser(
         prog="utopic generate",
-        description="Generate local image, speech, music, video, or misc artifacts.",
+        description=(
+            "Request image, speech, music, video, or misc artifacts through the "
+            "native-runner contract. Planned modalities report readiness until "
+            "their C++ runners exist."
+        ),
     )
     parser.add_argument("--version", action="store_true", help="Show version.")
     subparsers = parser.add_subparsers(dest="kind")
 
-    image = subparsers.add_parser("image", help="Generate an image artifact.")
+    image = subparsers.add_parser("image", help="Request an image artifact through the native runner contract.")
     _add_prompt_generate_args(image)
     _add_generation_common_args(image)
     image.add_argument("--size", help="Image size, for example 1024x1024.")
@@ -757,7 +761,7 @@ def _generate(argv: Sequence[str]) -> int:
     speech = subparsers.add_parser(
         "speech",
         aliases=["tts"],
-        help="Generate a speech audio artifact.",
+        help="Request a speech audio artifact through the native runner contract.",
     )
     speech.add_argument("model", nargs="?", help="TTS model alias.")
     speech.add_argument("--input", required=True, help="Text to speak.")
@@ -765,7 +769,7 @@ def _generate(argv: Sequence[str]) -> int:
     speech.add_argument("--voice", help="Voice name.")
     speech.add_argument("--sample-rate", type=int, help="Output sample rate when supported.")
 
-    music = subparsers.add_parser("music", help="Generate a music audio artifact.")
+    music = subparsers.add_parser("music", help="Request a music audio artifact through the native runner contract.")
     _add_prompt_generate_args(music)
     _add_generation_common_args(music)
     music.add_argument("--duration", type=float, help="Requested audio duration in seconds.")
@@ -774,7 +778,7 @@ def _generate(argv: Sequence[str]) -> int:
     music.add_argument("--steps", type=int, help="Generation steps when supported.")
     music.add_argument("--guidance-scale", type=float, help="Guidance scale when supported.")
 
-    video = subparsers.add_parser("video", help="Generate a video artifact.")
+    video = subparsers.add_parser("video", help="Request a video artifact through the native runner contract.")
     _add_prompt_generate_args(video)
     _add_generation_common_args(video)
     video.add_argument("--size", help="Video size, for example 832x480.")
@@ -784,7 +788,7 @@ def _generate(argv: Sequence[str]) -> int:
     video.add_argument("--guidance-scale", type=float, help="Classifier-free guidance scale.")
     video.add_argument("--negative-prompt", help="Negative prompt.")
 
-    misc = subparsers.add_parser("misc", help="Run a misc file-in/file-out artifact model.")
+    misc = subparsers.add_parser("misc", help="Request a misc artifact through the native runner contract.")
     misc.add_argument("model", nargs="?", help="Misc model alias.")
     misc.add_argument("--artifact", "--input-file", dest="artifact", required=True, help="Input artifact path.")
     _add_generation_common_args(misc)
@@ -840,7 +844,7 @@ def _add_generation_common_args(parser: argparse.ArgumentParser) -> None:
         action="append",
         default=[],
         metavar="KEY=JSON",
-        help="Pass an extra bridge parameter. Values are parsed as JSON when possible.",
+        help="Pass an extra generation parameter. Values are parsed as JSON when possible.",
     )
 
 
@@ -984,7 +988,7 @@ Checks:
   - whether cached native binaries are current
   - required setup tools: cmake and git
   - optional chat tool: Node.js
-  - optional bridge engines for image, speech, music, video, and misc artifacts
+  - explicit experimental bridge adapters for planned image, speech, music, video, and misc artifacts
 """
     )
 

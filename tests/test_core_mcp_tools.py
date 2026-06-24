@@ -45,6 +45,28 @@ def test_gateway_mcp_tool_definitions_are_agent_friendly():
     assert "utopic_models_check" in video_description
 
 
+def test_gateway_mcp_planned_modalities_are_described_as_native_readiness_surfaces():
+    by_name = {tool["name"]: tool for tool in gateway.MCP_TOOLS}
+    planned_tool_names = {
+        "utopic_generate_image",
+        "utopic_generate_speech",
+        "utopic_generate_music",
+        "utopic_generate_video",
+        "utopic_generate_misc",
+    }
+
+    for name in planned_tool_names:
+        description = by_name[name]["description"].lower()
+        assert "native runner" in description
+        assert "planned" in description
+        assert "readiness" in description
+        assert "experimental bridge" in description
+        assert "generate local" not in description
+        assert "local image generation" not in description
+        assert "local music" not in description
+        assert "local video" not in description
+
+
 def test_native_stdio_mcp_schema_points_agents_to_runtime_mcp_for_multimodal_tools():
     repo_root = Path(__file__).resolve().parents[1]
     source = (

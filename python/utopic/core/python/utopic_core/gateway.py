@@ -88,9 +88,10 @@ SPEECH_INPUT_SCHEMA = _schema(
 )
 
 SPEECH_DESCRIPTION = (
-    "Generate local speech audio from text with Utopic TTS models. Use for narration, "
-    "voice prototypes, accessibility previews, and agent-read summaries without sending "
-    "text to a remote TTS API. Returns artifact JSON pointing at generated audio."
+    "Call the planned native runner surface for local speech audio from text. Current "
+    "TTS models are cataloged for readiness checks and return a native runner planned "
+    "error until the C++ TTS runner exists; an experimental bridge can be used only when "
+    "explicitly enabled. Returns artifact JSON once native support is ready."
 )
 
 
@@ -125,10 +126,11 @@ MCP_TOOLS = [
     {
         "name": "utopic_generate_image",
         "description": (
-            "Create an image locally from a text prompt using a Utopic image model such as "
-            "FLUX, Qwen-Image, Krea, or Cosmos when the bridge is installed. Use for private "
-            "local image generation, concept art, product shots, UI assets, and prompt tests. "
-            "Returns OpenAI-compatible image/artifact JSON with local artifact metadata."
+            "Call the planned native runner surface for image creation from a text prompt. "
+            "Image models such as FLUX, Qwen-Image, Krea, and Cosmos are cataloged for "
+            "readiness, hardware, and OOM checks and return a native runner planned error "
+            "until the C++ image runner exists; an experimental bridge can be used only when "
+            "explicitly enabled. Returns OpenAI-compatible artifact JSON once native support is ready."
         ),
         "inputSchema": _schema(
             ["prompt"],
@@ -161,8 +163,10 @@ MCP_TOOLS = [
     {
         "name": "utopic_generate_music",
         "description": (
-            "Generate local music audio from a text prompt. Use for private soundtrack ideas, "
-            "loops, mood boards, and sonic sketches. Returns artifact JSON pointing at generated audio."
+            "Call the planned native runner surface for music audio from a text prompt. "
+            "Music models are cataloged for readiness checks and return a native runner "
+            "planned error until the C++ music runner exists; an experimental bridge can be "
+            "used only when explicitly enabled. Returns artifact JSON once native support is ready."
         ),
         "inputSchema": _schema(
             ["prompt"],
@@ -181,9 +185,11 @@ MCP_TOOLS = [
     {
         "name": "utopic_generate_video",
         "description": (
-            "Generate local video from a text prompt with Utopic video models. Use for short "
-            "text-to-video clips, motion studies, and prototype visuals. Some video models require "
-            "GB10 or high-memory CUDA; use utopic_models_check before running large jobs."
+            "Call the planned native runner surface for video from a text prompt. Video models "
+            "are cataloged for readiness and OOM checks and return a native runner planned error "
+            "until the C++ video runner exists; an experimental bridge can be used only when "
+            "explicitly enabled. Some video models require GB10 or high-memory CUDA; use "
+            "utopic_models_check before running large jobs."
         ),
         "inputSchema": _schema(
             ["prompt"],
@@ -206,9 +212,11 @@ MCP_TOOLS = [
     {
         "name": "utopic_generate_misc",
         "description": (
-            "Run a local miscellaneous artifact workflow such as ZUNA signal processing. "
-            "Use for local file-in/file-out models that are not text, image, speech, music, "
-            "or video yet. Returns artifact JSON with generated local files."
+            "Call the planned native runner surface for miscellaneous artifact workflows such "
+            "as ZUNA signal processing. Misc models are cataloged for readiness checks and "
+            "return a native runner planned error until the C++ misc runner exists; an "
+            "experimental bridge can be used only when explicitly enabled. Returns artifact JSON "
+            "once native support is ready."
         ),
         "inputSchema": _schema(
             ["artifact"],
@@ -232,7 +240,7 @@ MCP_TOOLS = [
         "name": "utopic_models_list",
         "description": (
             "List every Utopic catalog model with modality, runtime, endpoints, outputs, "
-            "hardware hints, and bridge setup metadata. Agents should call this before choosing "
+            "hardware hints, and native readiness metadata. Agents should call this before choosing "
             "a model for text, image, TTS, music, video, or misc generation."
         ),
         "inputSchema": _schema([], {}),
@@ -241,7 +249,7 @@ MCP_TOOLS = [
         "name": "utopic_models_check",
         "description": (
             "Check whether one model or the whole catalog is ready on this machine. Reports "
-            "download/cache state, bridge dependency gaps, hardware requirements, and local "
+            "download/cache state, native runner readiness, hardware requirements, and local "
             "runtime readiness so agents can avoid doomed OOM or missing-dependency calls."
         ),
         "inputSchema": _schema(
@@ -262,7 +270,7 @@ MCP_TOOLS = [
         "name": "utopic_models_pull",
         "description": (
             "Download or prepare a Utopic catalog model for local use. Use this when an agent "
-            "has permission to fetch weights or set up bridge model metadata. Supports one model "
+            "has permission to fetch weights or prepare model metadata. Supports one model "
             "or all=true; returns paths and setup results."
         ),
         "inputSchema": _schema(
