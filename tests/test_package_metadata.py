@@ -84,6 +84,38 @@ def test_native_ref_metadata_matches_installer_pin():
     assert pyproject["tool"]["utopic"]["native-ref"] == installer.UTOPIC_NATIVE_REF
 
 
+def test_package_data_globs_match_across_packaging_metadata():
+    if sys.version_info >= (3, 11):
+        import tomllib
+    else:
+        import tomli as tomllib
+
+    pyproject = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    pyproject_globs = pyproject["tool"]["setuptools"]["package-data"]["utopic"]
+
+    setup_tree = ast.parse((REPO_ROOT / "setup.py").read_text(encoding="utf-8"))
+    setup_call = next(
+        node
+        for node in ast.walk(setup_tree)
+        if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "setup"
+    )
+    package_data = next(keyword.value for keyword in setup_call.keywords if keyword.arg == "package_data")
+    assert isinstance(package_data, ast.Dict)
+    setup_globs: list[str] | None = None
+    for key, value in zip(package_data.keys, package_data.values):
+        if isinstance(key, ast.Constant) and key.value == "utopic":
+            setup_globs = [item.value for item in value.elts if isinstance(item, ast.Constant)]
+            break
+
+    assert setup_globs is not None
+    assert pyproject_globs == setup_globs
+
+    manifest = (REPO_ROOT / "MANIFEST.in").read_text(encoding="utf-8")
+    assert "recursive-include python/utopic/core *" in manifest
+    assert "recursive-include python/utopic/cmake *" in manifest
+    assert "prune node" in manifest
+
+
 def test_package_manager_no_longer_owns_legacy_native_source():
     assert not (REPO_ROOT / "python" / "utopic" / "native").exists()
 
