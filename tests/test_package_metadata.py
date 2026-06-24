@@ -344,6 +344,21 @@ def test_ci_workflow_runs_on_commits_without_publishing():
     assert "pypa/gh-action-pypi-publish" not in workflow
 
 
+def test_ci_workflow_runs_real_native_cpu_setup_smoke():
+    workflow = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert "native-cpu-smoke:" in workflow
+    assert "Native CPU setup smoke" in workflow
+    assert 'utopic setup --backend cpu --jobs 2' in workflow
+    assert "tests/test_native_runner_binary_smoke.py -q" in workflow
+    assert "UTOPIC_HOME=$RUNNER_TEMP/utopic-native" in workflow
+    assert "--dry-run" not in workflow[
+        workflow.index("native-cpu-smoke:") : workflow.index("package-check:")
+    ]
+
+
 def test_release_workflow_smokes_installed_node_free_chat_fallback():
     workflow = (REPO_ROOT / ".github" / "workflows" / "python-publish.yml").read_text(
         encoding="utf-8"
