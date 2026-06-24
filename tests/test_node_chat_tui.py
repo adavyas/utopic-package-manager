@@ -384,7 +384,7 @@ def test_bundled_chat_models_command_shows_chat_models_only(fake_openai_server, 
 
     assert "Available chat models:" in completed.stdout
     assert "diffusiongemma-26b-a4b-q4" in completed.stdout
-    assert "DiffusionGemma 26B Q4" in completed.stdout
+    assert "DiffusionGemma 26B-A4B IT Q4_K_M" in completed.stdout
     assert "cosmos3-super" not in completed.stdout
     assert "image / planned_native / planned / image_runner" not in completed.stdout
     assert requests == []

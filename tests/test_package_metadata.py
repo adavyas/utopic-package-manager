@@ -158,6 +158,26 @@ def test_package_data_excludes_bytecode_cache_artifacts():
     assert "**/*.pyd" in pyproject_excludes
 
 
+def test_chatterbox_extra_is_declared_as_conflicting_with_modern_bridge_extras():
+    if sys.version_info >= (3, 11):
+        import tomllib
+    else:
+        import tomli as tomllib
+
+    pyproject = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    conflicts = pyproject["tool"]["uv"]["conflicts"]
+    normalized = {
+        tuple(sorted(item["extra"] for item in conflict))
+        for conflict in conflicts
+    }
+
+    assert ("all", "chatterbox") in normalized
+    assert ("bridge", "chatterbox") in normalized
+    assert ("chatterbox", "image") in normalized
+    assert ("chatterbox", "tts") in normalized
+    assert ("chatterbox", "video") in normalized
+
+
 def test_package_manager_no_longer_owns_legacy_native_source():
     assert not (REPO_ROOT / "python" / "utopic" / "native").exists()
 

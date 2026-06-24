@@ -131,5 +131,29 @@ utopic = [
   "**/*.pyd",
 ]
 
+[tool.uv]
+conflicts = [
+  [
+    { extra = "all" },
+    { extra = "chatterbox" },
+  ],
+  [
+    { extra = "bridge" },
+    { extra = "chatterbox" },
+  ],
+  [
+    { extra = "image" },
+    { extra = "chatterbox" },
+  ],
+  [
+    { extra = "tts" },
+    { extra = "chatterbox" },
+  ],
+  [
+    { extra = "video" },
+    { extra = "chatterbox" },
+  ],
+]
+
 [tool.utopic]
 native-ref = "7e554b1d4f1b1dc9955eac1813781eec9b69fd68"
