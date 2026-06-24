@@ -23,7 +23,7 @@ def test_runner_request_emits_stable_contract_for_chat(tmp_path):
         modality="text",
         engine="native-text",
         runtime="native",
-        runner="utopic_runner",
+        runner="utopic-runner",
         native_status="ready",
     )
 
@@ -103,7 +103,7 @@ def test_runner_request_allocates_unique_output_dir_per_invocation(monkeypatch, 
         modality="text",
         engine="native-text",
         runtime="native",
-        runner="utopic_runner",
+        runner="utopic-runner",
         native_status="ready",
     )
     monkeypatch.setenv("UTOPIC_RUNS_DIR", str(runs_dir))

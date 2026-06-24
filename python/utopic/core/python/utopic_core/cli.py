@@ -457,8 +457,8 @@ def _run_prompt(args: Sequence[str], setup_enabled: bool) -> int:
     _validate_prompt_value_flags(args)
     _validate_run_value_flags(args)
     _validate_model_argument_count(args, _PROMPT_VALUE_FLAGS)
-    _ensure_setup(setup_enabled, "utopic_runner")
-    _native.binary_path("utopic_runner")
+    _ensure_setup(setup_enabled, models.TEXT_RUNNER)
+    _native.binary_path(models.TEXT_RUNNER)
     entry, request = _prompt_runner_request(args)
     payload = native_runner.chat_completion(entry, request)
     if payload.get("ok") is False:
@@ -1110,8 +1110,8 @@ def _run(argv: Sequence[str]) -> int:
                 models.pull_model(entry.id)
                 return _run_gateway_only(host, port, entry)
 
-        _ensure_setup(setup_enabled, "utopic_runner")
-        _native.binary_path("utopic_runner")
+        _ensure_setup(setup_enabled, models.TEXT_RUNNER)
+        _native.binary_path(models.TEXT_RUNNER)
         model_path = models.ensure_model(model_arg)
         active_model_id = model_arg if model_arg and models.get_model(model_arg) is not None else "utopic"
         return _run_gateway_only(

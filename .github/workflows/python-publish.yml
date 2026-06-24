@@ -512,8 +512,8 @@ jobs:
 
           code = cli.main(["run", "--model=diffusiongemma-26b-a4b-q4", "--prompt=hello", "--temp=0.1", "--seed=7"])
           expected = [
-              ("setup", True, "utopic_runner"),
-              ("binary", "utopic_runner"),
+              ("setup", True, "utopic-runner"),
+              ("binary", "utopic-runner"),
               ("model", "diffusiongemma-26b-a4b-q4"),
           ]
           if (

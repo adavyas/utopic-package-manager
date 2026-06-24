@@ -28,7 +28,7 @@ def generation(entry: models.ModelEntry, endpoint: str, request: dict[str, Any])
     runner_input = _generation_input(entry, request)
     payload = _invoke_runner(
         _runner_request(entry, entry.modality, runner_input, request, endpoint=endpoint),
-        binary_name=entry.runner or "utopic_runner",
+        binary_name=entry.runner or models.TEXT_RUNNER,
         binary_unavailable_payload=native_binary_unavailable_error(entry),
     )
     return _enrich_native_readiness_error(entry, payload)
@@ -37,7 +37,7 @@ def generation(entry: models.ModelEntry, endpoint: str, request: dict[str, Any])
 def _invoke_runner(
     runner_request: dict[str, Any],
     *,
-    binary_name: str = "utopic_runner",
+    binary_name: str = models.TEXT_RUNNER,
     binary_unavailable_payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     try:
@@ -217,7 +217,7 @@ def native_readiness_error(entry: models.ModelEntry) -> dict[str, Any]:
 
 
 def native_binary_unavailable_error(entry: models.ModelEntry) -> dict[str, Any]:
-    runner = entry.runner or "utopic_runner"
+    runner = entry.runner or models.TEXT_RUNNER
     payload = _error(
         "backend_unavailable",
         (

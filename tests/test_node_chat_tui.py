@@ -344,7 +344,7 @@ def test_bundled_chat_models_command_shows_chat_models_only(fake_openai_server, 
                     "description": "Default chat model",
                     "modality": "text",
                     "runtime": "native",
-                    "runner": "utopic_runner",
+                    "runner": "utopic-runner",
                     "native_status": "ready",
                     "supported_backends": ["metal", "cuda", "cpu"],
                     "expected_vram_gib": 24,
@@ -1151,7 +1151,7 @@ def reserve_local_port():
 
 
 def write_fake_runner(bin_dir):
-    fake_runner = bin_dir / "utopic_runner"
+    fake_runner = bin_dir / "utopic-runner"
     fake_runner.write_text("#!/bin/sh\n", encoding="utf-8")
     fake_runner.chmod(0o755)
 

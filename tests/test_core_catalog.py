@@ -27,7 +27,7 @@ def test_catalog_entries_expose_native_readiness_metadata():
         assert entry.expected_ram_gib is not None
         if entry.native_status == "ready":
             assert entry.runtime == "native"
-            assert entry.runner == "utopic_runner"
+            assert entry.runner == "utopic-runner"
         else:
             assert entry.runner.endswith("_runner")
 
@@ -43,7 +43,7 @@ def test_catalog_non_text_entries_are_planned_native_not_bridge_runtime():
 def test_model_payload_exposes_native_readiness_fields():
     payload = gateway._model_payload(models.default_model())
 
-    assert payload["runner"] == "utopic_runner"
+    assert payload["runner"] == "utopic-runner"
     assert payload["native_status"] == "ready"
     assert "metal" in payload["supported_backends"]
     assert payload["expected_vram_gib"] > 0

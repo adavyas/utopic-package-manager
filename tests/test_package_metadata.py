@@ -643,7 +643,11 @@ def test_model_catalog_declares_runtime_schema_for_every_entry():
         assert all(isinstance(item, str) and item for item in entry["hardware"])
         assert isinstance(entry["supported_backends"], list) and entry["supported_backends"]
         assert set(entry["supported_backends"]).issubset(valid_backends)
-        assert isinstance(entry["runner"], str) and entry["runner"].endswith("_runner")
+        assert isinstance(entry["runner"], str) and entry["runner"]
+        if entry["modality"] == "text":
+            assert entry["runner"] == "utopic-runner"
+        else:
+            assert entry["runner"].endswith("_runner")
         assert entry["native_status"] in valid_native_statuses
         assert isinstance(entry["expected_vram_gib"], (int, float)) and entry["expected_vram_gib"] > 0
         assert isinstance(entry["expected_ram_gib"], (int, float)) and entry["expected_ram_gib"] > 0
@@ -749,8 +753,8 @@ def test_release_workflow_smokes_installed_prompt_flag_normalization():
     assert "prompt_probe = textwrap.dedent" in workflow
     assert '"--model=diffusiongemma-26b-a4b-q4"' in workflow
     assert '"--prompt=hello"' in workflow
-    assert '("setup", True, "utopic_runner")' in workflow
-    assert '("binary", "utopic_runner")' in workflow
+    assert '("setup", True, "utopic-runner")' in workflow
+    assert '("binary", "utopic-runner")' in workflow
     assert '("runner", "diffusiongemma-26b-a4b-q4", Path("/models/diffusiongemma.gguf"))' in workflow
     assert 'calls[3][3]["messages"] != [{"role": "user", "content": "hello"}]' in workflow
 

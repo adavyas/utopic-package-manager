@@ -352,7 +352,7 @@ def test_python_chat_fallback_supports_catalog_and_endpoint_commands(monkeypatch
         modality="text",
         runtime="native",
         native_status="ready",
-        runner="utopic_runner",
+        runner="utopic-runner",
         supported_backends=("metal", "cuda", "cpu"),
         recommended=True,
     )
@@ -840,8 +840,8 @@ def test_cli_run_with_prompt_delegates_to_runner_contract(monkeypatch, capsys):
     cli.main(["run", "-m", "model.gguf", "-p", "hello", "-n", "8"])
 
     assert calls[0:3] == [
-        ("setup", True, "utopic_runner"),
-        ("binary", "utopic_runner"),
+        ("setup", True, "utopic-runner"),
+        ("binary", "utopic-runner"),
         ("model", "model.gguf"),
     ]
     assert calls[3][0:3] == ("runner", "model.gguf", Path("model.gguf"))
@@ -858,8 +858,8 @@ def test_cli_run_with_prompt_resolves_model_alias(monkeypatch):
     cli.main(["run", "-m", "diffusiongemma-26b-a4b-q4", "-p", "hello"])
 
     assert calls[0:3] == [
-        ("setup", True, "utopic_runner"),
-        ("binary", "utopic_runner"),
+        ("setup", True, "utopic-runner"),
+        ("binary", "utopic-runner"),
         ("model", "diffusiongemma-26b-a4b-q4"),
     ]
     assert calls[3][0:3] == ("runner", "diffusiongemma-26b-a4b-q4", Path("/models/diffusiongemma.gguf"))
@@ -874,8 +874,8 @@ def test_cli_run_with_prompt_normalizes_long_model_and_prompt_flags(monkeypatch)
     cli.main(["run", "--model", "diffusiongemma-26b-a4b-q4", "--prompt", "hello", "-n", "8"])
 
     assert calls[0:3] == [
-        ("setup", True, "utopic_runner"),
-        ("binary", "utopic_runner"),
+        ("setup", True, "utopic-runner"),
+        ("binary", "utopic-runner"),
         ("model", "diffusiongemma-26b-a4b-q4"),
     ]
     assert calls[3][3]["messages"] == [{"role": "user", "content": "hello"}]
@@ -890,8 +890,8 @@ def test_cli_run_with_prompt_normalizes_equals_form_native_flags(monkeypatch):
     cli.main(["run", "--model=diffusiongemma-26b-a4b-q4", "--prompt=hello", "--temp=0.1", "--seed=7"])
 
     assert calls[0:3] == [
-        ("setup", True, "utopic_runner"),
-        ("binary", "utopic_runner"),
+        ("setup", True, "utopic-runner"),
+        ("binary", "utopic-runner"),
         ("model", "diffusiongemma-26b-a4b-q4"),
     ]
     assert calls[3][3]["messages"] == [{"role": "user", "content": "hello"}]
@@ -907,8 +907,8 @@ def test_cli_run_with_prompt_resolves_positional_model_alias(monkeypatch):
     cli.main(["run", "diffusiongemma-26b-a4b-q4", "-p", "hello", "-n", "8"])
 
     assert calls[0:3] == [
-        ("setup", True, "utopic_runner"),
-        ("binary", "utopic_runner"),
+        ("setup", True, "utopic-runner"),
+        ("binary", "utopic-runner"),
         ("model", "diffusiongemma-26b-a4b-q4"),
     ]
     assert calls[3][3]["messages"] == [{"role": "user", "content": "hello"}]
@@ -923,8 +923,8 @@ def test_cli_run_with_prompt_without_model_uses_default_model(monkeypatch):
     cli.main(["run", "-p", "hello", "-n", "8"])
 
     assert calls[0:3] == [
-        ("setup", True, "utopic_runner"),
-        ("binary", "utopic_runner"),
+        ("setup", True, "utopic-runner"),
+        ("binary", "utopic-runner"),
         ("model", None),
     ]
     assert calls[3][0:3] == ("runner", "default-model", Path("/models/default.gguf"))
@@ -940,8 +940,8 @@ def test_cli_run_prompt_allows_negative_numeric_prompt_values(monkeypatch):
     cli.main(["run", "-p", "hello", "--seed", "-1"])
 
     assert calls[0:3] == [
-        ("setup", True, "utopic_runner"),
-        ("binary", "utopic_runner"),
+        ("setup", True, "utopic-runner"),
+        ("binary", "utopic-runner"),
         ("model", None),
     ]
     assert calls[3][3]["messages"] == [{"role": "user", "content": "hello"}]
@@ -1142,7 +1142,7 @@ def test_cli_run_reports_missing_setup_without_traceback(monkeypatch, capsys):
     assert cli.main(["run", "-m", "/models/default.gguf", "-p", "hi"]) == 1
 
     captured = capsys.readouterr()
-    assert "utopic run: native runtime binary `utopic_runner` is not installed or is stale." in captured.err
+    assert "utopic run: native runtime binary `utopic-runner` is not installed or is stale." in captured.err
     assert "utopic setup" in captured.err
     assert "Traceback" not in captured.err
 
@@ -1311,8 +1311,8 @@ def test_cli_run_without_prompt_starts_runner_gateway(monkeypatch):
     assert cli.main(["run", "diffusiongemma-26b-a4b-q4", "--port", "8999", "-ngl", "99"]) == 0
 
     assert calls == [
-        ("setup", True, "utopic_runner"),
-        ("binary", "utopic_runner"),
+        ("setup", True, "utopic-runner"),
+        ("binary", "utopic-runner"),
         ("model", "diffusiongemma-26b-a4b-q4"),
         ("gateway", "127.0.0.1", "8999", None, Path("/models/diffusiongemma.gguf"), "utopic"),
     ]
@@ -1338,8 +1338,8 @@ def test_cli_run_allows_server_flags_before_positional_model(monkeypatch):
     assert cli.main(["run", "--port", "8999", "-ngl", "99", "diffusiongemma-26b-a4b-q4"]) == 0
 
     assert calls == [
-        ("setup", True, "utopic_runner"),
-        ("binary", "utopic_runner"),
+        ("setup", True, "utopic-runner"),
+        ("binary", "utopic-runner"),
         ("model", "diffusiongemma-26b-a4b-q4"),
         ("gateway", "127.0.0.1", "8999", None, Path("/models/diffusiongemma-26b-a4b-q4.gguf"), "utopic"),
     ]
@@ -1774,8 +1774,8 @@ def test_cli_run_without_arguments_uses_default_model_and_starts_runner_gateway(
     assert cli.main(["run"]) == 0
 
     assert calls == [
-        ("setup", True, "utopic_runner"),
-        ("binary", "utopic_runner"),
+        ("setup", True, "utopic-runner"),
+        ("binary", "utopic-runner"),
         ("model", None),
         ("gateway", "127.0.0.1", "8910", None, Path("/models/default.gguf"), "utopic"),
     ]

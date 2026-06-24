@@ -8,15 +8,15 @@ import pytest
 from utopic import _native
 
 
-def _runner_binary(name: str = "utopic_runner") -> Path:
+def _runner_binary(name: str = "utopic-runner") -> Path:
     value = os.environ.get("UTOPIC_RUNNER_BINARY")
-    if value and name == "utopic_runner":
+    if value and name == "utopic-runner":
         path = Path(value).expanduser()
     else:
         try:
             path = _native.binary_path(name)
         except RuntimeError:
-            pytest.skip(f"run utopic setup or set UTOPIC_RUNNER_BINARY=/path/to/utopic_runner")
+            pytest.skip(f"run utopic setup or set UTOPIC_RUNNER_BINARY=/path/to/utopic-runner")
     if not path.is_file():
         pytest.fail(f"{name} does not exist: {path}")
     return path

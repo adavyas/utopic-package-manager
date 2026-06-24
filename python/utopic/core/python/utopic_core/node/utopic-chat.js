@@ -169,7 +169,7 @@ function binDir() {
     return configuredPath("UTOPIC_BIN_DIR", path.join(cacheRoot(), "bin"));
 }
 function runnerBinary() {
-    return path.join(binDir(), process.platform === "win32" ? "utopic_runner.exe" : "utopic_runner");
+    return path.join(binDir(), process.platform === "win32" ? "utopic-runner.exe" : "utopic-runner");
 }
 function cliBinary() {
     if (process.env.UTOPIC_CLI)
@@ -300,7 +300,7 @@ function modelNativeStatus(entry) {
     return entry.native_status ?? (modelRuntime(entry) === "native" ? "ready" : "planned");
 }
 function modelRunner(entry) {
-    return entry.runner ?? (modelModality(entry) !== "text" ? `${modelModality(entry)}_runner` : "utopic_runner");
+    return entry.runner ?? (modelModality(entry) !== "text" ? `${modelModality(entry)}_runner` : "utopic-runner");
 }
 function modelBackends(entry) {
     return (entry.supported_backends && entry.supported_backends.length > 0 ? entry.supported_backends : ["metal", "cuda", "cpu"]).join(", ");
