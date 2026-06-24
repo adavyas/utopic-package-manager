@@ -82,6 +82,8 @@ def test_package_manager_no_longer_owns_typescript_chat_source():
 def test_vendor_script_sources_chat_artifact_from_typescript_build_output():
     vendor_script = (REPO_ROOT / "scripts" / "vendor_core.py").read_text(encoding="utf-8")
 
+    assert 'run(["npm", "ci"], cwd=chat_dir)' in vendor_script
+    assert 'run(["npm", "run", "build"], cwd=chat_dir)' in vendor_script
     assert 'tmp / "chat" / "dist" / "utopic-chat.js"' in vendor_script
     assert 'tmp / "python" / "utopic_core" / "node"' not in vendor_script
 

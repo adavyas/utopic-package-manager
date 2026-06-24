@@ -33,11 +33,15 @@ def main() -> int:
     shutil.copytree(tmp / "native", CORE_DIR / "native", ignore=ignore)
     shutil.copytree(tmp / "python", CORE_DIR / "python", ignore=ignore)
 
+    chat_dir = tmp / "chat"
+    run(["npm", "ci"], cwd=chat_dir)
+    run(["npm", "run", "build"], cwd=chat_dir)
     dist_chat = tmp / "chat" / "dist" / "utopic-chat.js"
-    if dist_chat.exists():
-        node_dir = CORE_DIR / "python" / "utopic_core" / "node"
-        node_dir.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(dist_chat, node_dir / "utopic-chat.js")
+    if not dist_chat.exists():
+        raise FileNotFoundError(f"chat build did not produce {dist_chat}")
+    node_dir = CORE_DIR / "python" / "utopic_core" / "node"
+    node_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(dist_chat, node_dir / "utopic-chat.js")
 
     shutil.rmtree(tmp)
     return 0
