@@ -763,9 +763,9 @@ def test_bundled_chat_rejects_empty_model_values(args):
 @pytest.mark.parametrize(
     "args",
     [
-        ["dream-7b-q4", "llada-8b-q4"],
-        ["-m", "dream-7b-q4", "llada-8b-q4"],
-        ["-m", "dream-7b-q4", "-m", "llada-8b-q4"],
+        ["diffusiongemma-26b-a4b-q4", "diffusiongemma-26b-a4b-q5"],
+        ["-m", "diffusiongemma-26b-a4b-q4", "diffusiongemma-26b-a4b-q5"],
+        ["-m", "diffusiongemma-26b-a4b-q4", "-m", "diffusiongemma-26b-a4b-q5"],
     ],
 )
 def test_bundled_chat_rejects_extra_model_arguments(args):
@@ -789,7 +789,7 @@ def test_bundled_chat_rejects_extra_model_arguments(args):
     ("args", "message"),
     [
         (["--server="], "expected a value after --server"),
-        (["--server", "--model", "dream-7b-q4"], "expected a value after --server"),
+        (["--server", "--model", "diffusiongemma-26b-a4b-q4"], "expected a value after --server"),
         (["--host="], "expected a value after --host"),
         (["--host", "--port", "8910"], "expected a value after --host"),
         (["--port="], "expected a value after --port"),

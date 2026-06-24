@@ -27,7 +27,7 @@ def _stub_server_binary(monkeypatch):
     monkeypatch.setattr(cli._native, "binary_path", lambda name: Path(f"/fake/bin/{name}"))
 
 
-def _stub_prompt_runner(monkeypatch, calls, model_path=Path("/models/dream.gguf")):
+def _stub_prompt_runner(monkeypatch, calls, model_path=Path("/models/diffusiongemma.gguf")):
     def fake_ensure_model(value=None):
         calls.append(("model", value))
         return model_path
@@ -58,10 +58,10 @@ def test_chat_launch_sets_runtime_paths_and_executes_node(monkeypatch, tmp_path)
     monkeypatch.setattr(chat.installer, "setup", lambda argv: captured.setdefault("setup", list(argv)) or 0)
     monkeypatch.setattr(chat.subprocess, "run", lambda command, env, check: captured.update(command=command, env=env, check=check))
 
-    assert chat.launch(["dream-7b-q4"]) == 0
+    assert chat.launch(["diffusiongemma-26b-a4b-q4"]) == 0
 
     assert captured["setup"] == []
-    assert captured["command"] == ["/usr/bin/node", str(script), "dream-7b-q4"]
+    assert captured["command"] == ["/usr/bin/node", str(script), "diffusiongemma-26b-a4b-q4"]
     assert captured["env"]["UTOPIC_BIN_DIR"] == str(tmp_path / "bin")
     assert captured["env"]["UTOPIC_MODELS_DIR"] == str(tmp_path / "cache" / "models")
     assert captured["check"] is True
@@ -83,7 +83,7 @@ def test_chat_launch_skips_setup_when_runner_binary_exists(monkeypatch, tmp_path
     monkeypatch.setattr(chat.installer, "setup", lambda argv: setup_calls.append(list(argv)) or 0)
     monkeypatch.setattr(chat.subprocess, "run", lambda command, env, check: None)
 
-    assert chat.launch(["dream-7b-q4"]) == 0
+    assert chat.launch(["diffusiongemma-26b-a4b-q4"]) == 0
 
     assert setup_calls == []
 
@@ -104,10 +104,10 @@ def test_chat_launch_runs_setup_when_runner_cache_is_stale(monkeypatch, tmp_path
     monkeypatch.setattr(chat.installer, "setup", lambda argv: captured.setdefault("setup", list(argv)) or 0)
     monkeypatch.setattr(chat.subprocess, "run", lambda command, env, check: captured.update(command=command))
 
-    assert chat.launch(["dream-7b-q4"]) == 0
+    assert chat.launch(["diffusiongemma-26b-a4b-q4"]) == 0
 
     assert captured["setup"] == []
-    assert captured["command"] == ["/usr/bin/node", str(script), "dream-7b-q4"]
+    assert captured["command"] == ["/usr/bin/node", str(script), "diffusiongemma-26b-a4b-q4"]
 
 
 def test_chat_launch_reports_setup_subprocess_failures_without_traceback(monkeypatch, tmp_path, capsys):
@@ -123,7 +123,7 @@ def test_chat_launch_reports_setup_subprocess_failures_without_traceback(monkeyp
     monkeypatch.setattr(chat.installer, "setup", fail_setup)
     monkeypatch.setattr(chat.subprocess, "run", lambda command, env, check: pytest.fail("should not launch node"))
 
-    assert chat.launch(["dream-7b-q4"]) == 2
+    assert chat.launch(["diffusiongemma-26b-a4b-q4"]) == 2
 
     captured = capsys.readouterr()
     assert "utopic chat: setup command failed: cmake -B /tmp/build" in captured.err
@@ -268,10 +268,10 @@ def test_chat_launch_python_fallback_runs_setup_for_local_server_when_node_is_mi
         lambda args: fallback_calls.append(list(args)) or 0,
     )
 
-    assert chat.launch(["dream-7b-q4", "--port", "8999"]) == 0
+    assert chat.launch(["diffusiongemma-26b-a4b-q4", "--port", "8999"]) == 0
 
     assert setup_calls == [[]]
-    assert fallback_calls == [["dream-7b-q4", "--port", "8999"]]
+    assert fallback_calls == [["diffusiongemma-26b-a4b-q4", "--port", "8999"]]
 
 
 def test_chat_python_fallback_starts_runner_gateway_and_cleans_up(monkeypatch, tmp_path):
@@ -305,7 +305,7 @@ def test_chat_python_fallback_starts_runner_gateway_and_cleans_up(monkeypatch, t
     monkeypatch.setattr(chat, "_python_chat_loop", lambda base_url, args, fallback_reason="Node.js was not found", model=None: 0)
 
     assert chat._python_fallback_launch(
-        ["dream-7b-q4", "--port", "8999", "--max-tokens", "7", "-ngl", "99"]
+        ["diffusiongemma-26b-a4b-q4", "--port", "8999", "--max-tokens", "7", "-ngl", "99"]
     ) == 0
 
     assert commands == [
@@ -313,7 +313,7 @@ def test_chat_python_fallback_starts_runner_gateway_and_cleans_up(monkeypatch, t
             [
                 "utopic",
                 "run",
-                "dream-7b-q4",
+                "diffusiongemma-26b-a4b-q4",
                 "--port",
                 "8999",
                 "-ngl",
@@ -484,11 +484,11 @@ def test_chat_python_fallback_uses_recommended_model_on_prompt_eof(monkeypatch):
 
     catalog = [
         models.ModelEntry(
-            id="dream-7b-q4",
-            name="Dream 7B Instruct Q4_K_M",
-            family="dream",
-            filename="dream.gguf",
-            url="https://example.invalid/dream.gguf",
+            id="diffusiongemma-26b-a4b-q4",
+            name="DiffusionGemma 26B Q4_K_M",
+            family="diffusion-gemma",
+            filename="diffusiongemma.gguf",
+            url="https://example.invalid/diffusiongemma.gguf",
             size="4.4 GB",
             recommended=True,
             description="Recommended local chat model.",
@@ -502,7 +502,7 @@ def test_chat_python_fallback_uses_recommended_model_on_prompt_eof(monkeypatch):
     )
     monkeypatch.setattr(chat.models, "list_models", lambda: catalog)
 
-    assert chat._choose_model_arg([]) == "dream-7b-q4"
+    assert chat._choose_model_arg([]) == "diffusiongemma-26b-a4b-q4"
 
 
 def test_chat_python_fallback_delegates_to_utopic_run_after_model_resolution(monkeypatch, tmp_path):
@@ -599,9 +599,9 @@ def test_chat_launch_rejects_unknown_options_before_setup(monkeypatch, capsys):
 @pytest.mark.parametrize(
     "args",
     [
-        ["dream-7b-q4", "llada-8b-q4"],
-        ["-m", "dream-7b-q4", "llada-8b-q4"],
-        ["-m", "dream-7b-q4", "-m", "llada-8b-q4"],
+        ["diffusiongemma-26b-a4b-q4", "diffusiongemma-26b-a4b-q5"],
+        ["-m", "diffusiongemma-26b-a4b-q4", "diffusiongemma-26b-a4b-q5"],
+        ["-m", "diffusiongemma-26b-a4b-q4", "-m", "diffusiongemma-26b-a4b-q5"],
     ],
 )
 def test_chat_launch_rejects_extra_model_arguments_before_setup(monkeypatch, capsys, args):
@@ -619,7 +619,7 @@ def test_chat_launch_rejects_extra_model_arguments_before_setup(monkeypatch, cap
     ("args", "message"),
     [
         (["--server="], "expected a value after --server"),
-        (["--server", "--model", "dream-7b-q4"], "expected a value after --server"),
+        (["--server", "--model", "diffusiongemma-26b-a4b-q4"], "expected a value after --server"),
         (["--host="], "expected a value after --host"),
         (["--host", "--port", "8910"], "expected a value after --host"),
         (["--port="], "expected a value after --port"),
@@ -859,14 +859,14 @@ def test_cli_run_with_prompt_resolves_model_alias(monkeypatch):
 
     _stub_prompt_runner(monkeypatch, calls)
 
-    cli.main(["run", "-m", "dream-7b-q4", "-p", "hello"])
+    cli.main(["run", "-m", "diffusiongemma-26b-a4b-q4", "-p", "hello"])
 
     assert calls[0:3] == [
         ("setup", True, "utopic_runner"),
         ("binary", "utopic_runner"),
-        ("model", "dream-7b-q4"),
+        ("model", "diffusiongemma-26b-a4b-q4"),
     ]
-    assert calls[3][0:3] == ("runner", "dream-7b-q4", Path("/models/dream.gguf"))
+    assert calls[3][0:3] == ("runner", "diffusiongemma-26b-a4b-q4", Path("/models/diffusiongemma.gguf"))
     assert calls[3][3]["messages"] == [{"role": "user", "content": "hello"}]
 
 
@@ -875,12 +875,12 @@ def test_cli_run_with_prompt_normalizes_long_model_and_prompt_flags(monkeypatch)
 
     _stub_prompt_runner(monkeypatch, calls)
 
-    cli.main(["run", "--model", "dream-7b-q4", "--prompt", "hello", "-n", "8"])
+    cli.main(["run", "--model", "diffusiongemma-26b-a4b-q4", "--prompt", "hello", "-n", "8"])
 
     assert calls[0:3] == [
         ("setup", True, "utopic_runner"),
         ("binary", "utopic_runner"),
-        ("model", "dream-7b-q4"),
+        ("model", "diffusiongemma-26b-a4b-q4"),
     ]
     assert calls[3][3]["messages"] == [{"role": "user", "content": "hello"}]
     assert calls[3][3]["max_tokens"] == 8
@@ -891,12 +891,12 @@ def test_cli_run_with_prompt_normalizes_equals_form_native_flags(monkeypatch):
 
     _stub_prompt_runner(monkeypatch, calls)
 
-    cli.main(["run", "--model=dream-7b-q4", "--prompt=hello", "--temp=0.1", "--seed=7"])
+    cli.main(["run", "--model=diffusiongemma-26b-a4b-q4", "--prompt=hello", "--temp=0.1", "--seed=7"])
 
     assert calls[0:3] == [
         ("setup", True, "utopic_runner"),
         ("binary", "utopic_runner"),
-        ("model", "dream-7b-q4"),
+        ("model", "diffusiongemma-26b-a4b-q4"),
     ]
     assert calls[3][3]["messages"] == [{"role": "user", "content": "hello"}]
     assert calls[3][3]["temperature"] == 0.1
@@ -908,12 +908,12 @@ def test_cli_run_with_prompt_resolves_positional_model_alias(monkeypatch):
 
     _stub_prompt_runner(monkeypatch, calls)
 
-    cli.main(["run", "dream-7b-q4", "-p", "hello", "-n", "8"])
+    cli.main(["run", "diffusiongemma-26b-a4b-q4", "-p", "hello", "-n", "8"])
 
     assert calls[0:3] == [
         ("setup", True, "utopic_runner"),
         ("binary", "utopic_runner"),
-        ("model", "dream-7b-q4"),
+        ("model", "diffusiongemma-26b-a4b-q4"),
     ]
     assert calls[3][3]["messages"] == [{"role": "user", "content": "hello"}]
     assert calls[3][3]["max_tokens"] == 8
@@ -1054,12 +1054,12 @@ def test_cli_run_prompt_rejects_invalid_numeric_prompt_values_before_setup(monke
 @pytest.mark.parametrize(
     "args",
     [
-        ["dream-7b-q4", "llada-8b-q4"],
-        ["-m", "dream-7b-q4", "llada-8b-q4"],
-        ["-m", "dream-7b-q4", "-m", "llada-8b-q4"],
-        ["dream-7b-q4", "llada-8b-q4", "-p", "hi"],
-        ["-m", "dream-7b-q4", "llada-8b-q4", "-p", "hi"],
-        ["-m", "dream-7b-q4", "-m", "llada-8b-q4", "-p", "hi"],
+        ["diffusiongemma-26b-a4b-q4", "diffusiongemma-26b-a4b-q5"],
+        ["-m", "diffusiongemma-26b-a4b-q4", "diffusiongemma-26b-a4b-q5"],
+        ["-m", "diffusiongemma-26b-a4b-q4", "-m", "diffusiongemma-26b-a4b-q5"],
+        ["diffusiongemma-26b-a4b-q4", "diffusiongemma-26b-a4b-q5", "-p", "hi"],
+        ["-m", "diffusiongemma-26b-a4b-q4", "diffusiongemma-26b-a4b-q5", "-p", "hi"],
+        ["-m", "diffusiongemma-26b-a4b-q4", "-m", "diffusiongemma-26b-a4b-q5", "-p", "hi"],
     ],
 )
 def test_cli_run_rejects_extra_model_arguments_before_setup(monkeypatch, capsys, args):
@@ -1333,7 +1333,7 @@ def test_cli_run_without_prompt_starts_runner_gateway(monkeypatch):
 
     monkeypatch.setattr(cli, "_ensure_setup", lambda enabled=True, binary_name="utopic": calls.append(("setup", enabled, binary_name)))
     monkeypatch.setattr(cli._native, "binary_path", lambda name: calls.append(("binary", name)) or Path(f"/fake/bin/{name}"))
-    monkeypatch.setattr(cli.models, "ensure_model", lambda value=None: calls.append(("model", value)) or Path("/models/dream.gguf"))
+    monkeypatch.setattr(cli.models, "ensure_model", lambda value=None: calls.append(("model", value)) or Path("/models/diffusiongemma.gguf"))
     monkeypatch.setattr(cli.models, "get_model", lambda _model_id: None)
     monkeypatch.setattr(cli, "_run_server", lambda *args: pytest.fail("should not start utopic_server"))
     monkeypatch.setattr(
@@ -1345,13 +1345,13 @@ def test_cli_run_without_prompt_starts_runner_gateway(monkeypatch):
         or 0,
     )
 
-    assert cli.main(["run", "dream-7b-q4", "--port", "8999", "-ngl", "99"]) == 0
+    assert cli.main(["run", "diffusiongemma-26b-a4b-q4", "--port", "8999", "-ngl", "99"]) == 0
 
     assert calls == [
         ("setup", True, "utopic_runner"),
         ("binary", "utopic_runner"),
-        ("model", "dream-7b-q4"),
-        ("gateway", "127.0.0.1", "8999", None, Path("/models/dream.gguf"), "utopic"),
+        ("model", "diffusiongemma-26b-a4b-q4"),
+        ("gateway", "127.0.0.1", "8999", None, Path("/models/diffusiongemma.gguf"), "utopic"),
     ]
 
 
@@ -1372,13 +1372,13 @@ def test_cli_run_allows_server_flags_before_positional_model(monkeypatch):
         or 0,
     )
 
-    assert cli.main(["run", "--port", "8999", "-ngl", "99", "dream-7b-q4"]) == 0
+    assert cli.main(["run", "--port", "8999", "-ngl", "99", "diffusiongemma-26b-a4b-q4"]) == 0
 
     assert calls == [
         ("setup", True, "utopic_runner"),
         ("binary", "utopic_runner"),
-        ("model", "dream-7b-q4"),
-        ("gateway", "127.0.0.1", "8999", None, Path("/models/dream-7b-q4.gguf"), "utopic"),
+        ("model", "diffusiongemma-26b-a4b-q4"),
+        ("gateway", "127.0.0.1", "8999", None, Path("/models/diffusiongemma-26b-a4b-q4.gguf"), "utopic"),
     ]
 
 
@@ -1772,7 +1772,7 @@ def test_cli_run_normalizes_wildcard_host_for_client_url(monkeypatch):
 
     monkeypatch.setattr(cli, "_ensure_setup", lambda enabled=True, binary_name="utopic": None)
     monkeypatch.setattr(cli._native, "binary_path", lambda name: Path(f"/fake/bin/{name}"))
-    monkeypatch.setattr(cli.models, "ensure_model", lambda value=None: Path("/models/dream.gguf"))
+    monkeypatch.setattr(cli.models, "ensure_model", lambda value=None: Path("/models/diffusiongemma.gguf"))
     monkeypatch.setattr(cli.models, "get_model", lambda _model_id: None)
     monkeypatch.setattr(cli, "_run_server", lambda *args: pytest.fail("should not start utopic_server"))
     monkeypatch.setattr(
@@ -1784,9 +1784,9 @@ def test_cli_run_normalizes_wildcard_host_for_client_url(monkeypatch):
         or 0,
     )
 
-    assert cli.main(["run", "dream-7b-q4", "--host", "0.0.0.0", "--port", "8999"]) == 0
+    assert cli.main(["run", "diffusiongemma-26b-a4b-q4", "--host", "0.0.0.0", "--port", "8999"]) == 0
     assert calls == [
-        ("gateway", "0.0.0.0", "8999", None, Path("/models/dream.gguf"), "utopic")
+        ("gateway", "0.0.0.0", "8999", None, Path("/models/diffusiongemma.gguf"), "utopic")
     ]
     assert cli._server_url("0.0.0.0", "8999") == "http://127.0.0.1:8999/v1/chat/completions"
     assert cli._server_health_url("::", "8999") == "http://127.0.0.1:8999/health"
@@ -1984,7 +1984,7 @@ def test_cli_run_server_returns_failure_for_signal_exit(monkeypatch, tmp_path):
     monkeypatch.setattr(cli.subprocess, "Popen", lambda argv: ExitedProcess())
     monkeypatch.setattr(cli.time, "monotonic", lambda: 0)
 
-    assert cli._run_server("/models/dream.gguf", [], "127.0.0.1", "8910", "8911") == 1
+    assert cli._run_server("/models/diffusiongemma.gguf", [], "127.0.0.1", "8910", "8911") == 1
 
 
 def test_cli_run_server_reaps_process_after_health_timeout(monkeypatch, tmp_path):
@@ -2011,7 +2011,7 @@ def test_cli_run_server_reaps_process_after_health_timeout(monkeypatch, tmp_path
     monkeypatch.setattr(cli.subprocess, "Popen", lambda argv: RunningProcess())
     monkeypatch.setattr(cli, "_wait_for_health", lambda process, health_url: (_ for _ in ()).throw(RuntimeError("timed out")))
 
-    assert cli._run_server("/models/dream.gguf", [], "127.0.0.1", "8910", "8911") == 143
+    assert cli._run_server("/models/diffusiongemma.gguf", [], "127.0.0.1", "8910", "8911") == 143
     assert events == ["terminate", ("wait", 5)]
 
 
@@ -2046,7 +2046,7 @@ def test_cli_run_server_prints_openai_url_after_health(monkeypatch, tmp_path, ca
         lambda host, port, native_base_url=None: events.append(("gateway", host, port, native_base_url)),
     )
 
-    assert cli._run_server("/models/dream.gguf", ["-ngl", "99"], "0.0.0.0", "8999", "9900") == 0
+    assert cli._run_server("/models/diffusiongemma.gguf", ["-ngl", "99"], "0.0.0.0", "8999", "9900") == 0
 
     captured = capsys.readouterr()
     assert "OpenAI-compatible URL: http://127.0.0.1:8999/v1/chat/completions" in captured.out
@@ -2060,7 +2060,7 @@ def test_cli_run_server_prints_openai_url_after_health(monkeypatch, tmp_path, ca
             [
                 str(tmp_path / "utopic_server"),
                 "-m",
-                "/models/dream.gguf",
+                "/models/diffusiongemma.gguf",
                 "--host",
                 "127.0.0.1",
                 "--port",

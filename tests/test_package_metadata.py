@@ -618,6 +618,31 @@ def test_catalog_defaults_to_diffusiongemma_and_excludes_legacy_masked_models():
     assert "llada" not in families
 
 
+def test_repository_fixtures_do_not_reintroduce_legacy_masked_model_aliases():
+    banned = ("dream-7b-q4", "llada-8b-q4", "dream.gguf", "Dream 7B", "LLaDA 8B")
+    scanned_roots = (
+        REPO_ROOT / "README.md",
+        REPO_ROOT / "tests",
+        REPO_ROOT / "python",
+    )
+    allowed_paths = {Path(__file__).resolve()}
+
+    offenders: list[str] = []
+    for root in scanned_roots:
+        paths = [root] if root.is_file() else [path for path in root.rglob("*") if path.is_file()]
+        for path in paths:
+            if path.resolve() in allowed_paths:
+                continue
+            if "__pycache__" in path.parts:
+                continue
+            text = path.read_text(encoding="utf-8", errors="ignore")
+            for token in banned:
+                if token in text:
+                    offenders.append(f"{path.relative_to(REPO_ROOT)} contains {token}")
+
+    assert offenders == []
+
+
 def test_model_catalog_includes_first_multimodal_model_set():
     catalog = json.loads(CORE_CATALOG_PATH.read_text(encoding="utf-8"))
     by_id = {entry["id"]: entry for entry in catalog}
