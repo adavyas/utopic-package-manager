@@ -666,8 +666,8 @@ def test_vendored_native_docs_describe_planned_modalities_as_native_readiness():
     server = (REPO_ROOT / "python" / "utopic" / "core" / "native" / "SERVER.md").read_text(encoding="utf-8")
 
     assert "bridge runtimes today" not in supported
-    assert "| Qwen-Image | image | planned native runner |" in supported
-    assert "| video | `/v1/videos/generations`, `/v1/responses` | planned native runner" in server
+    assert "| Qwen-Image | image | planned native implementation |" in supported
+    assert "| video | `/v1/videos/generations`, `/v1/responses` | planned native implementation" in server
 
 
 def test_catalog_defaults_to_diffusiongemma_and_excludes_legacy_masked_models():

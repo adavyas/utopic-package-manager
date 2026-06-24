@@ -11,10 +11,10 @@ OpenAI-compatible and MCP gateway for the full Utopic catalog:
 | Modality | Endpoint | Runtime today |
 |---|---|---|
 | text | `/v1/chat/completions`, `/v1/responses` | native GGUF, optionally proxied through `utopic-server` |
-| image | `/v1/images/generations`, `/v1/responses` | planned native runner; readiness error until available |
-| tts | `/v1/audio/speech`, `/v1/responses` | planned native runner; readiness error until available |
-| music | `/v1/audio/generations`, `/v1/responses` | planned native runner; readiness error until available |
-| video | `/v1/videos/generations`, `/v1/responses` | planned native runner; readiness error until available |
+| image | `/v1/images/generations`, `/v1/responses` | planned native implementation; readiness error until available |
+| tts | `/v1/audio/speech`, `/v1/responses` | planned native implementation; readiness error until available |
+| music | `/v1/audio/generations`, `/v1/responses` | planned native implementation; readiness error until available |
+| video | `/v1/videos/generations`, `/v1/responses` | planned native implementation; readiness error until available |
 
 See `SUPPORTED_MODELS.md` for model aliases and quantization markers.
 
