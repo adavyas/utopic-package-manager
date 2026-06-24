@@ -71,7 +71,7 @@ Options:
   --ctx-size N          Context size for an auto-started server. Default: 4096
   --max-tokens N        Max response tokens. Default: 512
   --temperature N       Sampling temperature. Default: 0
-  --no-setup            Forwarded to spawned `utopic run` commands.
+  --no-setup            Skip first-use setup and forward to spawned `utopic run`.
   -h, --help            Show this help.
 
 Chat commands:
@@ -109,6 +109,21 @@ def _wants_version(argv: Sequence[str]) -> bool:
 
 def _uses_existing_server(argv: Sequence[str]) -> bool:
     return any(arg == "--server" or arg.startswith("--server=") for arg in argv)
+
+
+def _setup_enabled(argv: Sequence[str]) -> bool:
+    return "--no-setup" not in argv
+
+
+def _ensure_local_chat_setup(argv: Sequence[str]) -> None:
+    if not _setup_enabled(argv) or _uses_existing_server(argv):
+        return
+    if installer.native_installation_is_current((models.TEXT_RUNNER,)):
+        return
+    print("Native runtime is missing or stale; running `utopic setup`.", flush=True)
+    result = installer.setup([])
+    if result not in (None, 0):
+        raise RuntimeError(f"`utopic setup` failed with exit code {result}")
 
 
 def _validate_server_url_arg(args: Sequence[str]) -> None:
@@ -653,6 +668,7 @@ def launch(argv: Optional[Sequence[str]] = None) -> int:
     try:
         _validate_value_args(args)
         _validate_server_url_arg(args)
+        _ensure_local_chat_setup(args)
         if shutil.which("node") is None:
             return _python_fallback_launch(args)
         try:
