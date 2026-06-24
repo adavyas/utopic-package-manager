@@ -443,6 +443,7 @@ int main(int argc, char ** argv) {
                 {"supported_backends", opts.value("supported_backends", json::array())},
                 {"expected_vram_gib", opts.value("expected_vram_gib", json())},
                 {"expected_ram_gib", opts.value("expected_ram_gib", json())},
+                {"detected", detected_capacity()},
             });
         }
     } catch (const std::exception & exc) {

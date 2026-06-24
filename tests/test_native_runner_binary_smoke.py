@@ -310,6 +310,47 @@ def test_modality_runner_entrypoint_reports_planned_readiness(tmp_path):
     assert payload["error"]["detail"]["task"] == "image"
 
 
+def test_modality_runner_readiness_includes_detected_runtime(tmp_path):
+    request_path = tmp_path / "planned-image-detected-runtime.json"
+    request_path.write_text(
+        json.dumps(
+            {
+                "task": "image",
+                "model": "unit-image",
+                "input": {"prompt": "a red cube"},
+                "options": {
+                    "modality": "image",
+                    "engine": "diffusers",
+                    "runtime": "planned_native",
+                    "native_status": "planned",
+                    "supported_backends": ["metal", "cuda"],
+                },
+                "output_dir": str(tmp_path),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    completed = _run_runner_with_env(
+        _runner_binary("image_runner"),
+        request_path,
+        {
+            "UTOPIC_RUNTIME_BACKEND": "cuda",
+            "UTOPIC_RUNTIME_DEVICE": "unit-test-gpu",
+        },
+    )
+    payload = _last_json(completed.stdout)
+
+    assert completed.returncode != 0
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "unsupported_model"
+    assert payload["error"]["detail"]["runner"] == "image_runner"
+    assert payload["error"]["detail"]["detected"] == {
+        "backend": "cuda",
+        "device": "unit-test-gpu",
+    }
+
+
 def test_modality_runner_entrypoint_reports_its_own_name_without_runner_option(tmp_path):
     request_path = tmp_path / "planned-image-no-runner-option.json"
     request_path.write_text(
