@@ -359,10 +359,21 @@ def test_python_chat_fallback_supports_catalog_and_endpoint_commands(monkeypatch
         supported_backends=("metal", "cuda", "cpu"),
         recommended=True,
     )
+    image_entry = SimpleNamespace(
+        id="qwen-image",
+        name="Qwen Image",
+        size="20 GiB",
+        modality="image",
+        runtime="planned_native",
+        native_status="planned",
+        runner="image_runner",
+        supported_backends=("cuda",),
+        recommended=False,
+    )
     inputs = iter(["/help", "/models", "/serve", "/pull diffusiongemma-26b-a4b-q4", "/exit"])
 
     monkeypatch.setattr("builtins.input", lambda _prompt: next(inputs))
-    monkeypatch.setattr(chat.models, "list_models", lambda: [entry])
+    monkeypatch.setattr(chat.models, "list_models", lambda: [entry, image_entry])
     monkeypatch.setattr(chat.models, "is_model_downloaded", lambda _entry: False)
     monkeypatch.setattr(chat.models, "get_model", lambda model_id: entry if model_id == entry.id else None)
     monkeypatch.setattr(chat.models, "ensure_model", lambda model_id: tmp_path / f"{model_id}.gguf")
@@ -371,9 +382,10 @@ def test_python_chat_fallback_supports_catalog_and_endpoint_commands(monkeypatch
     assert chat._python_chat_loop("http://127.0.0.1:8910", [], fallback_reason="test", model=entry.id) == 0
 
     captured = capsys.readouterr()
-    assert "/models       Show catalog models with native readiness." in captured.out
+    assert "/models       Show native text chat models." in captured.out
     assert "diffusiongemma-26b-a4b-q4" in captured.out
-    assert "text / native / ready / utopic_runner" in captured.out
+    assert "DiffusionGemma 26B Q4" in captured.out
+    assert "qwen-image" not in captured.out
     assert "Chat completions: http://127.0.0.1:8910/v1/chat/completions" in captured.out
     assert "Models: http://127.0.0.1:8910/v1/models" in captured.out
     assert "MCP: http://127.0.0.1:8910/mcp" in captured.out
@@ -400,24 +412,38 @@ def test_chat_python_fallback_prompts_for_model_when_interactive(monkeypatch, tm
 
     catalog = [
         models.ModelEntry(
-            id="dream-7b-q4",
-            name="Dream 7B Instruct Q4_K_M",
-            family="dream",
-            filename="dream.gguf",
-            url="https://example.invalid/dream.gguf",
-            size="4.4 GB",
+            id="diffusiongemma-26b-a4b-q4",
+            name="DiffusionGemma 26B Q4",
+            family="diffusiongemma",
+            filename="diffusiongemma-26b-q4.gguf",
+            url="https://example.invalid/diffusiongemma-26b-q4.gguf",
+            size="15.65 GiB",
             recommended=True,
             description="Recommended local chat model.",
         ),
         models.ModelEntry(
-            id="llada-8b-q4",
-            name="LLaDA 8B Instruct Q4_K_M",
-            family="llada",
-            filename="llada.gguf",
-            url="https://example.invalid/llada.gguf",
-            size="4.8 GB",
+            id="diffusiongemma-4b-q4",
+            name="DiffusionGemma 4B Q4",
+            family="diffusiongemma",
+            filename="diffusiongemma-4b-q4.gguf",
+            url="https://example.invalid/diffusiongemma-4b-q4.gguf",
+            size="3.2 GiB",
             recommended=False,
-            description="Discrete diffusion instruct model.",
+            description="Smaller local chat model.",
+        ),
+        models.ModelEntry(
+            id="qwen-image",
+            name="Qwen Image",
+            family="qwen-image",
+            filename="qwen-image",
+            url="https://example.invalid/qwen-image",
+            size="20 GiB",
+            recommended=False,
+            description="Image generation model.",
+            modality="image",
+            runtime="planned_native",
+            runner="image_runner",
+            native_status="planned",
         ),
     ]
 
@@ -441,11 +467,12 @@ def test_chat_python_fallback_prompts_for_model_when_interactive(monkeypatch, tm
     assert chat._python_fallback_launch([]) == 0
 
     captured = capsys.readouterr()
-    assert "Available models:" in captured.out
-    assert "1. * dream-7b-q4 (4.4 GB, not downloaded)" in captured.out
-    assert "2.   llada-8b-q4 (4.8 GB, not downloaded)" in captured.out
-    assert selected_models == ["llada-8b-q4"]
-    assert commands[0][:3] == ["utopic", "run", "llada-8b-q4"]
+    assert "Available chat models:" in captured.out
+    assert "1. * diffusiongemma-26b-a4b-q4 (15.65 GiB, not downloaded)" in captured.out
+    assert "2.   diffusiongemma-4b-q4 (3.2 GiB, not downloaded)" in captured.out
+    assert "qwen-image" not in captured.out
+    assert selected_models == ["diffusiongemma-4b-q4"]
+    assert commands[0][:3] == ["utopic", "run", "diffusiongemma-4b-q4"]
     assert "--no-setup" in commands[0]
 
 

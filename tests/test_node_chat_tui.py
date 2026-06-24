@@ -324,7 +324,7 @@ def test_bundled_chat_posts_messages_to_openai_compatible_server(fake_openai_ser
     ]
 
 
-def test_bundled_chat_models_command_shows_native_readiness(fake_openai_server, tmp_path):
+def test_bundled_chat_models_command_shows_chat_models_only(fake_openai_server, tmp_path):
     node = shutil.which("node")
     if node is None:
         pytest.skip("node is not installed")
@@ -382,13 +382,11 @@ def test_bundled_chat_models_command_shows_native_readiness(fake_openai_server, 
         env={**os.environ, "UTOPIC_MODELS_CATALOG": str(catalog)},
     )
 
-    assert "Catalog models:" in completed.stdout
+    assert "Available chat models:" in completed.stdout
     assert "diffusiongemma-26b-a4b-q4" in completed.stdout
-    assert "text / native / ready / utopic_runner" in completed.stdout
-    assert "backends: metal, cuda, cpu; VRAM 24 GiB, RAM 32 GiB" in completed.stdout
-    assert "cosmos3-super" in completed.stdout
-    assert "image / planned_native / planned / image_runner" in completed.stdout
-    assert "backends: cuda; VRAM 96 GiB, RAM 128 GiB" in completed.stdout
+    assert "DiffusionGemma 26B Q4" in completed.stdout
+    assert "cosmos3-super" not in completed.stdout
+    assert "image / planned_native / planned / image_runner" not in completed.stdout
     assert requests == []
     assert paths == []
 

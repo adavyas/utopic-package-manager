@@ -30,7 +30,7 @@ Options:
 
 Chat commands:
   /help                 Show chat commands.
-  /models               Show catalog models with native readiness.
+  /models               Show native text chat models.
   /pull MODEL           Download a native text model. Restart chat to switch.
   /serve                Show local OpenAI-compatible endpoints.
   /clear                Clear this session's conversation.
@@ -275,7 +275,7 @@ function validateCatalogEntry(item, index) {
     if (entry.modality !== undefined && !["text", "image", "tts", "music", "video", "misc"].includes(entry.modality)) {
         throw new Error(`Invalid model catalog entry ${index}: modality is not supported`);
     }
-    if (entry.runtime !== undefined && !["native", "bridge"].includes(entry.runtime)) {
+    if (entry.runtime !== undefined && !["native", "planned_native", "bridge"].includes(entry.runtime)) {
         throw new Error(`Invalid model catalog entry ${index}: runtime is not supported`);
     }
     if (entry.native_status !== undefined &&
@@ -297,10 +297,10 @@ function modelRuntime(entry) {
     return entry.runtime ?? "native";
 }
 function modelNativeStatus(entry) {
-    return entry.native_status ?? (modelRuntime(entry) === "bridge" ? "planned" : "ready");
+    return entry.native_status ?? (modelRuntime(entry) === "native" ? "ready" : "planned");
 }
 function modelRunner(entry) {
-    return entry.runner ?? (modelRuntime(entry) === "bridge" ? `${modelModality(entry)}_runner` : "utopic_runner");
+    return entry.runner ?? (modelModality(entry) !== "text" ? `${modelModality(entry)}_runner` : "utopic_runner");
 }
 function modelBackends(entry) {
     return (entry.supported_backends && entry.supported_backends.length > 0 ? entry.supported_backends : ["metal", "cuda", "cpu"]).join(", ");
@@ -316,6 +316,9 @@ function modelMemory(entry) {
 function isNativeTextModel(entry) {
     return modelModality(entry) === "text" && modelRuntime(entry) === "native";
 }
+function usesMetadataCache(entry) {
+    return modelModality(entry) !== "text" && ["planned_native", "bridge"].includes(modelRuntime(entry));
+}
 function printModelCatalog(catalog, options) {
     const visible = options.chatOnly ? catalog.filter(isNativeTextModel) : catalog;
     if (visible.length === 0) {
@@ -328,8 +331,10 @@ function printModelCatalog(catalog, options) {
         const downloaded = isModelDownloaded(entry) ? "downloaded" : "not downloaded";
         console.log(`${index + 1}. ${marker} ${entry.id} (${entry.size}, ${downloaded})`);
         console.log(`   ${entry.name}`);
-        console.log(`   ${modelModality(entry)} / ${modelRuntime(entry)} / ${modelNativeStatus(entry)} / ${modelRunner(entry)}`);
-        console.log(`   backends: ${modelBackends(entry)}; ${modelMemory(entry)}`);
+        if (!options.chatOnly) {
+            console.log(`   ${modelModality(entry)} / ${modelRuntime(entry)} / ${modelNativeStatus(entry)} / ${modelRunner(entry)}`);
+            console.log(`   backends: ${modelBackends(entry)}; ${modelMemory(entry)}`);
+        }
     });
 }
 function safeModelFilename(entry) {
@@ -359,7 +364,7 @@ function validateModelUrl(entry) {
     }
 }
 function localModelPath(entry) {
-    if (entry.runtime === "bridge")
+    if (usesMetadataCache(entry))
         return path.join(modelsDir(), entry.id);
     return path.join(modelsDir(), safeModelFilename(entry));
 }
@@ -382,7 +387,7 @@ function isInteractiveInput() {
 }
 function isModelDownloaded(entry) {
     const filePath = localModelPath(entry);
-    if (entry.runtime === "bridge")
+    if (usesMetadataCache(entry))
         return fs.existsSync(path.join(filePath, "utopic-model.json"));
     if (!isNonEmptyFile(filePath))
         return false;
@@ -783,7 +788,7 @@ async function chatLoop(baseUrl, options) {
     const interactive = isInteractiveInput();
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout, prompt: interactive ? ">>> " : "" });
     const messages = [{ role: "system", content: DEFAULT_SYSTEM_PROMPT }];
-    console.log("Type /help for commands, /models for catalog, /serve for endpoints, /exit to quit.\n");
+    console.log("Type /help for commands, /models for chat models, /serve for endpoints, /exit to quit.\n");
     if (interactive)
         rl.prompt();
     for await (const line of rl) {
@@ -804,7 +809,7 @@ async function chatLoop(baseUrl, options) {
             continue;
         }
         if (input === "/help") {
-            console.log("/models       Show catalog models with native readiness.");
+            console.log("/models       Show native text chat models.");
             console.log("/pull MODEL   Download a native text model. Restart chat to switch.");
             console.log("/serve        Show local OpenAI-compatible endpoints.");
             console.log("/clear        Clear conversation history.");
@@ -816,7 +821,7 @@ async function chatLoop(baseUrl, options) {
         }
         if (input === "/models") {
             try {
-                printModelCatalog(readCatalog(), { chatOnly: false });
+                printModelCatalog(readCatalog(), { chatOnly: true });
             }
             catch (error) {
                 console.error(`catalog failed: ${error.message}`);

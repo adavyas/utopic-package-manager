@@ -77,7 +77,7 @@ Options:
 
 Chat commands:
   /help                 Show chat commands.
-  /models               Show catalog models with native readiness.
+  /models               Show native text chat models.
   /pull MODEL           Download a native text model. Restart chat to switch.
   /serve                Show local OpenAI-compatible endpoints.
   /clear                Clear this session's conversation.
@@ -298,10 +298,12 @@ def _choose_model_arg(args: Sequence[str]) -> Optional[str]:
     if existing or not sys.stdin.isatty():
         return existing
 
-    catalog = models.list_models()
+    catalog = _chat_model_catalog()
+    if not catalog:
+        raise RuntimeError("No native text chat models are available in this catalog.")
     recommended = next((entry for entry in catalog if entry.recommended), catalog[0])
 
-    print("\nAvailable models:")
+    print("\nAvailable chat models:")
     for index, entry in enumerate(catalog, start=1):
         marker = "*" if entry.recommended else " "
         status = "downloaded" if models.is_model_downloaded(entry) else "not downloaded"
@@ -322,6 +324,14 @@ def _choose_model_arg(args: Sequence[str]) -> Optional[str]:
     if 1 <= selected <= len(catalog):
         return catalog[selected - 1].id
     return answer
+
+
+def _is_chat_model(entry: object) -> bool:
+    return getattr(entry, "modality", "text") == "text" and getattr(entry, "runtime", "native") == "native"
+
+
+def _chat_model_catalog() -> list[object]:
+    return [entry for entry in models.list_models() if _is_chat_model(entry)]
 
 
 def _server_base_url(args: Sequence[str]) -> Optional[str]:
@@ -490,7 +500,7 @@ def _python_chat_loop(
 
     print(f"utopic chat: {fallback_reason}; using the built-in Python chat fallback.")
     print(f"OpenAI-compatible URL: {_chat_completions_url(base_url)}")
-    print("Type /help for commands, /models for catalog, /serve for endpoints, /exit to quit.")
+    print("Type /help for commands, /models for chat models, /serve for endpoints, /exit to quit.")
 
     while True:
         try:
@@ -553,7 +563,7 @@ def _python_chat_loop(
 
 
 def _print_python_chat_commands() -> None:
-    print("/models       Show catalog models with native readiness.")
+    print("/models       Show native text chat models.")
     print("/pull MODEL   Download a native text model. Restart chat to switch.")
     print("/serve        Show local OpenAI-compatible endpoints.")
     print("/clear        Clear conversation history.")
@@ -562,13 +572,15 @@ def _print_python_chat_commands() -> None:
 
 
 def _print_python_chat_models() -> None:
-    print("\nCatalog models:")
-    for index, entry in enumerate(models.list_models(), start=1):
+    entries = _chat_model_catalog()
+    if not entries:
+        print("\nNo native text chat models are available in this catalog.")
+        return
+    print("\nAvailable chat models:")
+    for index, entry in enumerate(entries, start=1):
         marker = "*" if entry.recommended else " "
         status = "downloaded" if models.is_model_downloaded(entry) else "not downloaded"
         print(f"{index}. {marker} {entry.id} ({entry.size}, {status})")
-        print(f"   {entry.modality} / {entry.runtime} / {entry.native_status} / {entry.runner}")
-        print(f"   backends: {', '.join(entry.supported_backends)}")
         print(f"   {entry.name}")
 
 
