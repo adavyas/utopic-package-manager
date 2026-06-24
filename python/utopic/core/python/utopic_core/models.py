@@ -331,13 +331,6 @@ def _bridge_input_key(entry: ModelEntry) -> str:
 def _bridge_model_metadata(entry: ModelEntry) -> dict[str, object]:
     adapter = bridge.ADAPTERS.get(entry.engine)
     payload: dict[str, object] = {
-        "bridge": {
-            "command": f"utopic-bridge {entry.engine}",
-            "environment_variable": _bridge_command_env_var(entry),
-            "input": _bridge_input_key(entry),
-            "install_hint": adapter.install_hint if adapter is not None else "",
-            "schema_version": bridge.SCHEMA_VERSION,
-        },
         "endpoints": list(entry.endpoints),
         "engine": entry.engine,
         "hardware": list(entry.hardware),
@@ -358,6 +351,14 @@ def _bridge_model_metadata(entry: ModelEntry) -> dict[str, object]:
         payload["expected_ram_gib"] = entry.expected_ram_gib
     if entry.requirements:
         payload["requirements"] = entry.requirements
+    if _experimental_bridge_enabled():
+        payload["experimental_bridge"] = {
+            "command": f"utopic-bridge {entry.engine}",
+            "environment_variable": _bridge_command_env_var(entry),
+            "input": _bridge_input_key(entry),
+            "install_hint": adapter.install_hint if adapter is not None else "",
+            "schema_version": bridge.SCHEMA_VERSION,
+        }
     return payload
 
 
@@ -484,6 +485,31 @@ def _native_model_check(entry: ModelEntry) -> dict[str, object]:
 
 
 def _bridge_model_check(entry: ModelEntry) -> dict[str, object]:
+    if not _experimental_bridge_enabled():
+        return {
+            "id": entry.id,
+            "name": entry.name,
+            "runtime": entry.runtime,
+            "modality": entry.modality,
+            "engine": entry.engine,
+            "runner": entry.runner,
+            "native_status": entry.native_status,
+            "supported_backends": list(entry.supported_backends),
+            "expected_vram_gib": entry.expected_vram_gib,
+            "expected_ram_gib": entry.expected_ram_gib,
+            "status": "native_runner_not_ready",
+            "ready": False,
+            "requirements": entry.requirements or {},
+            "cache": {
+                "path": str(entry.path),
+                "prepared": is_model_downloaded(entry),
+                "metadata_path": str(entry.path / "utopic-model.json"),
+            },
+            "next_steps": [
+                f"{entry.runner} for {entry.modality} is cataloged but not native-ready yet"
+            ],
+        }
+
     prepared = is_model_downloaded(entry)
     adapter = bridge.ADAPTERS.get(entry.engine)
     if adapter is None:
@@ -526,9 +552,14 @@ def _bridge_model_check(entry: ModelEntry) -> dict[str, object]:
             "prepared": prepared,
             "metadata_path": str(entry.path / "utopic-model.json"),
         },
-        "bridge": bridge_check,
+        "experimental_bridge": bridge_check,
         "next_steps": next_steps,
     }
+
+
+def _experimental_bridge_enabled() -> bool:
+    value = os.environ.get("UTOPIC_EXPERIMENTAL_BRIDGE", "")
+    return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def model_check(model_id: str) -> dict[str, object]:

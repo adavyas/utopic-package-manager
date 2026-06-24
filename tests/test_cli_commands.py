@@ -2592,13 +2592,6 @@ def test_bridge_model_pull_prepares_metadata_cache(monkeypatch, tmp_path):
     assert model_dir == models_dir / "qwen-image"
     metadata = json.loads((model_dir / "utopic-model.json").read_text(encoding="utf-8"))
     assert metadata == {
-        "bridge": {
-            "command": "utopic-bridge diffusers",
-            "environment_variable": "UTOPIC_BRIDGE_DIFFUSERS_COMMAND",
-            "input": "prompt",
-            "install_hint": 'pip install "utopic[image]"',
-            "schema_version": "utopic-bridge/v1",
-        },
         "endpoints": ["/v1/images/generations", "/v1/responses"],
         "engine": "diffusers",
         "hardware": ["mac-48gb", "gb10", "cuda"],
@@ -2613,6 +2606,8 @@ def test_bridge_model_pull_prepares_metadata_cache(monkeypatch, tmp_path):
         "supported_backends": ["metal", "cuda", "cpu"],
         "url": "https://huggingface.co/Qwen/Qwen-Image",
     }
+    assert "bridge" not in metadata
+    assert "experimental_bridge" not in metadata
     assert models.is_model_downloaded(models.get_model("qwen-image"))
 
 
@@ -2728,6 +2723,7 @@ def test_models_check_reports_ready_bridge_model(monkeypatch, tmp_path, capsys):
     )
     monkeypatch.setenv("UTOPIC_MODELS_CATALOG", str(catalog))
     monkeypatch.setenv("UTOPIC_MODELS_DIR", str(models_dir))
+    monkeypatch.setenv("UTOPIC_EXPERIMENTAL_BRIDGE", "1")
     models.pull_model("qwen-image")
     monkeypatch.setattr(
         models.bridge,
@@ -2753,9 +2749,9 @@ def test_models_check_reports_ready_bridge_model(monkeypatch, tmp_path, capsys):
     assert payload["ready"] is True
     assert payload["cache"]["prepared"] is True
     assert payload["cache"]["path"] == str(models_dir / "qwen-image")
-    assert payload["bridge"]["engine"] == "diffusers"
-    assert payload["bridge"]["status"] == "ready"
-    assert payload["bridge"]["ready"] is True
+    assert payload["experimental_bridge"]["engine"] == "diffusers"
+    assert payload["experimental_bridge"]["status"] == "ready"
+    assert payload["experimental_bridge"]["ready"] is True
 
 
 def test_models_check_reports_bridge_dependency_gap(monkeypatch, tmp_path, capsys):
@@ -2787,6 +2783,7 @@ def test_models_check_reports_bridge_dependency_gap(monkeypatch, tmp_path, capsy
     )
     monkeypatch.setenv("UTOPIC_MODELS_CATALOG", str(catalog))
     monkeypatch.setenv("UTOPIC_MODELS_DIR", str(models_dir))
+    monkeypatch.setenv("UTOPIC_EXPERIMENTAL_BRIDGE", "1")
     monkeypatch.setattr(
         models.bridge,
         "_check_adapter",
@@ -2808,8 +2805,8 @@ def test_models_check_reports_bridge_dependency_gap(monkeypatch, tmp_path, capsy
     assert payload["status"] == "not_ready"
     assert payload["ready"] is False
     assert payload["cache"]["prepared"] is False
-    assert payload["bridge"]["status"] == "missing_dependencies"
-    assert payload["bridge"]["missing"] == ["kokoro"]
+    assert payload["experimental_bridge"]["status"] == "missing_dependencies"
+    assert payload["experimental_bridge"]["missing"] == ["kokoro"]
     assert payload["next_steps"] == [
         "utopic models pull kokoro-82m",
         (
@@ -2866,6 +2863,7 @@ def test_models_check_all_reports_every_model_and_fails_when_any_not_ready(monke
     )
     monkeypatch.setenv("UTOPIC_MODELS_CATALOG", str(catalog))
     monkeypatch.setenv("UTOPIC_MODELS_DIR", str(models_dir))
+    monkeypatch.setenv("UTOPIC_EXPERIMENTAL_BRIDGE", "1")
     model_file = models_dir / "diffusiongemma.gguf"
     model_file.parent.mkdir(parents=True)
     model_file.write_bytes(b"model")

@@ -34,7 +34,9 @@ def test_gateway_module_entrypoint_prints_help():
     assert "--port" in result.stdout
 
 
-def test_gateway_models_endpoint_exposes_multimodal_runtime_metadata():
+def test_gateway_models_endpoint_exposes_multimodal_runtime_metadata(monkeypatch):
+    monkeypatch.setenv("UTOPIC_EXPERIMENTAL_BRIDGE", "1")
+
     status, payload = decode(gateway.handle_openai_request("GET", "/v1/models", None))
 
     assert status == 200
@@ -46,7 +48,7 @@ def test_gateway_models_endpoint_exposes_multimodal_runtime_metadata():
     assert by_id["qwen-image"]["repo"] == "Qwen/Qwen-Image"
     assert by_id["qwen-image"]["url"] == "https://huggingface.co/Qwen/Qwen-Image"
     assert "/v1/images/generations" in by_id["qwen-image"]["endpoints"]
-    assert by_id["qwen-image"]["bridge"] == {
+    assert by_id["qwen-image"]["experimental_bridge"] == {
         "schema_version": "utopic-bridge/v1",
         "engine": "diffusers",
         "command": "utopic-bridge diffusers",
@@ -69,10 +71,12 @@ def test_gateway_models_endpoint_exposes_multimodal_runtime_metadata():
     assert by_id["zuna"]["runtime"] == "bridge"
     assert by_id["zuna"]["repo"] == "Zyphra/ZUNA"
     assert "/v1/utopic/misc/generations" in by_id["zuna"]["endpoints"]
-    assert by_id["zuna"]["bridge"]["input"] == "artifact"
+    assert by_id["zuna"]["experimental_bridge"]["input"] == "artifact"
 
 
-def test_gateway_models_endpoint_exposes_bridge_activation_for_all_bridge_models():
+def test_gateway_models_endpoint_exposes_bridge_activation_for_all_bridge_models(monkeypatch):
+    monkeypatch.setenv("UTOPIC_EXPERIMENTAL_BRIDGE", "1")
+
     status, payload = decode(gateway.handle_openai_request("GET", "/v1/models", None))
 
     assert status == 200
@@ -93,20 +97,20 @@ def test_gateway_models_endpoint_exposes_bridge_activation_for_all_bridge_models
         "zuna",
     }
     for item in bridge_models:
-        assert item["bridge"]["schema_version"] == "utopic-bridge/v1"
-        assert item["bridge"]["engine"] == item["engine"]
-        assert item["bridge"]["command"] == f"utopic-bridge {item['engine']}"
-        assert item["bridge"]["environment_variable"].startswith("UTOPIC_BRIDGE_")
-        assert item["bridge"]["install_hint"] or item["engine"] == "artifact"
-        assert item["bridge"]["input"] in {"prompt", "input", "artifact"}
-        assert item["bridge"]["outputs"] == item["outputs"]
+        assert item["experimental_bridge"]["schema_version"] == "utopic-bridge/v1"
+        assert item["experimental_bridge"]["engine"] == item["engine"]
+        assert item["experimental_bridge"]["command"] == f"utopic-bridge {item['engine']}"
+        assert item["experimental_bridge"]["environment_variable"].startswith("UTOPIC_BRIDGE_")
+        assert item["experimental_bridge"]["install_hint"] or item["engine"] == "artifact"
+        assert item["experimental_bridge"]["input"] in {"prompt", "input", "artifact"}
+        assert item["experimental_bridge"]["outputs"] == item["outputs"]
 
     by_id = {item["id"]: item for item in bridge_models}
     assert by_id["ltx-video"]["repo"] == "Lightricks/LTX-Video"
-    assert by_id["ltx-video"]["bridge"]["command"] == "utopic-bridge ltx"
-    assert by_id["ltx-video"]["bridge"]["environment_variable"] == "UTOPIC_BRIDGE_LTX_COMMAND"
-    assert by_id["cosmos3-super"]["bridge"]["command"] == "utopic-bridge cosmos"
-    assert by_id["cosmos3-super"]["bridge"]["environment_variable"] == "UTOPIC_BRIDGE_COSMOS_COMMAND"
+    assert by_id["ltx-video"]["experimental_bridge"]["command"] == "utopic-bridge ltx"
+    assert by_id["ltx-video"]["experimental_bridge"]["environment_variable"] == "UTOPIC_BRIDGE_LTX_COMMAND"
+    assert by_id["cosmos3-super"]["experimental_bridge"]["command"] == "utopic-bridge cosmos"
+    assert by_id["cosmos3-super"]["experimental_bridge"]["environment_variable"] == "UTOPIC_BRIDGE_COSMOS_COMMAND"
 
 
 def test_gateway_cosmos_returns_oom_preflight_before_starting_bridge(monkeypatch):
@@ -326,6 +330,7 @@ print(json.dumps({
         encoding="utf-8",
     )
     monkeypatch.setenv("UTOPIC_HOME", str(tmp_path / "cache"))
+    monkeypatch.setenv("UTOPIC_EXPERIMENTAL_BRIDGE", "1")
     monkeypatch.setenv("UTOPIC_BRIDGE_DIFFUSERS_COMMAND", f"{sys.executable} {script}")
 
     status, payload = decode(
@@ -409,6 +414,7 @@ print(json.dumps({{
         encoding="utf-8",
     )
     monkeypatch.setenv("UTOPIC_HOME", str(tmp_path / "cache"))
+    monkeypatch.setenv("UTOPIC_EXPERIMENTAL_BRIDGE", "1")
     monkeypatch.setenv("UTOPIC_BRIDGE_ARTIFACT_COMMAND", f"{sys.executable} {script}")
 
     status, payload = decode(
@@ -457,6 +463,7 @@ print(json.dumps({
         encoding="utf-8",
     )
     monkeypatch.setenv("UTOPIC_HOME", str(tmp_path / "cache"))
+    monkeypatch.setenv("UTOPIC_EXPERIMENTAL_BRIDGE", "1")
     monkeypatch.setenv("UTOPIC_BRIDGE_DIFFUSERS_COMMAND", f"{sys.executable} {script}")
 
     status, payload = decode(
@@ -495,6 +502,7 @@ print(json.dumps({{
         encoding="utf-8",
     )
     monkeypatch.setenv("UTOPIC_HOME", str(tmp_path / "cache"))
+    monkeypatch.setenv("UTOPIC_EXPERIMENTAL_BRIDGE", "1")
     monkeypatch.setenv("UTOPIC_BRIDGE_DIFFUSERS_COMMAND", f"{sys.executable} {script}")
 
     status, payload = decode(
@@ -531,6 +539,7 @@ print(json.dumps({
         encoding="utf-8",
     )
     monkeypatch.setenv("UTOPIC_HOME", str(tmp_path / "cache"))
+    monkeypatch.setenv("UTOPIC_EXPERIMENTAL_BRIDGE", "1")
     monkeypatch.setenv("UTOPIC_BRIDGE_DIFFUSERS_COMMAND", f"{sys.executable} {script}")
 
     status, payload = decode(
@@ -569,6 +578,7 @@ print(json.dumps({{
         encoding="utf-8",
     )
     monkeypatch.setenv("UTOPIC_HOME", str(tmp_path / "cache"))
+    monkeypatch.setenv("UTOPIC_EXPERIMENTAL_BRIDGE", "1")
     monkeypatch.setenv("UTOPIC_BRIDGE_DIFFUSERS_COMMAND", f"{sys.executable} {script}")
 
     status, payload = decode(
@@ -622,6 +632,7 @@ print(json.dumps({{
         encoding="utf-8",
     )
     monkeypatch.setenv("UTOPIC_HOME", str(tmp_path / "cache"))
+    monkeypatch.setenv("UTOPIC_EXPERIMENTAL_BRIDGE", "1")
     monkeypatch.setenv("UTOPIC_BRIDGE_KOKORO_COMMAND", f"{sys.executable} {script}")
 
     status, payload = decode(
@@ -802,6 +813,7 @@ print(json.dumps({
 """.strip(),
         encoding="utf-8",
     )
+    monkeypatch.setenv("UTOPIC_EXPERIMENTAL_BRIDGE", "1")
     monkeypatch.setenv("UTOPIC_BRIDGE_DIFFUSERS_COMMAND", f"{sys.executable} {script}")
 
     status, payload = decode(
@@ -854,6 +866,7 @@ print(json.dumps({
         encoding="utf-8",
     )
     monkeypatch.setenv("UTOPIC_HOME", str(tmp_path / "cache"))
+    monkeypatch.setenv("UTOPIC_EXPERIMENTAL_BRIDGE", "1")
     monkeypatch.setenv("UTOPIC_BRIDGE_DIFFUSERS_COMMAND", f"{sys.executable} {script}")
 
     status, payload = decode(
@@ -1377,6 +1390,7 @@ print(json.dumps({{
         encoding="utf-8",
     )
     monkeypatch.setenv("UTOPIC_HOME", str(tmp_path / "cache"))
+    monkeypatch.setenv("UTOPIC_EXPERIMENTAL_BRIDGE", "1")
     monkeypatch.setenv("UTOPIC_BRIDGE_KOKORO_COMMAND", f"{sys.executable} {script}")
     monkeypatch.setenv("UTOPIC_BRIDGE_ACE_STEP_COMMAND", f"{sys.executable} {script}")
     monkeypatch.setenv("UTOPIC_BRIDGE_ARTIFACT_COMMAND", f"{sys.executable} {script}")

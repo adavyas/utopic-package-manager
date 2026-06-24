@@ -333,7 +333,7 @@ def handle_openai_request(
         preflight = _bridge_runtime_preflight(entry)
         if preflight is not None:
             return preflight
-        command = _explicit_bridge_command(entry)
+        command = _explicit_bridge_command(entry) if _experimental_bridge_enabled() else None
         if command is not None:
             return _run_bridge(entry, path, runtime_request, command)
         runner_payload = native_runner.generation(entry, path, runtime_request)
@@ -1349,8 +1349,8 @@ def _model_payload(entry: models.ModelEntry) -> dict[str, Any]:
         "url": entry.url,
         "description": entry.description,
     }
-    if entry.runtime == "bridge":
-        payload["bridge"] = _bridge_model_payload(entry)
+    if entry.runtime == "bridge" and _experimental_bridge_enabled():
+        payload["experimental_bridge"] = _bridge_model_payload(entry)
     return payload
 
 
@@ -1366,6 +1366,11 @@ def _bridge_model_payload(entry: models.ModelEntry) -> dict[str, Any]:
         "outputs": list(entry.outputs),
         "progress_events": ["queued", "loading", "generating", "completed", "failed"],
     }
+
+
+def _experimental_bridge_enabled() -> bool:
+    value = os.environ.get("UTOPIC_EXPERIMENTAL_BRIDGE", "")
+    return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _json(status: int, payload: dict[str, Any]) -> tuple[int, dict[str, str], bytes]:
