@@ -121,8 +121,8 @@ static json error_response(const string & code, const string & message, const js
     };
 }
 
-static json invalid_request(const string & message, const string & field) {
-    return error_response("invalid_request", message, {
+static json contract_error(const string & message, const string & field) {
+    return error_response("runner_failed", message, {
         {"field", field},
         {"schema_version", "utopic-runner/v1"},
     });
@@ -233,37 +233,37 @@ static bool read_json_file(const char * path, json & out, string & error) {
 static bool validate_request_contract(const json & root, json & response) {
     if (root.contains("schema_version")) {
         if (!root["schema_version"].is_string()) {
-            response = invalid_request("schema_version must be utopic-runner/v1", "schema_version");
+            response = contract_error("schema_version must be utopic-runner/v1", "schema_version");
             return false;
         }
         if (root["schema_version"].get<string>() != "utopic-runner/v1") {
-            response = invalid_request("unsupported schema_version", "schema_version");
+            response = contract_error("unsupported schema_version", "schema_version");
             return false;
         }
     }
     if (!root.contains("task") || !root["task"].is_string() || root["task"].get<string>().empty()) {
-        response = invalid_request("task is required", "task");
+        response = contract_error("task is required", "task");
         return false;
     }
     const string task = root["task"].get<string>();
     if (task != "chat" && task != "image" && task != "tts" && task != "music" && task != "video" && task != "misc") {
-        response = invalid_request("task must be chat, image, tts, music, video, or misc", "task");
+        response = contract_error("task must be chat, image, tts, music, video, or misc", "task");
         return false;
     }
     if (!root.contains("model") || !root["model"].is_string() || root["model"].get<string>().empty()) {
-        response = invalid_request("model is required", "model");
+        response = contract_error("model is required", "model");
         return false;
     }
     if (!root.contains("input") || !root["input"].is_object()) {
-        response = invalid_request("input must be an object", "input");
+        response = contract_error("input must be an object", "input");
         return false;
     }
     if (!root.contains("options") || !root["options"].is_object()) {
-        response = invalid_request("options must be an object", "options");
+        response = contract_error("options must be an object", "options");
         return false;
     }
     if (!root.contains("output_dir") || !root["output_dir"].is_string() || root["output_dir"].get<string>().empty()) {
-        response = invalid_request("output_dir is required", "output_dir");
+        response = contract_error("output_dir is required", "output_dir");
         return false;
     }
     return true;

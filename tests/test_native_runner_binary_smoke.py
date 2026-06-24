@@ -179,7 +179,7 @@ def test_native_runner_rejects_incomplete_contract(tmp_path, runner_request, fie
 
     assert completed.returncode != 0
     assert payload["ok"] is False
-    assert payload["error"]["code"] == "invalid_request"
+    assert payload["error"]["code"] == "runner_failed"
     assert payload["error"]["message"] == message
     assert payload["error"]["detail"]["field"] == field
     assert payload["error"]["detail"]["schema_version"] == "utopic-runner/v1"
@@ -230,7 +230,7 @@ def test_native_runner_rejects_unknown_task(tmp_path):
 
     assert completed.returncode != 0
     assert payload["ok"] is False
-    assert payload["error"]["code"] == "invalid_request"
+    assert payload["error"]["code"] == "runner_failed"
     assert payload["error"]["message"] == "task must be chat, image, tts, music, video, or misc"
     assert payload["error"]["detail"]["field"] == "task"
 
