@@ -12,10 +12,11 @@ from typing import Any, Optional
 import urllib.error
 import urllib.request
 
-from . import __version__, bridge, installer, models
+from . import __version__, _native, bridge, installer, models
 
 
 JSON_HEADERS = {"content-type": "application/json"}
+_native_binary_path = _native.binary_path
 
 HELP = """usage: utopic-runtime [options]
 
@@ -69,6 +70,15 @@ def _schema(required: list[str], properties: dict[str, str | dict[str, Any]]) ->
     }
 
 
+EXPERIMENTAL_BRIDGE_PROPERTY = {
+    "type": "boolean",
+    "description": (
+        "Set true only when you explicitly want to run an experimental Python bridge model. "
+        "Production generation defaults to native C++ runners; omit this for native-ready models."
+    ),
+}
+
+
 MCP_TOOLS = [
     {
         "name": "utopic_chat",
@@ -120,6 +130,7 @@ MCP_TOOLS = [
                     "type": "string",
                     "description": "Optional output size such as 1024x1024 when supported by the model.",
                 },
+                "experimental_bridge": EXPERIMENTAL_BRIDGE_PROPERTY,
             },
         ),
     },
@@ -145,6 +156,7 @@ MCP_TOOLS = [
                     "type": "string",
                     "description": "Optional model-specific voice name.",
                 },
+                "experimental_bridge": EXPERIMENTAL_BRIDGE_PROPERTY,
             },
         ),
     },
@@ -165,6 +177,7 @@ MCP_TOOLS = [
                     "type": "string",
                     "description": "Music prompt with genre, instrumentation, mood, tempo, and duration hints.",
                 },
+                "experimental_bridge": EXPERIMENTAL_BRIDGE_PROPERTY,
             },
         ),
     },
@@ -190,6 +203,7 @@ MCP_TOOLS = [
                     "type": "string",
                     "description": "Optional output size such as 832x480 when supported by the model.",
                 },
+                "experimental_bridge": EXPERIMENTAL_BRIDGE_PROPERTY,
             },
         ),
     },
@@ -215,6 +229,7 @@ MCP_TOOLS = [
                     "type": "string",
                     "description": "Optional MIME type for the input artifact.",
                 },
+                "experimental_bridge": EXPERIMENTAL_BRIDGE_PROPERTY,
             },
         ),
     },
@@ -320,6 +335,8 @@ def handle_openai_request(
         )
     runtime_request = _normalize_request_for_runtime(path, entry, request)
     if entry.runtime == "bridge":
+        if not _experimental_bridge_enabled(runtime_request):
+            return _bridge_requires_explicit_opt_in(entry, path)
         preflight = _bridge_runtime_preflight(entry)
         if preflight is not None:
             return preflight
@@ -327,21 +344,45 @@ def handle_openai_request(
         if command is None:
             return _bridge_not_installed(entry, path)
         return _run_bridge(entry, path, runtime_request, command)
+    if entry.modality != "text":
+        return _run_native_runner(entry, path, runtime_request)
     if native_base_url and entry.modality == "text":
         native_path = "/v1/chat/completions" if path == "/v1/responses" else path
         status, headers, response_body = _forward_native_text(native_base_url, native_path, runtime_request)
         if path == "/v1/responses" and status < 400:
             return _json(status, _native_chat_to_response(entry, response_body))
         return status, headers, response_body
+    return _run_native_runner(entry, path, runtime_request)
+
+
+def _experimental_bridge_enabled(request: dict[str, Any]) -> bool:
+    return request.get("experimental_bridge") is True or request.get("allow_experimental_bridge") is True
+
+
+def _bridge_requires_explicit_opt_in(entry: models.ModelEntry, endpoint: str) -> tuple[int, dict[str, str], bytes]:
     return _json(
-        503,
+        501,
         {
             "error": {
-                "message": "native text routing requires the C++ server proxy path",
-                "code": "native_text_server_required",
+                "message": (
+                    f"model {entry.id} is cataloged as an experimental bridge model. "
+                    "Set experimental_bridge=true to run the Python bridge explicitly; "
+                    "native runners are the default production path."
+                ),
+                "code": "native_runner_not_ready",
                 "model": entry.id,
                 "modality": entry.modality,
-            }
+                "engine": entry.engine,
+                "runtime": entry.runtime,
+                "native_status": entry.native_status,
+            },
+            "native": {
+                "runner": entry.runner,
+                "native_status": entry.native_status,
+                "supported_backends": list(entry.supported_backends),
+                "endpoint": endpoint,
+            },
+            "bridge": _bridge_contract(entry, endpoint),
         },
     )
 
@@ -783,6 +824,285 @@ def _run_bridge(
     return _json(200, response)
 
 
+def _run_native_runner(
+    entry: models.ModelEntry,
+    endpoint: str,
+    request: dict[str, Any],
+) -> tuple[int, dict[str, str], bytes]:
+    run_id = "run_" + uuid.uuid4().hex
+    run_dir = _runs_dir() / run_id
+    output_dir = run_dir / "outputs"
+    progress_path = run_dir / "progress.jsonl"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    payload = {
+        "schema_version": "utopic-runner/v1",
+        "run_id": run_id,
+        "task": "chat" if entry.modality == "text" else entry.modality,
+        "model": entry.id,
+        "input": _native_runner_input(entry, request),
+        "options": _native_runner_options(entry, request),
+        "output_dir": str(output_dir),
+        "progress_path": str(progress_path),
+    }
+    request_path = run_dir / "request.json"
+    request_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+
+    try:
+        result = subprocess.run(
+            [str(_native_binary_path("utopic_runner")), "--json-request", str(request_path)],
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=_runner_timeout_seconds(),
+        )
+    except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
+        return _native_runner_failed(entry, str(exc), run_id=run_id, progress_path=progress_path)
+    runner_payload, parse_error = _parse_runner_json(result.stdout)
+    if result.returncode != 0:
+        if isinstance(runner_payload, dict) and isinstance(runner_payload.get("error"), dict):
+            return _native_runner_error(entry, runner_payload["error"], run_id=run_id, progress_path=progress_path)
+        message = result.stderr.strip() or result.stdout.strip() or f"exit code {result.returncode}"
+        return _native_runner_failed(entry, message, run_id=run_id, progress_path=progress_path)
+    if parse_error:
+        return _native_runner_failed(entry, parse_error, run_id=run_id, progress_path=progress_path)
+    if not isinstance(runner_payload, dict) or runner_payload.get("ok") is not True:
+        return _native_runner_failed(entry, "native runner returned an invalid response", run_id=run_id, progress_path=progress_path)
+
+    if entry.modality == "text":
+        return _native_text_runner_response(entry, endpoint, runner_payload, run_id=run_id, progress_path=progress_path)
+
+    artifacts, artifact_error = _normalize_artifacts(runner_payload.get("artifacts"), entry, output_dir)
+    if artifact_error:
+        return _native_runner_failed(entry, artifact_error, run_id=run_id, progress_path=progress_path)
+    if not artifacts:
+        return _native_runner_failed(entry, "native runner returned no artifacts", run_id=run_id, progress_path=progress_path)
+    response = {
+        "id": run_id,
+        "object": "utopic.artifact.response",
+        "created": int(time.time()),
+        "model": entry.id,
+        "modality": entry.modality,
+        "engine": entry.engine,
+        "artifacts": artifacts,
+        "progress": _read_progress(progress_path),
+        "progress_url": f"/v1/utopic/runs/{run_id}/events",
+        "metadata": {
+            "backend": runner_payload.get("backend"),
+            "device": runner_payload.get("device"),
+            "metrics": runner_payload.get("metrics") if isinstance(runner_payload.get("metrics"), dict) else {},
+            "runtime": entry.runtime,
+        },
+    }
+    if entry.modality == "image":
+        response["data"] = _image_generation_data(artifacts, request)
+    if endpoint == "/v1/responses":
+        return _json(200, _artifact_response_to_responses(entry, response))
+    return _json(200, response)
+
+
+def _native_runner_input(entry: models.ModelEntry, request: dict[str, Any]) -> dict[str, Any]:
+    if entry.modality == "text":
+        input_payload: dict[str, Any] = {}
+        for key in ("messages", "prompt", "system"):
+            if key in request:
+                input_payload[key] = request[key]
+        return input_payload
+    return _bridge_input(entry, request)
+
+
+def _native_runner_options(entry: models.ModelEntry, request: dict[str, Any]) -> dict[str, Any]:
+    excluded = {"model", "prompt", "input", "messages", "artifact", "input_file", "response_format"}
+    options = {key: value for key, value in request.items() if key not in excluded}
+    artifact_paths = _native_artifact_paths(entry)
+    options.update(
+        {
+            "model_path": str(entry.path),
+            "modality": entry.modality,
+            "engine": entry.engine,
+            "runtime": entry.runtime,
+            "runner": "utopic_runner",
+            "catalog_runner": entry.runner,
+            "native_status": entry.native_status,
+            "supported_backends": list(entry.supported_backends),
+            "artifact_filenames": list(entry.artifact_filenames),
+            "expected_vram_gib": entry.expected_vram_gib,
+            "expected_ram_gib": entry.expected_ram_gib,
+            "oom_policy": entry.oom_policy,
+            "hardware": list(entry.hardware),
+            "outputs": list(entry.outputs),
+            "repo": entry.repo,
+            "url": entry.url,
+        }
+    )
+    if artifact_paths:
+        options["artifact_paths"] = artifact_paths
+        _apply_native_image_artifact_paths(options, artifact_paths)
+    if entry.requirements:
+        options["requirements"] = entry.requirements
+    if entry.native_library:
+        options["native_library_path"] = str(_native_library_path(entry.native_library))
+    if entry.native_entrypoint:
+        options["native_entrypoint"] = entry.native_entrypoint
+    return options
+
+
+def _native_library_path(native_library: str) -> Path:
+    path = Path(native_library).expanduser()
+    if path.is_absolute() or path.parent != Path("."):
+        return path
+    return installer.bin_dir() / native_library
+
+
+def _native_text_runner_response(
+    entry: models.ModelEntry,
+    endpoint: str,
+    runner_payload: dict[str, Any],
+    *,
+    run_id: str,
+    progress_path: Path,
+) -> tuple[int, dict[str, str], bytes]:
+    text = runner_payload.get("text") if isinstance(runner_payload.get("text"), str) else ""
+    metrics = runner_payload.get("metrics") if isinstance(runner_payload.get("metrics"), dict) else {}
+    prompt_tokens = _int_metric(metrics, "prompt_tokens")
+    completion_tokens = _int_metric(metrics, "answer_tokens")
+    chat_payload = {
+        "id": run_id,
+        "object": "chat.completion",
+        "created": int(time.time()),
+        "model": entry.id,
+        "choices": [
+            {
+                "index": 0,
+                "message": {"role": "assistant", "content": text},
+                "finish_reason": "stop",
+            }
+        ],
+        "usage": {
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": prompt_tokens + completion_tokens,
+        },
+        "metadata": {
+            "backend": runner_payload.get("backend"),
+            "device": runner_payload.get("device"),
+            "metrics": metrics,
+            "runtime": entry.runtime,
+            "engine": entry.engine,
+            "progress": _read_progress(progress_path),
+            "progress_url": f"/v1/utopic/runs/{run_id}/events",
+        },
+    }
+    reasoning = runner_payload.get("reasoning")
+    if isinstance(reasoning, str) and reasoning:
+        chat_payload["metadata"]["reasoning"] = reasoning
+    if endpoint == "/v1/responses":
+        return _json(200, _native_chat_to_response(entry, json.dumps(chat_payload).encode("utf-8")))
+    return _json(200, chat_payload)
+
+
+def _int_metric(metrics: dict[str, Any], key: str) -> int:
+    value = metrics.get(key)
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
+    if isinstance(value, float) and value >= 0:
+        return int(value)
+    return 0
+
+
+def _native_artifact_paths(entry: models.ModelEntry) -> dict[str, str]:
+    if entry.runtime != "native" or entry.modality == "text":
+        return {}
+    if not entry.artifact_filenames:
+        return {}
+    if len(entry.artifact_filenames) == 1 and not entry.native_library:
+        return {entry.artifact_filenames[0]: str(entry.path)}
+    base_dir = models.models_dir() / entry.id
+    return {filename: str(base_dir / filename) for filename in entry.artifact_filenames}
+
+
+def _apply_native_image_artifact_paths(options: dict[str, Any], artifact_paths: dict[str, str]) -> None:
+    if options.get("modality") != "image":
+        return
+    for filename, path in artifact_paths.items():
+        role = _native_image_artifact_role(filename)
+        if role:
+            if role == "diffusion_model_path" and filename.lower().endswith(".gguf"):
+                options[role] = path
+            else:
+                options.setdefault(role, path)
+
+
+def _native_image_artifact_role(filename: str) -> Optional[str]:
+    normalized = filename.lower().replace("-", "_")
+    if "clip_l" in normalized or "text_encoder" in normalized:
+        return "clip_l_path"
+    if "clip_g" in normalized:
+        return "clip_g_path"
+    if "t5xxl" in normalized or normalized.startswith("t5_") or "_t5_" in normalized:
+        return "t5xxl_path"
+    if "vae" in normalized:
+        return "vae_path"
+    if normalized.endswith(".gguf"):
+        return "diffusion_model_path"
+    if "diffusion" in normalized or "unet" in normalized or "model" in normalized:
+        return "diffusion_model_path"
+    return None
+
+
+def _parse_runner_json(stdout: str) -> tuple[Optional[dict[str, Any]], Optional[str]]:
+    for line in reversed(stdout.splitlines()):
+        if not line.strip():
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict):
+            return payload, None
+    return None, "native runner did not return JSON"
+
+
+def _native_runner_failed(
+    entry: models.ModelEntry,
+    message: str,
+    *,
+    run_id: Optional[str],
+    progress_path: Optional[Path],
+) -> tuple[int, dict[str, str], bytes]:
+    payload: dict[str, Any] = {
+        "message": f"native runner failed for {entry.id}: {message}",
+        "code": "native_runner_failed",
+        "model": entry.id,
+        "modality": entry.modality,
+        "engine": entry.engine,
+    }
+    _attach_bridge_run_context(payload, run_id=run_id, progress_path=progress_path)
+    return _json(502, {"error": payload})
+
+
+def _native_runner_error(
+    entry: models.ModelEntry,
+    error: dict[str, Any],
+    *,
+    run_id: Optional[str],
+    progress_path: Optional[Path],
+) -> tuple[int, dict[str, str], bytes]:
+    code = error.get("code") if isinstance(error.get("code"), str) else "native_runner_failed"
+    status = 507 if code == "oom" else 501 if code == "unsupported_model" else 404 if code == "missing_model" else 502
+    payload: dict[str, Any] = {
+        "code": code,
+        "message": error.get("message") if isinstance(error.get("message"), str) else "native runner failed",
+        "model": entry.id,
+        "modality": entry.modality,
+        "engine": entry.engine,
+        "detail": error.get("detail") if isinstance(error.get("detail"), dict) else {},
+    }
+    _attach_bridge_run_context(payload, run_id=run_id, progress_path=progress_path)
+    return _json(status, {"error": payload})
+
+
 def _image_generation_data(artifacts: list[dict[str, Any]], request: dict[str, Any]) -> list[dict[str, str]]:
     if request.get("response_format") != "b64_json":
         return [{"url": artifact["url"]} for artifact in artifacts if isinstance(artifact.get("url"), str)]
@@ -978,6 +1298,15 @@ def _bridge_timeout_seconds() -> int:
     return max(1, parsed)
 
 
+def _runner_timeout_seconds() -> int:
+    value = os.environ.get("UTOPIC_RUNNER_TIMEOUT_SECONDS", "3600")
+    try:
+        parsed = int(value)
+    except ValueError:
+        return 3600
+    return max(1, parsed)
+
+
 def _normalize_artifacts(
     raw_artifacts: object,
     entry: models.ModelEntry,
@@ -1021,6 +1350,9 @@ def _path_is_relative_to(path: Path, root: Path) -> bool:
 
 
 def _runs_dir() -> Path:
+    configured = os.environ.get("UTOPIC_RUNS_DIR")
+    if configured:
+        return Path(configured).expanduser()
     return installer.cache_root() / "runs"
 
 
@@ -1202,6 +1534,13 @@ def _model_payload(entry: models.ModelEntry) -> dict[str, Any]:
         "endpoints": list(entry.endpoints),
         "outputs": list(entry.outputs),
         "requirements": entry.requirements or {},
+        "native_status": entry.native_status,
+        "runner": entry.runner,
+        "supported_backends": list(entry.supported_backends),
+        "artifact_filenames": list(entry.artifact_filenames),
+        "expected_vram_gib": entry.expected_vram_gib,
+        "expected_ram_gib": entry.expected_ram_gib,
+        "oom_policy": entry.oom_policy,
         "repo": entry.repo,
         "url": entry.url,
         "description": entry.description,

@@ -1309,11 +1309,12 @@ def test_cli_generate_video_high_quality_invokes_gateway_and_copies_artifact(
                 "20",
                 "--fps",
                 "16",
-                "--guidance-scale",
-                "5.5",
-                "--output",
-                str(output),
-            ]
+                    "--guidance-scale",
+                    "5.5",
+                    "--experimental-bridge",
+                    "--output",
+                    str(output),
+                ]
         )
         == 0
     )
@@ -1333,6 +1334,7 @@ def test_cli_generate_video_high_quality_invokes_gateway_and_copies_artifact(
                 "num_inference_steps": 20,
                 "fps": 16,
                 "guidance_scale": 5.5,
+                "experimental_bridge": True,
             },
         ),
     ]
@@ -1412,7 +1414,9 @@ def test_cli_generate_supports_all_bridge_modalities(monkeypatch, tmp_path, args
     )
     monkeypatch.setattr(cli.gateway, "handle_openai_request", fake_handle)
 
-    assert cli.main(["generate", *args]) == 0
+    expected = {**expected, "experimental_bridge": True}
+
+    assert cli.main(["generate", *args, "--experimental-bridge"]) == 0
 
     assert calls == [
         ("pull", expected["model"]),
@@ -1467,6 +1471,7 @@ def test_cli_generate_misc_invokes_gateway_and_copies_artifact(monkeypatch, tmp_
                 str(source),
                 "--artifact-type",
                 "application/octet-stream",
+                "--experimental-bridge",
                 "--output",
                 str(output),
             ]
@@ -1485,6 +1490,7 @@ def test_cli_generate_misc_invokes_gateway_and_copies_artifact(monkeypatch, tmp_
                 "model": "zuna",
                 "artifact": str(source),
                 "artifact_type": "application/octet-stream",
+                "experimental_bridge": True,
             },
         ),
     ]
@@ -2558,6 +2564,7 @@ def test_bridge_model_pull_prepares_metadata_cache(monkeypatch, tmp_path):
     assert model_dir == models_dir / "qwen-image"
     metadata = json.loads((model_dir / "utopic-model.json").read_text(encoding="utf-8"))
     assert metadata == {
+        "artifact_filenames": ["qwen-image"],
         "bridge": {
             "command": "utopic-bridge diffusers",
             "environment_variable": "UTOPIC_BRIDGE_DIFFUSERS_COMMAND",
@@ -2567,13 +2574,19 @@ def test_bridge_model_pull_prepares_metadata_cache(monkeypatch, tmp_path):
         },
         "endpoints": ["/v1/images/generations", "/v1/responses"],
         "engine": "diffusers",
+        "expected_ram_gib": None,
+        "expected_vram_gib": None,
         "hardware": ["mac-48gb", "gb10", "cuda"],
         "id": "qwen-image",
         "modality": "image",
         "name": "Qwen-Image",
+        "native_status": "ready",
+        "oom_policy": {},
         "outputs": ["image/png"],
         "repo": "Qwen/Qwen-Image",
+        "runner": "utopic_runner",
         "runtime": "bridge",
+        "supported_backends": ["metal", "cuda", "cpu"],
         "url": "https://huggingface.co/Qwen/Qwen-Image",
     }
     assert models.is_model_downloaded(models.get_model("qwen-image"))
@@ -2912,4 +2925,5 @@ def test_models_check_reports_native_model_file_status(monkeypatch, tmp_path, ca
         "present": True,
         "size": 5,
         "expected_size": 5,
+        "artifacts": {},
     }

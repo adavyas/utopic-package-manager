@@ -12,9 +12,35 @@
     "modality": "text",
     "engine": "native-gguf",
     "runtime": "native",
-    "hardware": ["mac-48gb", "gb10", "cuda"],
-    "endpoints": ["/v1/chat/completions", "/v1/responses"],
-    "outputs": ["text"]
+    "hardware": [
+      "mac-48gb",
+      "gb10",
+      "cuda"
+    ],
+    "endpoints": [
+      "/v1/chat/completions",
+      "/v1/responses"
+    ],
+    "outputs": [
+      "text"
+    ],
+    "runner": "utopic_runner",
+    "native_status": "ready",
+    "supported_backends": [
+      "metal",
+      "cuda",
+      "cpu"
+    ],
+    "artifact_filenames": [
+      "diffusiongemma-26B-A4B-it-Q4_K_M.gguf"
+    ],
+    "expected_vram_gib": 20,
+    "expected_ram_gib": 24,
+    "oom_policy": {
+      "error_code": "oom",
+      "minimum_gpu_memory_gib": 20,
+      "behavior": "fail before generation when detected GPU memory is below the catalog requirement"
+    }
   },
   {
     "id": "diffusiongemma-26b-a4b-q5",
@@ -29,9 +55,35 @@
     "modality": "text",
     "engine": "native-gguf",
     "runtime": "native",
-    "hardware": ["mac-48gb", "gb10", "cuda"],
-    "endpoints": ["/v1/chat/completions", "/v1/responses"],
-    "outputs": ["text"]
+    "hardware": [
+      "mac-48gb",
+      "gb10",
+      "cuda"
+    ],
+    "endpoints": [
+      "/v1/chat/completions",
+      "/v1/responses"
+    ],
+    "outputs": [
+      "text"
+    ],
+    "runner": "utopic_runner",
+    "native_status": "ready",
+    "supported_backends": [
+      "metal",
+      "cuda",
+      "cpu"
+    ],
+    "artifact_filenames": [
+      "diffusiongemma-26B-A4B-it-Q5_K_M.gguf"
+    ],
+    "expected_vram_gib": 24,
+    "expected_ram_gib": 28,
+    "oom_policy": {
+      "error_code": "oom",
+      "minimum_gpu_memory_gib": 24,
+      "behavior": "fail before generation when detected GPU memory is below the catalog requirement"
+    }
   },
   {
     "id": "diffusiongemma-26b-a4b-q6",
@@ -46,9 +98,35 @@
     "modality": "text",
     "engine": "native-gguf",
     "runtime": "native",
-    "hardware": ["mac-48gb", "gb10", "cuda"],
-    "endpoints": ["/v1/chat/completions", "/v1/responses"],
-    "outputs": ["text"]
+    "hardware": [
+      "mac-48gb",
+      "gb10",
+      "cuda"
+    ],
+    "endpoints": [
+      "/v1/chat/completions",
+      "/v1/responses"
+    ],
+    "outputs": [
+      "text"
+    ],
+    "runner": "utopic_runner",
+    "native_status": "ready",
+    "supported_backends": [
+      "metal",
+      "cuda",
+      "cpu"
+    ],
+    "artifact_filenames": [
+      "diffusiongemma-26B-A4B-it-Q6_K.gguf"
+    ],
+    "expected_vram_gib": 28,
+    "expected_ram_gib": 32,
+    "oom_policy": {
+      "error_code": "oom",
+      "minimum_gpu_memory_gib": 28,
+      "behavior": "fail before generation when detected GPU memory is below the catalog requirement"
+    }
   },
   {
     "id": "diffusiongemma-26b-a4b-q8",
@@ -63,9 +141,35 @@
     "modality": "text",
     "engine": "native-gguf",
     "runtime": "native",
-    "hardware": ["mac-48gb", "gb10", "cuda"],
-    "endpoints": ["/v1/chat/completions", "/v1/responses"],
-    "outputs": ["text"]
+    "hardware": [
+      "mac-48gb",
+      "gb10",
+      "cuda"
+    ],
+    "endpoints": [
+      "/v1/chat/completions",
+      "/v1/responses"
+    ],
+    "outputs": [
+      "text"
+    ],
+    "runner": "utopic_runner",
+    "native_status": "ready",
+    "supported_backends": [
+      "metal",
+      "cuda",
+      "cpu"
+    ],
+    "artifact_filenames": [
+      "diffusiongemma-26B-A4B-it-Q8_0.gguf"
+    ],
+    "expected_vram_gib": 36,
+    "expected_ram_gib": 42,
+    "oom_policy": {
+      "error_code": "oom",
+      "minimum_gpu_memory_gib": 36,
+      "behavior": "fail before generation when detected GPU memory is below the catalog requirement"
+    }
   },
   {
     "id": "qwen-image",
@@ -80,9 +184,32 @@
     "modality": "image",
     "engine": "diffusers",
     "runtime": "bridge",
-    "hardware": ["gb10", "cuda"],
-    "endpoints": ["/v1/images/generations", "/v1/responses"],
-    "outputs": ["image/png"]
+    "hardware": [
+      "gb10",
+      "cuda"
+    ],
+    "endpoints": [
+      "/v1/images/generations",
+      "/v1/responses"
+    ],
+    "outputs": [
+      "image/png"
+    ],
+    "runner": "utopic-bridge:diffusers",
+    "native_status": "experimental",
+    "supported_backends": [
+      "cuda"
+    ],
+    "artifact_filenames": [
+      "image.png"
+    ],
+    "expected_vram_gib": 32,
+    "expected_ram_gib": 48,
+    "oom_policy": {
+      "error_code": "oom",
+      "minimum_gpu_memory_gib": 32,
+      "behavior": "fail before generation when detected GPU memory is below the catalog requirement"
+    }
   },
   {
     "id": "flux-1-schnell",
@@ -97,9 +224,86 @@
     "modality": "image",
     "engine": "diffusers",
     "runtime": "bridge",
-    "hardware": ["mac-48gb", "gb10", "cuda"],
-    "endpoints": ["/v1/images/generations", "/v1/responses"],
-    "outputs": ["image/png"]
+    "hardware": [
+      "mac-48gb",
+      "gb10",
+      "cuda"
+    ],
+    "endpoints": [
+      "/v1/images/generations",
+      "/v1/responses"
+    ],
+    "outputs": [
+      "image/png"
+    ],
+    "runner": "utopic-bridge:diffusers",
+    "native_status": "experimental",
+    "supported_backends": [
+      "metal",
+      "cuda"
+    ],
+    "artifact_filenames": [
+      "image.png"
+    ],
+    "expected_vram_gib": 24,
+    "expected_ram_gib": 32,
+    "oom_policy": {
+      "error_code": "oom",
+      "minimum_gpu_memory_gib": 24,
+      "behavior": "fail before generation when detected GPU memory is below the catalog requirement"
+    }
+  },
+  {
+    "id": "flux-1-schnell-q4-native",
+    "name": "FLUX.1-schnell Q4 Native",
+    "family": "flux",
+    "filename": "flux1-schnell-Q4_0.gguf",
+    "url": "https://huggingface.co/city96/FLUX.1-schnell-gguf",
+    "repo": "city96/FLUX.1-schnell-gguf",
+    "size": "native stable-diffusion.cpp component bundle",
+    "recommended": false,
+    "description": "Experimental native stable-diffusion.cpp image path for FLUX.1-schnell Q4. Uses component artifacts instead of the Python Diffusers bridge.",
+    "modality": "image",
+    "engine": "stable-diffusion-cpp",
+    "runtime": "native",
+    "hardware": [
+      "mac-48gb",
+      "gb10",
+      "cuda"
+    ],
+    "endpoints": [
+      "/v1/images/generations",
+      "/v1/responses"
+    ],
+    "outputs": [
+      "image/png"
+    ],
+    "runner": "utopic_runner",
+    "native_status": "experimental",
+    "supported_backends": [
+      "metal",
+      "cuda",
+      "cpu"
+    ],
+    "artifact_filenames": [
+      "flux1-schnell-Q4_0.gguf",
+      "ae.safetensors",
+      "clip_l.safetensors",
+      "t5xxl_fp16.safetensors"
+    ],
+    "artifact_urls": {
+      "flux1-schnell-Q4_0.gguf": "https://huggingface.co/city96/FLUX.1-schnell-gguf/resolve/main/flux1-schnell-Q4_0.gguf",
+      "ae.safetensors": "https://huggingface.co/black-forest-labs/FLUX.1-schnell/resolve/main/ae.safetensors",
+      "clip_l.safetensors": "https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/clip_l.safetensors",
+      "t5xxl_fp16.safetensors": "https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/t5xxl_fp16.safetensors"
+    },
+    "expected_vram_gib": 24,
+    "expected_ram_gib": 32,
+    "oom_policy": {
+      "error_code": "oom",
+      "minimum_gpu_memory_gib": 24,
+      "behavior": "fail before generation when detected GPU memory is below the catalog requirement"
+    }
   },
   {
     "id": "krea-2-raw",
@@ -114,9 +318,32 @@
     "modality": "image",
     "engine": "diffusers",
     "runtime": "bridge",
-    "hardware": ["gb10", "cuda"],
-    "endpoints": ["/v1/images/generations", "/v1/responses"],
-    "outputs": ["image/png"]
+    "hardware": [
+      "gb10",
+      "cuda"
+    ],
+    "endpoints": [
+      "/v1/images/generations",
+      "/v1/responses"
+    ],
+    "outputs": [
+      "image/png"
+    ],
+    "runner": "utopic-bridge:diffusers",
+    "native_status": "experimental",
+    "supported_backends": [
+      "cuda"
+    ],
+    "artifact_filenames": [
+      "image.png"
+    ],
+    "expected_vram_gib": 48,
+    "expected_ram_gib": 64,
+    "oom_policy": {
+      "error_code": "oom",
+      "minimum_gpu_memory_gib": 48,
+      "behavior": "fail before generation when detected GPU memory is below the catalog requirement"
+    }
   },
   {
     "id": "cosmos3-super",
@@ -131,14 +358,37 @@
     "modality": "image",
     "engine": "cosmos",
     "runtime": "bridge",
-    "hardware": ["gb10", "high-memory-cuda"],
+    "hardware": [
+      "gb10",
+      "high-memory-cuda"
+    ],
     "requirements": {
       "min_gpu_memory_gib": 96,
       "preferred_gpu_memory_gib": 128,
       "allow_cpu": false
     },
-    "endpoints": ["/v1/images/generations", "/v1/responses"],
-    "outputs": ["image/png"]
+    "endpoints": [
+      "/v1/images/generations",
+      "/v1/responses"
+    ],
+    "outputs": [
+      "image/png"
+    ],
+    "runner": "utopic-bridge:cosmos",
+    "native_status": "experimental",
+    "supported_backends": [
+      "cuda"
+    ],
+    "artifact_filenames": [
+      "image.png"
+    ],
+    "expected_vram_gib": 96,
+    "expected_ram_gib": 128,
+    "oom_policy": {
+      "error_code": "oom",
+      "minimum_gpu_memory_gib": 96,
+      "behavior": "fail before generation when detected GPU memory is below the catalog requirement"
+    }
   },
   {
     "id": "kokoro-82m",
@@ -153,9 +403,34 @@
     "modality": "tts",
     "engine": "kokoro",
     "runtime": "bridge",
-    "hardware": ["mac-48gb", "gb10", "cuda"],
-    "endpoints": ["/v1/audio/speech", "/v1/responses"],
-    "outputs": ["audio/wav"]
+    "hardware": [
+      "mac-48gb",
+      "gb10",
+      "cuda"
+    ],
+    "endpoints": [
+      "/v1/audio/speech",
+      "/v1/responses"
+    ],
+    "outputs": [
+      "audio/wav"
+    ],
+    "runner": "utopic-bridge:kokoro",
+    "native_status": "experimental",
+    "supported_backends": [
+      "metal",
+      "cuda"
+    ],
+    "artifact_filenames": [
+      "speech.wav"
+    ],
+    "expected_vram_gib": 2,
+    "expected_ram_gib": 4,
+    "oom_policy": {
+      "error_code": "oom",
+      "minimum_gpu_memory_gib": 2,
+      "behavior": "fail before generation when detected GPU memory is below the catalog requirement"
+    }
   },
   {
     "id": "chatterbox",
@@ -170,9 +445,34 @@
     "modality": "tts",
     "engine": "chatterbox",
     "runtime": "bridge",
-    "hardware": ["mac-48gb", "gb10", "cuda"],
-    "endpoints": ["/v1/audio/speech", "/v1/responses"],
-    "outputs": ["audio/wav"]
+    "hardware": [
+      "mac-48gb",
+      "gb10",
+      "cuda"
+    ],
+    "endpoints": [
+      "/v1/audio/speech",
+      "/v1/responses"
+    ],
+    "outputs": [
+      "audio/wav"
+    ],
+    "runner": "utopic-bridge:chatterbox",
+    "native_status": "experimental",
+    "supported_backends": [
+      "metal",
+      "cuda"
+    ],
+    "artifact_filenames": [
+      "speech.wav"
+    ],
+    "expected_vram_gib": 8,
+    "expected_ram_gib": 16,
+    "oom_policy": {
+      "error_code": "oom",
+      "minimum_gpu_memory_gib": 8,
+      "behavior": "fail before generation when detected GPU memory is below the catalog requirement"
+    }
   },
   {
     "id": "dia-1.6b",
@@ -187,9 +487,34 @@
     "modality": "tts",
     "engine": "dia",
     "runtime": "bridge",
-    "hardware": ["mac-48gb", "gb10", "cuda"],
-    "endpoints": ["/v1/audio/speech", "/v1/responses"],
-    "outputs": ["audio/wav"]
+    "hardware": [
+      "mac-48gb",
+      "gb10",
+      "cuda"
+    ],
+    "endpoints": [
+      "/v1/audio/speech",
+      "/v1/responses"
+    ],
+    "outputs": [
+      "audio/wav"
+    ],
+    "runner": "utopic-bridge:dia",
+    "native_status": "experimental",
+    "supported_backends": [
+      "metal",
+      "cuda"
+    ],
+    "artifact_filenames": [
+      "speech.wav"
+    ],
+    "expected_vram_gib": 12,
+    "expected_ram_gib": 24,
+    "oom_policy": {
+      "error_code": "oom",
+      "minimum_gpu_memory_gib": 12,
+      "behavior": "fail before generation when detected GPU memory is below the catalog requirement"
+    }
   },
   {
     "id": "ace-step-3.5b",
@@ -204,9 +529,34 @@
     "modality": "music",
     "engine": "ace-step",
     "runtime": "bridge",
-    "hardware": ["mac-48gb", "gb10", "cuda"],
-    "endpoints": ["/v1/audio/generations", "/v1/responses"],
-    "outputs": ["audio/wav"]
+    "hardware": [
+      "mac-48gb",
+      "gb10",
+      "cuda"
+    ],
+    "endpoints": [
+      "/v1/audio/generations",
+      "/v1/responses"
+    ],
+    "outputs": [
+      "audio/wav"
+    ],
+    "runner": "utopic-bridge:ace-step",
+    "native_status": "experimental",
+    "supported_backends": [
+      "metal",
+      "cuda"
+    ],
+    "artifact_filenames": [
+      "music.wav"
+    ],
+    "expected_vram_gib": 16,
+    "expected_ram_gib": 32,
+    "oom_policy": {
+      "error_code": "oom",
+      "minimum_gpu_memory_gib": 16,
+      "behavior": "fail before generation when detected GPU memory is below the catalog requirement"
+    }
   },
   {
     "id": "wan2.1-t2v-1.3b",
@@ -221,9 +571,34 @@
     "modality": "video",
     "engine": "wan",
     "runtime": "bridge",
-    "hardware": ["mac-48gb", "gb10", "cuda"],
-    "endpoints": ["/v1/videos/generations", "/v1/responses"],
-    "outputs": ["video/mp4"]
+    "hardware": [
+      "mac-48gb",
+      "gb10",
+      "cuda"
+    ],
+    "endpoints": [
+      "/v1/videos/generations",
+      "/v1/responses"
+    ],
+    "outputs": [
+      "video/mp4"
+    ],
+    "runner": "utopic-bridge:wan",
+    "native_status": "experimental",
+    "supported_backends": [
+      "metal",
+      "cuda"
+    ],
+    "artifact_filenames": [
+      "video.mp4"
+    ],
+    "expected_vram_gib": 16,
+    "expected_ram_gib": 32,
+    "oom_policy": {
+      "error_code": "oom",
+      "minimum_gpu_memory_gib": 16,
+      "behavior": "fail before generation when detected GPU memory is below the catalog requirement"
+    }
   },
   {
     "id": "wan2.1-t2v-14b",
@@ -238,9 +613,32 @@
     "modality": "video",
     "engine": "wan",
     "runtime": "bridge",
-    "hardware": ["gb10", "cuda"],
-    "endpoints": ["/v1/videos/generations", "/v1/responses"],
-    "outputs": ["video/mp4"]
+    "hardware": [
+      "gb10",
+      "cuda"
+    ],
+    "endpoints": [
+      "/v1/videos/generations",
+      "/v1/responses"
+    ],
+    "outputs": [
+      "video/mp4"
+    ],
+    "runner": "utopic-bridge:wan",
+    "native_status": "experimental",
+    "supported_backends": [
+      "cuda"
+    ],
+    "artifact_filenames": [
+      "video.mp4"
+    ],
+    "expected_vram_gib": 48,
+    "expected_ram_gib": 64,
+    "oom_policy": {
+      "error_code": "oom",
+      "minimum_gpu_memory_gib": 48,
+      "behavior": "fail before generation when detected GPU memory is below the catalog requirement"
+    }
   },
   {
     "id": "ltx-video",
@@ -255,9 +653,34 @@
     "modality": "video",
     "engine": "ltx",
     "runtime": "bridge",
-    "hardware": ["mac-48gb", "gb10", "cuda"],
-    "endpoints": ["/v1/videos/generations", "/v1/responses"],
-    "outputs": ["video/mp4"]
+    "hardware": [
+      "mac-48gb",
+      "gb10",
+      "cuda"
+    ],
+    "endpoints": [
+      "/v1/videos/generations",
+      "/v1/responses"
+    ],
+    "outputs": [
+      "video/mp4"
+    ],
+    "runner": "utopic-bridge:ltx",
+    "native_status": "experimental",
+    "supported_backends": [
+      "metal",
+      "cuda"
+    ],
+    "artifact_filenames": [
+      "video.mp4"
+    ],
+    "expected_vram_gib": 16,
+    "expected_ram_gib": 32,
+    "oom_policy": {
+      "error_code": "oom",
+      "minimum_gpu_memory_gib": 16,
+      "behavior": "fail before generation when detected GPU memory is below the catalog requirement"
+    }
   },
   {
     "id": "zuna",
@@ -272,8 +695,33 @@
     "modality": "misc",
     "engine": "artifact",
     "runtime": "bridge",
-    "hardware": ["mac-48gb", "gb10", "cuda"],
-    "endpoints": ["/v1/utopic/misc/generations", "/v1/responses"],
-    "outputs": ["application/octet-stream"]
+    "hardware": [
+      "mac-48gb",
+      "gb10",
+      "cuda"
+    ],
+    "endpoints": [
+      "/v1/utopic/misc/generations",
+      "/v1/responses"
+    ],
+    "outputs": [
+      "application/octet-stream"
+    ],
+    "runner": "utopic-bridge:artifact",
+    "native_status": "experimental",
+    "supported_backends": [
+      "metal",
+      "cuda"
+    ],
+    "artifact_filenames": [
+      "artifact"
+    ],
+    "expected_vram_gib": 16,
+    "expected_ram_gib": 32,
+    "oom_policy": {
+      "error_code": "oom",
+      "minimum_gpu_memory_gib": 16,
+      "behavior": "fail before generation when detected GPU memory is below the catalog requirement"
+    }
   }
 ]

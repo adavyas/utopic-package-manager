@@ -7,7 +7,7 @@ import shutil
 import sys
 import urllib.parse
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, Sequence
 
@@ -39,20 +39,36 @@ class ModelEntry:
     outputs: tuple[str, ...] = ("text",)
     repo: Optional[str] = None
     requirements: Optional[dict[str, object]] = None
+    runner: str = "utopic_runner"
+    native_status: str = "ready"
+    supported_backends: tuple[str, ...] = ("metal", "cuda", "cpu")
+    artifact_filenames: tuple[str, ...] = ("output",)
+    expected_vram_gib: Optional[float] = None
+    expected_ram_gib: Optional[float] = None
+    oom_policy: dict[str, object] = field(default_factory=dict)
+    native_library: Optional[str] = None
+    native_entrypoint: Optional[str] = None
+    artifact_urls: dict[str, str] = field(default_factory=dict)
 
     @property
     def path(self) -> Path:
-        if self.runtime == "bridge":
+        if self.runtime == "bridge" or _native_uses_artifact_directory(self):
             return models_dir() / _safe_cache_name(self.id)
         return models_dir() / _safe_model_filename(self)
 
 
 VALID_MODALITIES = {"text", "image", "tts", "music", "video", "misc"}
 VALID_RUNTIMES = {"native", "bridge"}
+VALID_NATIVE_STATUSES = {"ready", "planned", "experimental", "unsupported_on_device"}
 
 
 def _safe_model_filename(entry: ModelEntry) -> str:
     filename = entry.filename
+    _validate_safe_filename(filename, f"unsafe model filename for '{entry.id}'")
+    return filename
+
+
+def _validate_safe_filename(filename: str, message: str) -> None:
     if (
         not filename
         or filename in {".", ".."}
@@ -60,8 +76,16 @@ def _safe_model_filename(entry: ModelEntry) -> str:
         or "\\" in filename
         or ":" in filename
     ):
-        raise RuntimeError(f"unsafe model filename for '{entry.id}': {filename}")
+        raise RuntimeError(f"{message}: {filename}")
+
+
+def _safe_artifact_filename(entry: ModelEntry, filename: str) -> str:
+    _validate_safe_filename(filename, f"unsafe artifact filename for '{entry.id}'")
     return filename
+
+
+def _native_uses_artifact_directory(entry: ModelEntry) -> bool:
+    return entry.runtime == "native" and (entry.native_library is not None or bool(entry.artifact_urls))
 
 
 def _safe_cache_name(value: str) -> str:
@@ -133,6 +157,16 @@ def _validate_catalog_entry(item: object, index: int) -> ModelEntry:
     hardware = _string_list_field(item, "hardware", ["local"], index)
     endpoints = _string_list_field(item, "endpoints", ["/v1/chat/completions"], index)
     outputs = _string_list_field(item, "outputs", ["text"], index)
+    runner = _string_field(item, "runner", "utopic_runner", index)
+    native_status = _string_field(item, "native_status", "ready", index)
+    supported_backends = _string_list_field(item, "supported_backends", ["metal", "cuda", "cpu"], index)
+    artifact_filenames = _string_list_field(item, "artifact_filenames", [item["filename"]], index)
+    expected_vram_gib = _optional_positive_number_field(item, "expected_vram_gib", index)
+    expected_ram_gib = _optional_positive_number_field(item, "expected_ram_gib", index)
+    oom_policy = item.get("oom_policy", {})
+    native_library = item.get("native_library")
+    native_entrypoint = item.get("native_entrypoint")
+    artifact_urls = item.get("artifact_urls", {})
     repo = item.get("repo")
     if repo is not None and not isinstance(repo, str):
         raise RuntimeError(f"Invalid model catalog entry {index}: repo must be a string")
@@ -145,8 +179,29 @@ def _validate_catalog_entry(item: object, index: int) -> ModelEntry:
         raise RuntimeError(f"Invalid model catalog entry {index}: modality must be one of {sorted(VALID_MODALITIES)}")
     if runtime not in VALID_RUNTIMES:
         raise RuntimeError(f"Invalid model catalog entry {index}: runtime must be one of {sorted(VALID_RUNTIMES)}")
-    if runtime == "native" and not item["filename"].lower().endswith(".gguf"):
-        raise RuntimeError(f"Invalid model catalog entry {index}: native models must use a GGUF filename")
+    if native_status not in VALID_NATIVE_STATUSES:
+        raise RuntimeError(
+            f"Invalid model catalog entry {index}: native_status must be one of {sorted(VALID_NATIVE_STATUSES)}"
+        )
+    if not isinstance(oom_policy, dict):
+        raise RuntimeError(f"Invalid model catalog entry {index}: oom_policy must be an object")
+    if native_library is not None and not isinstance(native_library, str):
+        raise RuntimeError(f"Invalid model catalog entry {index}: native_library must be a string")
+    if native_entrypoint is not None and not isinstance(native_entrypoint, str):
+        raise RuntimeError(f"Invalid model catalog entry {index}: native_entrypoint must be a string")
+    if native_library is not None and not native_library:
+        raise RuntimeError(f"Invalid model catalog entry {index}: native_library must be non-empty")
+    if native_entrypoint is not None and not native_entrypoint:
+        raise RuntimeError(f"Invalid model catalog entry {index}: native_entrypoint must be non-empty")
+    if native_entrypoint is not None and native_library is None:
+        raise RuntimeError(f"Invalid model catalog entry {index}: native_entrypoint requires native_library")
+    if not isinstance(artifact_urls, dict):
+        raise RuntimeError(f"Invalid model catalog entry {index}: artifact_urls must be an object")
+    _validate_artifact_urls(artifact_urls, artifact_filenames, index)
+    if runtime == "native" and native_library is None and not item["filename"].lower().endswith(".gguf"):
+        raise RuntimeError(
+            f"Invalid model catalog entry {index}: native GGUF models must use a GGUF filename"
+        )
     if runtime == "bridge" and engine not in bridge.ADAPTERS:
         raise RuntimeError(f"Invalid model catalog entry {index}: unknown bridge engine: {engine}")
 
@@ -168,7 +223,38 @@ def _validate_catalog_entry(item: object, index: int) -> ModelEntry:
         outputs=tuple(outputs),
         repo=repo,
         requirements=dict(requirements) if isinstance(requirements, dict) else None,
+        runner=runner,
+        native_status=native_status,
+        supported_backends=tuple(supported_backends),
+        artifact_filenames=tuple(artifact_filenames),
+        expected_vram_gib=expected_vram_gib,
+        expected_ram_gib=expected_ram_gib,
+        oom_policy=dict(oom_policy),
+        native_library=native_library,
+        native_entrypoint=native_entrypoint,
+        artifact_urls=dict(artifact_urls),
     )
+
+
+def _validate_artifact_urls(artifact_urls: dict[object, object], artifact_filenames: list[str], index: int) -> None:
+    if not artifact_urls:
+        return
+    filenames = set(artifact_filenames)
+    if set(artifact_urls) != filenames:
+        raise RuntimeError(
+            f"Invalid model catalog entry {index}: artifact_urls must include exactly artifact_filenames"
+        )
+    for filename, url in artifact_urls.items():
+        if not isinstance(filename, str) or not filename:
+            raise RuntimeError(f"Invalid model catalog entry {index}: artifact_urls keys must be non-empty strings")
+        if not isinstance(url, str) or not url:
+            raise RuntimeError(f"Invalid model catalog entry {index}: artifact_urls values must be non-empty strings")
+        try:
+            parsed = urllib.parse.urlsplit(url)
+        except ValueError as exc:
+            raise RuntimeError(f"Invalid model catalog entry {index}: artifact_urls.{filename} must be a URL") from exc
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise RuntimeError(f"Invalid model catalog entry {index}: artifact_urls.{filename} must be an HTTP URL")
 
 
 def _validate_requirements(requirements: dict[str, object], index: int) -> None:
@@ -188,6 +274,15 @@ def _string_field(item: dict[str, object], field: str, default: str, index: int)
     if not isinstance(value, str) or not value:
         raise RuntimeError(f"Invalid model catalog entry {index}: {field} must be a non-empty string")
     return value
+
+
+def _optional_positive_number_field(item: dict[str, object], field: str, index: int) -> Optional[float]:
+    if field not in item:
+        return None
+    value = item[field]
+    if not isinstance(value, (int, float)) or isinstance(value, bool) or value <= 0:
+        raise RuntimeError(f"Invalid model catalog entry {index}: {field} must be a positive number")
+    return float(value)
 
 
 def _string_list_field(
@@ -258,11 +353,17 @@ def _is_nonempty_file(path: Path) -> bool:
 def is_model_downloaded(entry: ModelEntry) -> bool:
     if entry.runtime == "bridge":
         return (entry.path / "utopic-model.json").is_file()
+    if _native_uses_artifact_directory(entry):
+        return all(_is_nonempty_file(_native_artifact_cache_path(entry, filename)) for filename in entry.artifact_filenames)
     if not _is_nonempty_file(entry.path):
         return False
     if entry.bytes is None:
         return True
     return entry.path.stat().st_size == entry.bytes
+
+
+def _native_artifact_cache_path(entry: ModelEntry, filename: str) -> Path:
+    return entry.path / _safe_artifact_filename(entry, filename)
 
 
 def _is_empty_file(path: Path) -> bool:
@@ -306,10 +407,40 @@ def _bridge_model_metadata(entry: ModelEntry) -> dict[str, object]:
         "outputs": list(entry.outputs),
         "repo": entry.repo,
         "runtime": entry.runtime,
+        "runner": entry.runner,
+        "native_status": entry.native_status,
+        "supported_backends": list(entry.supported_backends),
+        "artifact_filenames": list(entry.artifact_filenames),
+        "expected_vram_gib": entry.expected_vram_gib,
+        "expected_ram_gib": entry.expected_ram_gib,
+        "oom_policy": entry.oom_policy,
         "url": entry.url,
     }
+    if entry.native_library:
+        payload["native_library"] = entry.native_library
+    if entry.native_entrypoint:
+        payload["native_entrypoint"] = entry.native_entrypoint
     if entry.requirements:
         payload["requirements"] = entry.requirements
+    return payload
+
+
+def readiness_metadata(entry: ModelEntry) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "native_status": entry.native_status,
+        "runner": entry.runner,
+        "supported_backends": list(entry.supported_backends),
+        "artifact_filenames": list(entry.artifact_filenames),
+        "expected_vram_gib": entry.expected_vram_gib,
+        "expected_ram_gib": entry.expected_ram_gib,
+        "oom_policy": entry.oom_policy,
+    }
+    if entry.native_library:
+        payload["native_library"] = entry.native_library
+    if entry.native_entrypoint:
+        payload["native_entrypoint"] = entry.native_entrypoint
+    if entry.artifact_urls:
+        payload["artifact_urls"] = entry.artifact_urls
     return payload
 
 
@@ -329,6 +460,9 @@ def pull_model(model_id: str, *, force: bool = False) -> Path:
             encoding="utf-8",
         )
         return destination
+
+    if _native_uses_artifact_directory(entry):
+        return _pull_native_artifact_model(entry, force=force)
 
     if destination.exists() and is_model_downloaded(entry) and not force:
         return destination
@@ -362,6 +496,36 @@ def pull_model(model_id: str, *, force: bool = False) -> Path:
         ):
             _remove_path(destination)
         raise RuntimeError(f"Failed to pull {entry.id} from {entry.url}: {exc}") from exc
+    return destination
+
+
+def _pull_native_artifact_model(entry: ModelEntry, *, force: bool = False) -> Path:
+    destination = entry.path
+    if destination.exists() and is_model_downloaded(entry) and not force:
+        return destination
+    if destination.exists() and not destination.is_dir():
+        _remove_path(destination)
+    destination.mkdir(parents=True, exist_ok=True)
+    for filename in entry.artifact_filenames:
+        if filename not in entry.artifact_urls:
+            raise RuntimeError(f"Native model '{entry.id}' is missing artifact URL for {filename}")
+        target = _native_artifact_cache_path(entry, filename)
+        if target.exists() and _is_nonempty_file(target) and not force:
+            continue
+        tmp = target.with_name(target.name + ".partial")
+        if tmp.exists():
+            _remove_path(tmp)
+        try:
+            print(f"Pulling {entry.name} artifact {filename} from Hugging Face")
+            print(entry.artifact_urls[filename])
+            _copy_stream_with_progress(entry.artifact_urls[filename], tmp)
+            if tmp.stat().st_size == 0:
+                raise OSError("downloaded 0 bytes")
+            tmp.replace(target)
+        except Exception as exc:
+            if tmp.exists():
+                _remove_path(tmp)
+            raise RuntimeError(f"Failed to pull {entry.id} artifact {filename}: {exc}") from exc
     return destination
 
 
@@ -404,8 +568,13 @@ def _print_path(model_id: str) -> None:
 
 def _native_model_check(entry: ModelEntry) -> dict[str, object]:
     path = entry.path
-    present = _is_nonempty_file(path)
-    size = path.stat().st_size if present else 0
+    artifact_cache = _native_artifact_cache(entry)
+    present = _is_nonempty_file(path) if not artifact_cache else all(
+        bool(value["present"]) for value in artifact_cache.values()
+    )
+    size = path.stat().st_size if path.is_file() else sum(
+        int(value["size"]) for value in artifact_cache.values()
+    )
     expected_size = entry.bytes
     ready = present and (expected_size is None or size == expected_size)
     return {
@@ -414,6 +583,7 @@ def _native_model_check(entry: ModelEntry) -> dict[str, object]:
         "runtime": entry.runtime,
         "modality": entry.modality,
         "engine": entry.engine,
+        **readiness_metadata(entry),
         "status": "ready" if ready else "missing_model_file",
         "ready": ready,
         "requirements": entry.requirements or {},
@@ -422,9 +592,26 @@ def _native_model_check(entry: ModelEntry) -> dict[str, object]:
             "present": present,
             "size": size,
             "expected_size": expected_size,
+            "artifacts": artifact_cache,
         },
         "next_steps": [] if ready else [f"utopic models pull {entry.id}"],
     }
+
+
+def _native_artifact_cache(entry: ModelEntry) -> dict[str, dict[str, object]]:
+    if not _native_uses_artifact_directory(entry):
+        return {}
+    cache: dict[str, dict[str, object]] = {}
+    for filename in entry.artifact_filenames:
+        path = _native_artifact_cache_path(entry, filename)
+        present = _is_nonempty_file(path)
+        cache[filename] = {
+            "path": str(path),
+            "present": present,
+            "size": path.stat().st_size if present else 0,
+            "url": entry.artifact_urls.get(filename),
+        }
+    return cache
 
 
 def _bridge_model_check(entry: ModelEntry) -> dict[str, object]:
@@ -457,6 +644,7 @@ def _bridge_model_check(entry: ModelEntry) -> dict[str, object]:
         "runtime": entry.runtime,
         "modality": entry.modality,
         "engine": entry.engine,
+        **readiness_metadata(entry),
         "status": "ready" if ready else "not_ready",
         "ready": ready,
         "requirements": entry.requirements or {},

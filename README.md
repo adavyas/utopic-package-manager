@@ -162,6 +162,7 @@ endpoints, and output artifact type.
 | `diffusiongemma-26b-a4b-q8` | DiffusionGemma 26B-A4B IT Q8_0 | text | native | Near-lossless 8-bit DiffusionGemma weights for GB10 and high-memory CUDA hosts. |
 | `qwen-image` | Qwen-Image | image | bridge | Open-weight image generation model with strong prompt following and text rendering. |
 | `flux-1-schnell` | FLUX.1-schnell | image | bridge | Fast Apache-licensed image generation model for local 1-4 step generation. |
+| `flux-1-schnell-q4-native` | FLUX.1-schnell Q4 Native | image | native | Experimental native image entry backed by stable-diffusion.cpp artifacts; normal setup currently builds the runner with image generation disabled until that dependency is enabled explicitly. |
 | `krea-2-raw` | Krea 2 Raw | image | bridge | High-quality Krea text-to-image model through Diffusers Krea2Pipeline; GB10 or high-memory CUDA recommended until Mac generation is validated. |
 | `cosmos3-super` | Cosmos3 Super Text2Image | image | bridge | Agentic high-memory NVIDIA Cosmos3 image model; preflights GPU memory before loading. |
 | `kokoro-82m` | Kokoro 82M | tts | bridge | Tiny, fast open-weight TTS model for local speech synthesis. |
@@ -204,7 +205,7 @@ target backend.
 
 ## Commands
 
-The package installs these launchers:
+The package installs these Python launchers:
 
 - `utopic`
 - `utopic-runtime`
@@ -212,6 +213,9 @@ The package installs these launchers:
 - `utopic-server`
 - `utopic-mcp`
 - `utopic-acp`
+
+After `utopic setup`, the native cache also contains `utopic_runner`, the JSON
+contract runner used by the Python control plane.
 
 Show help:
 

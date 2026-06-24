@@ -17,6 +17,10 @@ def test_dry_run_quotes_arguments_that_need_shell_escaping(capsys):
     assert capsys.readouterr().out == "+ cmake '-DCMAKE_BUILD_RPATH=/a;/b'\n"
 
 
+def test_setup_installs_native_json_runner_binary():
+    assert "utopic_runner" in installer.BIN_NAMES
+
+
 def test_auto_backend_prefers_metal_when_available(monkeypatch):
     monkeypatch.setattr(installer, "_detect_metal_device", lambda: "Apple M4 Pro")
     monkeypatch.setattr(installer, "_detect_cuda_architectures", lambda: "80")

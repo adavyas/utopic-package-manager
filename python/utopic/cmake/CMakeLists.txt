@@ -33,6 +33,7 @@ else()
 endif()
 
 find_package(Threads REQUIRED)
+option(UTOPIC_ENABLE_STABLE_DIFFUSION "Build the native image engine against stable-diffusion.cpp" OFF)
 
 set(UTOPIC_INCLUDES
   "${UTOPIC_NATIVE_SOURCE_DIR}"
@@ -51,6 +52,19 @@ if(LLAMA_PUBLIC_HEADER MATCHES "int32_t[ \t\r\n]+off")
 endif()
 if(EXISTS "${LLAMA_BIN}/libggml-cuda.so" OR EXISTS "${LLAMA_BIN}/libggml-cuda.dylib")
   list(APPEND UTOPIC_LLAMA_DEFINES GGML_USE_CUDA)
+endif()
+
+set(UTOPIC_IMAGE_ENGINE_SOURCE "${CMAKE_CURRENT_LIST_DIR}/image_engine_disabled.cpp")
+if(UTOPIC_ENABLE_STABLE_DIFFUSION)
+  if(NOT DEFINED UTOPIC_STABLE_DIFFUSION_DIR)
+    message(FATAL_ERROR "UTOPIC_STABLE_DIFFUSION_DIR is required when UTOPIC_ENABLE_STABLE_DIFFUSION=ON")
+  endif()
+  get_filename_component(UTOPIC_STABLE_DIFFUSION_DIR "${UTOPIC_STABLE_DIFFUSION_DIR}" ABSOLUTE)
+  if(NOT EXISTS "${UTOPIC_STABLE_DIFFUSION_DIR}/stable-diffusion.h")
+    message(FATAL_ERROR "UTOPIC_STABLE_DIFFUSION_DIR must contain stable-diffusion.h: ${UTOPIC_STABLE_DIFFUSION_DIR}")
+  endif()
+  list(APPEND UTOPIC_INCLUDES "${UTOPIC_STABLE_DIFFUSION_DIR}")
+  set(UTOPIC_IMAGE_ENGINE_SOURCE "${UTOPIC_NATIVE_SOURCE_DIR}/image_engine.cpp")
 endif()
 
 # CLI: one-shot generation
@@ -109,4 +123,27 @@ if(NOT UTOPIC_HAS_BLOCK_DECODE)
   target_compile_definitions(utopic_acp PRIVATE DG_NO_BLOCK_DECODE)
 endif()
 set_target_properties(utopic_acp PROPERTIES
+  BUILD_RPATH "${LLAMA_BIN}" INSTALL_RPATH "${LLAMA_BIN}")
+
+# JSON runner: stable control-plane contract for chat/image/audio/video tasks.
+add_executable(utopic_runner
+  "${UTOPIC_NATIVE_SOURCE_DIR}/runner.cpp"
+  "${UTOPIC_NATIVE_SOURCE_DIR}/runner_contract.cpp"
+  "${UTOPIC_NATIVE_SOURCE_DIR}/runner_tasks.cpp"
+  "${UTOPIC_NATIVE_SOURCE_DIR}/runner_plugin.cpp"
+  "${UTOPIC_NATIVE_SOURCE_DIR}/audio_engine.cpp"
+  "${UTOPIC_IMAGE_ENGINE_SOURCE}"
+  "${UTOPIC_NATIVE_SOURCE_DIR}/video_engine.cpp"
+  "${UTOPIC_NATIVE_SOURCE_DIR}/diffusion_driver.cpp")
+target_include_directories(utopic_runner PRIVATE ${UTOPIC_INCLUDES})
+target_compile_definitions(utopic_runner PRIVATE ${UTOPIC_LLAMA_DEFINES})
+target_link_directories(utopic_runner PRIVATE "${LLAMA_BIN}")
+target_link_libraries(utopic_runner PRIVATE llama ggml ggml-base Threads::Threads)
+if(NOT UTOPIC_HAS_BLOCK_DECODE)
+  target_compile_definitions(utopic_runner PRIVATE DG_NO_BLOCK_DECODE)
+endif()
+if(NOT UTOPIC_ENABLE_STABLE_DIFFUSION)
+  target_compile_definitions(utopic_runner PRIVATE UTOPIC_IMAGE_ENGINE_DISABLED)
+endif()
+set_target_properties(utopic_runner PROPERTIES
   BUILD_RPATH "${LLAMA_BIN}" INSTALL_RPATH "${LLAMA_BIN}")

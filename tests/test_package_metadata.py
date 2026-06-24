@@ -18,6 +18,23 @@ CORE_CATALOG_PATH = (
     / "utopic_core"
     / "models.json"
 )
+EXPECTED_NATIVE_REF = "7e2f8410481bdd94edd9dd5f603877d8397e591f"
+
+REQUIRED_NATIVE_RUNNER_FILES = {
+    "runner.cpp",
+    "runner_contract.cpp",
+    "runner_contract.h",
+    "runner_plugin.cpp",
+    "runner_plugin.h",
+    "runner_tasks.cpp",
+    "runner_tasks.h",
+    "audio_engine.cpp",
+    "audio_engine.h",
+    "image_engine.cpp",
+    "image_engine.h",
+    "video_engine.cpp",
+    "video_engine.h",
+}
 
 
 def test_native_mcp_server_info_uses_package_version_constant():
@@ -69,6 +86,7 @@ def test_native_ref_metadata_matches_installer_pin():
     pyproject = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
 
     assert pyproject["tool"]["utopic"]["native-ref"] == installer.UTOPIC_NATIVE_REF
+    assert installer.UTOPIC_NATIVE_REF == EXPECTED_NATIVE_REF
 
 
 def test_package_manager_no_longer_owns_legacy_native_source():
@@ -111,6 +129,38 @@ def test_vendored_core_layout_exists():
         / "node"
         / "utopic-chat.js"
     ).exists()
+
+
+def test_vendored_core_includes_native_runner_sources():
+    native_dir = REPO_ROOT / "python" / "utopic" / "core" / "native"
+
+    missing = sorted(
+        filename
+        for filename in REQUIRED_NATIVE_RUNNER_FILES
+        if not (native_dir / filename).exists()
+    )
+
+    assert missing == []
+
+
+def test_package_cmake_builds_native_runner_and_multimodal_sources():
+    cmake = (REPO_ROOT / "python" / "utopic" / "cmake" / "CMakeLists.txt").read_text(
+        encoding="utf-8"
+    )
+
+    assert "add_executable(utopic_runner" in cmake
+    for filename in (
+        "runner.cpp",
+        "runner_contract.cpp",
+        "runner_tasks.cpp",
+        "runner_plugin.cpp",
+        "audio_engine.cpp",
+        "video_engine.cpp",
+    ):
+        assert f'${{UTOPIC_NATIVE_SOURCE_DIR}}/{filename}' in cmake
+    assert "UTOPIC_ENABLE_STABLE_DIFFUSION" in cmake
+    assert "${UTOPIC_NATIVE_SOURCE_DIR}/image_engine.cpp" in cmake
+    assert "target_compile_definitions(utopic_runner PRIVATE" in cmake
 
 
 def test_gateway_console_script_is_declared():

@@ -720,6 +720,11 @@ def _add_generation_common_args(parser: argparse.ArgumentParser) -> None:
         metavar="KEY=JSON",
         help="Pass an extra bridge parameter. Values are parsed as JSON when possible.",
     )
+    parser.add_argument(
+        "--experimental-bridge",
+        action="store_true",
+        help="Explicitly allow experimental Python bridge execution for models without a native runner.",
+    )
 
 
 def _canonical_generate_kind(kind: str) -> str:
@@ -737,12 +742,19 @@ def _generate_request(args: argparse.Namespace) -> dict[str, Any]:
         raise RuntimeError(
             f"model {entry.id} is {entry.modality}, but `utopic generate {kind}` requires {expected_modality}"
         )
-    if entry.runtime != "bridge":
+    if entry.runtime == "native" and entry.modality == "text":
         raise RuntimeError(
             f"model {entry.id} is a native text model; use `utopic run` or `utopic chat`"
         )
+    if entry.runtime == "bridge" and not bool(getattr(args, "experimental_bridge", False)):
+        raise RuntimeError(
+            f"model {entry.id} is an experimental bridge model and requires --experimental-bridge; "
+            "native runners are the default production path"
+        )
 
     request: dict[str, Any] = {"model": entry.id}
+    if entry.runtime == "bridge":
+        request["experimental_bridge"] = True
     if kind == "speech":
         request["input"] = args.input
     elif kind == "misc":
@@ -762,9 +774,13 @@ def _default_generate_model(kind: str, quality: str) -> str:
         return preferred
     expected_modality = _GENERATE_MODALITY[kind]
     for entry in models.list_models():
-        if entry.modality == expected_modality and entry.runtime == "bridge":
+        if (
+            entry.modality == expected_modality
+            and entry.runtime == "native"
+            and entry.native_status == "ready"
+        ):
             return entry.id
-    raise RuntimeError(f"no catalog model supports `utopic generate {kind}`")
+    raise RuntimeError(f"no native-ready catalog model supports `utopic generate {kind}`")
 
 
 def _add_optional_generate_parameters(args: argparse.Namespace, request: dict[str, Any]) -> None:

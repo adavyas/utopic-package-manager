@@ -126,7 +126,11 @@ def test_gateway_cosmos_returns_oom_preflight_before_starting_bridge(monkeypatch
         gateway.handle_openai_request(
             "POST",
             "/v1/images/generations",
-            {"model": "cosmos3-super", "prompt": "a glass city at sunrise"},
+            {
+                "model": "cosmos3-super",
+                "prompt": "a glass city at sunrise",
+                "experimental_bridge": True,
+            },
         )
     )
 
@@ -143,6 +147,7 @@ def test_gateway_image_generation_reports_packaged_bridge_dependency_gap():
         "model": "qwen-image",
         "prompt": "a precise product photo of a glass teapot",
         "size": "1024x1024",
+        "experimental_bridge": True,
     }
 
     status, payload = decode(
@@ -169,7 +174,11 @@ def test_gateway_uses_packaged_bridge_command_by_default_for_bridge_models(monke
         gateway.handle_openai_request(
             "POST",
             "/v1/images/generations",
-            {"model": "qwen-image", "prompt": "a precise product photo of a glass teapot"},
+            {
+                "model": "qwen-image",
+                "prompt": "a precise product photo of a glass teapot",
+                "experimental_bridge": True,
+            },
         )
     )
 
@@ -235,6 +244,7 @@ def test_gateway_exposes_openai_routes_for_each_bridge_modality():
     ]
 
     for endpoint, request, modality, engine, install_hint in cases:
+        request = {**request, "experimental_bridge": True}
         status, payload = decode(gateway.handle_openai_request("POST", endpoint, request))
 
         assert status in {501, 502}
@@ -272,7 +282,11 @@ def test_every_bridge_catalog_model_has_openai_and_mcp_runtime_surface():
         assert any(endpoint != "/v1/responses" for endpoint in entry.endpoints)
 
         modality_endpoint = next(endpoint for endpoint in entry.endpoints if endpoint != "/v1/responses")
-        request = {"model": entry.id, **request_by_modality[entry.modality]}
+        request = {
+            "model": entry.id,
+            **request_by_modality[entry.modality],
+            "experimental_bridge": True,
+        }
         status, payload = decode(gateway.handle_openai_request("POST", modality_endpoint, request))
 
         assert status in {501, 502, 507}, entry.id
@@ -286,6 +300,7 @@ def test_every_bridge_catalog_model_has_openai_and_mcp_runtime_surface():
             "input": request_by_modality[entry.modality].get("prompt")
             or request_by_modality[entry.modality].get("input")
             or request_by_modality[entry.modality]["artifact"],
+            "experimental_bridge": True,
         }
         status, payload = decode(gateway.handle_openai_request("POST", "/v1/responses", responses_request))
 
@@ -356,6 +371,7 @@ print(json.dumps({
                 "prompt": "a precise product photo of a glass teapot",
                 "size": "1024x1024",
                 "seed": 7,
+                "experimental_bridge": True,
             },
         )
     )
@@ -438,6 +454,7 @@ print(json.dumps({{
                 "model": "zuna",
                 "artifact": str(source),
                 "artifact_type": "application/octet-stream",
+                "experimental_bridge": True,
             },
         )
     )
@@ -452,7 +469,10 @@ print(json.dumps({{
     captured = json.loads(captured_path.read_text(encoding="utf-8"))
     assert captured["endpoint"] == "/v1/utopic/misc/generations"
     assert captured["input"] == {"artifact": str(source)}
-    assert captured["parameters"] == {"artifact_type": "application/octet-stream"}
+    assert captured["parameters"] == {
+        "artifact_type": "application/octet-stream",
+        "experimental_bridge": True,
+    }
 
 
 def test_gateway_image_generation_supports_b64_json_response_format(tmp_path, monkeypatch):
@@ -486,6 +506,7 @@ print(json.dumps({
                 "model": "qwen-image",
                 "prompt": "a precise product photo of a glass teapot",
                 "response_format": "b64_json",
+                "experimental_bridge": True,
             },
         )
     )
@@ -520,7 +541,7 @@ print(json.dumps({{
         gateway.handle_openai_request(
             "POST",
             "/v1/images/generations",
-            {"model": "qwen-image", "prompt": "test"},
+            {"model": "qwen-image", "prompt": "test", "experimental_bridge": True},
         )
     )
 
@@ -556,7 +577,7 @@ print(json.dumps({
         gateway.handle_openai_request(
             "POST",
             "/v1/images/generations",
-            {"model": "qwen-image", "prompt": "test"},
+            {"model": "qwen-image", "prompt": "test", "experimental_bridge": True},
         )
     )
 
@@ -596,6 +617,7 @@ print(json.dumps({{
             "/v1/responses",
             {
                 "model": "flux-1-schnell",
+                "experimental_bridge": True,
                 "input": [
                     {
                         "role": "user",
@@ -649,6 +671,7 @@ print(json.dumps({{
             "/v1/responses",
             {
                 "model": "kokoro-82m",
+                "experimental_bridge": True,
                 "input": [
                     {
                         "role": "user",
@@ -827,7 +850,7 @@ print(json.dumps({
         gateway.handle_openai_request(
             "POST",
             "/v1/images/generations",
-            {"model": "qwen-image", "prompt": "test"},
+            {"model": "qwen-image", "prompt": "test", "experimental_bridge": True},
         )
     )
 
@@ -879,7 +902,7 @@ print(json.dumps({
         gateway.handle_openai_request(
             "POST",
             "/v1/images/generations",
-            {"model": "qwen-image", "prompt": "a glass teapot"},
+            {"model": "qwen-image", "prompt": "a glass teapot", "experimental_bridge": True},
         )
     )
 
@@ -907,7 +930,11 @@ print(json.dumps({
                 "method": "tools/call",
                 "params": {
                     "name": "utopic_generate_image",
-                    "arguments": {"model": "qwen-image", "prompt": "a glass teapot"},
+                    "arguments": {
+                        "model": "qwen-image",
+                        "prompt": "a glass teapot",
+                        "experimental_bridge": True,
+                    },
                 },
             }
         )
@@ -1077,7 +1104,7 @@ def test_gateway_mcp_lists_and_dispatches_multimodal_tools():
     assert payload["result"]["isError"] is True
     assert payload["result"]["content"][0]["type"] == "text"
     bridge_error = json.loads(payload["result"]["content"][0]["text"])["error"]["code"]
-    assert bridge_error in {"bridge_dependency_missing", "bridge_adapter_api_mismatch"}
+    assert bridge_error == "native_runner_not_ready"
 
 
 def test_gateway_mcp_tool_definitions_are_clear_for_agents():
@@ -1403,17 +1430,30 @@ print(json.dumps({{
         (
             10,
             "utopic_speak",
-            {"model": "kokoro-82m", "input": "hello from mcp", "voice": "af_heart"},
+            {
+                "model": "kokoro-82m",
+                "input": "hello from mcp",
+                "voice": "af_heart",
+                "experimental_bridge": True,
+            },
         ),
         (
             11,
             "utopic_generate_music",
-            {"model": "ace-step-3.5b", "prompt": "ambient piano from mcp"},
+            {
+                "model": "ace-step-3.5b",
+                "prompt": "ambient piano from mcp",
+                "experimental_bridge": True,
+            },
         ),
         (
             12,
             "utopic_generate_misc",
-            {"model": "zuna", "artifact": str(misc_source)},
+            {
+                "model": "zuna",
+                "artifact": str(misc_source),
+                "experimental_bridge": True,
+            },
         ),
     ]:
         status, payload = decode(
