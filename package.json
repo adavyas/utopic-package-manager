@@ -6,8 +6,7 @@
     "node": ">=18"
   },
   "scripts": {
-    "build:chat": "tsc -p tsconfig.json",
-    "check:chat": "tsc -p tsconfig.json --noEmit && npm run build:chat && git diff --exit-code -- python/utopic/node/utopic-chat.js && node --check python/utopic/node/utopic-chat.js",
+    "check:chat": "node --check python/utopic/core/python/utopic_core/node/utopic-chat.js",
     "test": "npm run check:chat"
   },
   "devDependencies": {

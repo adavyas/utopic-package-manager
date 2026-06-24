@@ -114,7 +114,10 @@ where = ["python"]
 
 [tool.setuptools.package-data]
 utopic = [
-  "native/*",
-  "models.json",
-  "node/*",
+  "core/native/*",
+  "core/python/utopic_core/*",
+  "core/python/utopic_core/node/*",
 ]
+
+[tool.utopic]
+native-ref = "c0dbe7f2234d30b3b22c5e7180c2a39fe49ef281"

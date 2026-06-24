@@ -3,8 +3,11 @@
 Python package management for the Utopic native runtime.
 
 This repository is intentionally thin. The wheel installs Python launchers plus
-the small Utopic native source tree. Dependency checkout, build configuration,
-and binary installation all happen later through `utopic setup`.
+a pinned vendored snapshot of the shippable Utopic runtime source. Product
+runtime code, native C++ code, and the TypeScript chat UI are developed in the
+main Utopic repository; this repository packages that snapshot and owns setup,
+dependency checkout, build configuration, and binary installation through
+`utopic setup`.
 
 ## Install
 
@@ -604,7 +607,7 @@ curl http://127.0.0.1:8910/v1/models
 
 The package manager owns the user-facing setup path:
 
-- use the packaged Utopic native source
+- use the vendored Utopic core source snapshot
 - fetch the pinned compatible public llama.cpp dependency source
 - configure the native build for Metal, CUDA, or CPU, including CUDA compiler and architecture detection
 - build the dependency layer and Utopic
@@ -618,11 +621,17 @@ model alias.
 
 ## Development
 
-Rebuild the bundled chat UI after editing `node/utopic-chat.ts`:
+Runtime, native, model catalog, and chat UI source changes should land in the
+main Utopic repository first. Then vendor a pinned core snapshot here:
+
+```sh
+python scripts/vendor_core.py --ref <utopic-commit>
+```
+
+Validate the vendored chat UI:
 
 ```sh
 npm install
-npm run build:chat
 npm run check:chat
 ```
 

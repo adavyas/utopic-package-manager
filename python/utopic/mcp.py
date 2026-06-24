@@ -1,29 +1,14 @@
+from __future__ import annotations
+
 import sys
 
-from . import __version__
-from ._native import main as _main
+from . import installer as _installer
+from .core_loader import load_core_module
 
 
-HELP = """usage: utopic-mcp [native options]
+_core = load_core_module("mcp", installer_api=_installer)
 
-Start the Utopic Model Context Protocol server.
+if __name__ == "__main__":
+    raise SystemExit(_core.main())
 
-Run `utopic setup` first if the native runtime is not installed. Most users
-should start with `utopic chat` or `utopic run`; this launcher is for MCP
-integrations that need the native protocol server directly.
-"""
-
-
-def main() -> int:
-    if any(arg == "--version" for arg in sys.argv[1:]):
-        print(f"utopic-mcp {__version__}")
-        return 0
-    if any(arg in ("-h", "--help") for arg in sys.argv[1:]):
-        print(HELP)
-        return 0
-    try:
-        _main("utopic_mcp")
-        return 0
-    except RuntimeError as exc:
-        print(f"utopic-mcp: {exc}", file=sys.stderr)
-        return 1
+sys.modules[__name__] = _core

@@ -14,9 +14,10 @@ from . import __version__
 
 
 PACKAGE_DIR = Path(__file__).resolve().parent
-PACKAGED_NATIVE_DIR = PACKAGE_DIR / "native"
+PACKAGED_CORE_DIR = PACKAGE_DIR / "core"
+PACKAGED_NATIVE_DIR = PACKAGED_CORE_DIR / "native"
 UTOPIC_NATIVE_REPO = "https://github.com/adavyas/utopic.git"
-UTOPIC_NATIVE_REF = "92ca14f12fe45f78d605511bc4e7e21c3ed9bebd"
+UTOPIC_NATIVE_REF = "c0dbe7f2234d30b3b22c5e7180c2a39fe49ef281"
 LLAMA_REPO = "https://github.com/ggml-org/llama.cpp.git"
 LLAMA_REF = "refs/pull/24423/head"
 BIN_NAMES = ("utopic", "utopic_server", "utopic_mcp", "utopic_acp")
@@ -109,7 +110,7 @@ def default_native_dir() -> Path:
         return Path(configured).expanduser()
     if PACKAGED_NATIVE_DIR.exists():
         return PACKAGED_NATIVE_DIR
-    return source_root() / "Utopic"
+    return source_root() / "Utopic" / "native"
 
 
 def default_llama_dir() -> Path:
@@ -777,13 +778,15 @@ def setup(argv: Optional[Sequence[str]] = None) -> int:
     elif native_dir == PACKAGED_NATIVE_DIR:
         print(f"Using packaged Utopic source at {native_dir}")
     else:
-        print(f"Managing Utopic source at {native_dir}")
+        native_checkout_dir = native_dir.parent if native_dir.name == "native" else native_dir
+        print(f"Managing Utopic source at {native_checkout_dir}")
         _clone_or_checkout(
             os.environ.get("UTOPIC_NATIVE_REPO", UTOPIC_NATIVE_REPO),
             os.environ.get("UTOPIC_NATIVE_REF", UTOPIC_NATIVE_REF),
-            native_dir,
+            native_checkout_dir,
             dry_run=dry_run,
         )
+        native_dir = native_checkout_dir / "native"
 
     native_build_dir = _build_utopic(native_dir, llama_dir, jobs=args.jobs, dry_run=dry_run)
     if dry_run:

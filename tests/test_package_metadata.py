@@ -8,13 +8,22 @@ from utopic import __version__
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+CORE_CATALOG_PATH = (
+    REPO_ROOT
+    / "python"
+    / "utopic"
+    / "core"
+    / "python"
+    / "utopic_core"
+    / "models.json"
+)
 
 
 def test_native_mcp_server_info_uses_package_version_constant():
-    identity = (REPO_ROOT / "python" / "utopic" / "native" / "utopic_identity.h").read_text(
+    identity = (REPO_ROOT / "python" / "utopic" / "core" / "native" / "utopic_identity.h").read_text(
         encoding="utf-8"
     )
-    mcp_server = (REPO_ROOT / "python" / "utopic" / "native" / "mcp_server.cpp").read_text(
+    mcp_server = (REPO_ROOT / "python" / "utopic" / "core" / "native" / "mcp_server.cpp").read_text(
         encoding="utf-8"
     )
 
@@ -26,11 +35,10 @@ def test_native_mcp_server_info_uses_package_version_constant():
 def test_release_version_literals_match_package_version():
     pyproject = (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
     setup_tree = ast.parse((REPO_ROOT / "setup.py").read_text(encoding="utf-8"))
-    chat_ts = (REPO_ROOT / "node" / "utopic-chat.ts").read_text(encoding="utf-8")
     chat_js = (
-        REPO_ROOT / "python" / "utopic" / "node" / "utopic-chat.js"
+        REPO_ROOT / "python" / "utopic" / "core" / "python" / "utopic_core" / "node" / "utopic-chat.js"
     ).read_text(encoding="utf-8")
-    identity = (REPO_ROOT / "python" / "utopic" / "native" / "utopic_identity.h").read_text(
+    identity = (REPO_ROOT / "python" / "utopic" / "core" / "native" / "utopic_identity.h").read_text(
         encoding="utf-8"
     )
 
@@ -47,9 +55,39 @@ def test_release_version_literals_match_package_version():
 
     assert f'version = "{__version__}"' in pyproject
     assert setup_version == __version__
-    assert re.search(rf'const VERSION = "{re.escape(__version__)}";', chat_ts)
     assert re.search(rf'const VERSION = "{re.escape(__version__)}";', chat_js)
     assert f'project_version = "{__version__}"' in identity
+
+
+def test_package_manager_no_longer_owns_legacy_native_source():
+    assert not (REPO_ROOT / "python" / "utopic" / "native").exists()
+
+
+def test_package_manager_no_longer_owns_typescript_chat_source():
+    assert not (REPO_ROOT / "node" / "utopic-chat.ts").exists()
+
+
+def test_vendored_core_layout_exists():
+    assert (REPO_ROOT / "python" / "utopic" / "core" / "native" / "CMakeLists.txt").exists()
+    assert (
+        REPO_ROOT
+        / "python"
+        / "utopic"
+        / "core"
+        / "python"
+        / "utopic_core"
+        / "models.json"
+    ).exists()
+    assert (
+        REPO_ROOT
+        / "python"
+        / "utopic"
+        / "core"
+        / "python"
+        / "utopic_core"
+        / "node"
+        / "utopic-chat.js"
+    ).exists()
 
 
 def test_gateway_console_script_is_declared():
@@ -158,8 +196,8 @@ def test_chat_check_script_rejects_stale_bundled_javascript():
     package_json = json.loads((REPO_ROOT / "package.json").read_text(encoding="utf-8"))
     check_script = package_json["scripts"]["check:chat"]
 
-    assert "npm run build:chat" in check_script
-    assert "git diff --exit-code -- python/utopic/node/utopic-chat.js" in check_script
+    assert "node --check python/utopic/core/python/utopic_core/node/utopic-chat.js" in check_script
+    assert "npm run build:chat" not in check_script
 
 
 def test_gitignore_covers_generated_release_artifacts():
@@ -229,6 +267,12 @@ def test_ci_workflow_runs_on_commits_without_publishing():
     assert "python -m pip install --upgrade build pytest twine uv" in workflow
     assert "python -m build" in workflow
     assert "python -m twine check dist/*" in workflow
+    assert "python/utopic/core/python/utopic_core/models.json" in workflow
+    assert "python/utopic/core/native/CMakeLists.txt" in workflow
+    assert "python/utopic/core/python/utopic_core/node/utopic-chat.js" in workflow
+    assert "utopic/core/python/utopic_core/models.json" in workflow
+    assert "utopic/core/native/CMakeLists.txt" in workflow
+    assert "utopic/core/python/utopic_core/node/utopic-chat.js" in workflow
     assert "Smoke test built distributions" in workflow
     assert "Smoke test uv tool install" in workflow
     assert "UV_TOOL_DIR" in workflow
@@ -264,6 +308,12 @@ def test_release_workflow_smokes_installed_node_free_chat_fallback():
         encoding="utf-8"
     )
 
+    assert "python/utopic/core/python/utopic_core/models.json" in workflow
+    assert "python/utopic/core/native/CMakeLists.txt" in workflow
+    assert "python/utopic/core/python/utopic_core/node/utopic-chat.js" in workflow
+    assert "utopic/core/python/utopic_core/models.json" in workflow
+    assert "utopic/core/native/CMakeLists.txt" in workflow
+    assert "utopic/core/python/utopic_core/node/utopic-chat.js" in workflow
     assert "Installed Node-free chat fallback smoke failed" in workflow
     assert 'PATH=""' in workflow
     assert "node-free fallback ok" in workflow
@@ -311,8 +361,7 @@ def test_readme_documents_chat_tui_and_node_free_fallback():
 
 def test_readme_documents_supported_models_without_prohibited_mentions():
     readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
-    catalog_path = REPO_ROOT / "python" / "utopic" / "models.json"
-    catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+    catalog = json.loads(CORE_CATALOG_PATH.read_text(encoding="utf-8"))
 
     assert "## Models" in readme
     for entry in catalog:
@@ -365,8 +414,7 @@ def test_readme_documents_supported_models_without_prohibited_mentions():
 
 
 def test_model_catalog_declares_runtime_schema_for_every_entry():
-    catalog_path = REPO_ROOT / "python" / "utopic" / "models.json"
-    catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+    catalog = json.loads(CORE_CATALOG_PATH.read_text(encoding="utf-8"))
 
     required_fields = {
         "modality",
@@ -393,8 +441,7 @@ def test_model_catalog_declares_runtime_schema_for_every_entry():
 
 
 def test_catalog_defaults_to_diffusiongemma_and_excludes_legacy_masked_models():
-    catalog_path = REPO_ROOT / "python" / "utopic" / "models.json"
-    catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+    catalog = json.loads(CORE_CATALOG_PATH.read_text(encoding="utf-8"))
 
     recommended = [entry["id"] for entry in catalog if entry["recommended"]]
     families = {entry["family"] for entry in catalog}
@@ -405,8 +452,7 @@ def test_catalog_defaults_to_diffusiongemma_and_excludes_legacy_masked_models():
 
 
 def test_model_catalog_includes_first_multimodal_model_set():
-    catalog_path = REPO_ROOT / "python" / "utopic" / "models.json"
-    catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+    catalog = json.loads(CORE_CATALOG_PATH.read_text(encoding="utf-8"))
     by_id = {entry["id"]: entry for entry in catalog}
 
     expected = {

@@ -7,7 +7,13 @@ setup(
     description="Python package manager for the Utopic native runtime",
     package_dir={"": "python"},
     packages=find_packages(where="python"),
-    package_data={"utopic": ["native/*", "models.json", "node/*"]},
+    package_data={
+        "utopic": [
+            "core/native/*",
+            "core/python/utopic_core/*",
+            "core/python/utopic_core/node/*",
+        ]
+    },
     python_requires=">=3.10,<3.13",
     entry_points={
         "console_scripts": [

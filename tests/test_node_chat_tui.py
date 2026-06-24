@@ -12,7 +12,16 @@ import pytest
 from utopic import __version__, chat
 
 
-CHAT_SCRIPT = Path(__file__).resolve().parents[1] / "python" / "utopic" / "node" / "utopic-chat.js"
+CHAT_SCRIPT = (
+    Path(__file__).resolve().parents[1]
+    / "python"
+    / "utopic"
+    / "core"
+    / "python"
+    / "utopic_core"
+    / "node"
+    / "utopic-chat.js"
+)
 
 
 class FakeOpenAIServer(BaseHTTPRequestHandler):

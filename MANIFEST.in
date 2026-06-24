@@ -3,8 +3,9 @@ prune node_modules
 prune .pytest_cache
 prune build
 prune dist
+prune node
 
-exclude node/utopic-chat.ts
+recursive-include python/utopic/core *
 
 global-exclude __pycache__
 global-exclude *.py[cod]
