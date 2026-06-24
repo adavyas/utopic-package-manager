@@ -18,6 +18,11 @@ def binary_path(name: str) -> Path:
             f"Utopic native binary is not installed: {path}. "
             "Run `utopic setup` to build and cache the native runtime."
         )
+    if not path.is_file() or not os.access(path, os.X_OK):
+        raise RuntimeError(
+            f"Utopic native binary is not an executable file: {path}. "
+            "Run `utopic setup --force` to rebuild the native runtime."
+        )
     return path
 
 

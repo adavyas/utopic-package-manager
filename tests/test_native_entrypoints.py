@@ -1,4 +1,5 @@
 from utopic import acp, mcp, server
+from utopic_core import _native
 
 
 def test_server_entrypoint_version_does_not_require_native_binary(monkeypatch, capsys):
@@ -111,3 +112,39 @@ def test_acp_entrypoint_reports_missing_binary_without_traceback(monkeypatch, ca
     captured = capsys.readouterr()
     assert "utopic-acp: native binary missing" in captured.err
     assert "Traceback" not in captured.err
+
+
+def test_binary_path_rejects_directory_cache_entry(monkeypatch, tmp_path):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "utopic_server").mkdir()
+    monkeypatch.setattr(_native.installer, "bin_dir", lambda: bin_dir)
+
+    try:
+        _native.binary_path("utopic_server")
+    except RuntimeError as exc:
+        message = str(exc)
+    else:
+        raise AssertionError("expected RuntimeError")
+
+    assert "not an executable file" in message
+    assert "utopic setup" in message
+
+
+def test_binary_path_rejects_non_executable_cache_entry(monkeypatch, tmp_path):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    binary = bin_dir / "utopic_server"
+    binary.write_text("binary", encoding="utf-8")
+    binary.chmod(0o644)
+    monkeypatch.setattr(_native.installer, "bin_dir", lambda: bin_dir)
+
+    try:
+        _native.binary_path("utopic_server")
+    except RuntimeError as exc:
+        message = str(exc)
+    else:
+        raise AssertionError("expected RuntimeError")
+
+    assert "not an executable file" in message
+    assert "utopic setup" in message
