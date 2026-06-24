@@ -173,6 +173,66 @@ def test_gateway_native_text_falls_back_to_runner_without_server(monkeypatch, tm
     assert captured["request"]["messages"][0]["content"] == "hi"
 
 
+def test_gateway_raw_gguf_model_uses_runner(monkeypatch, tmp_path):
+    model_path = tmp_path / "raw-model.gguf"
+    model_path.write_text("model", encoding="utf-8")
+    captured = {}
+
+    monkeypatch.setattr(gateway.models, "get_model", lambda model_id: None)
+
+    def fake_chat_completion(runner_entry, request):
+        captured["entry"] = runner_entry
+        captured["request"] = request
+        return {"ok": True, "type": "text", "text": "raw path works", "metrics": {}}
+
+    monkeypatch.setattr(gateway.native_runner, "chat_completion", fake_chat_completion)
+
+    status, _headers, body = gateway.handle_openai_request(
+        "POST",
+        "/v1/chat/completions",
+        {"model": str(model_path), "messages": [{"role": "user", "content": "hi"}]},
+        native_base_url=None,
+    )
+
+    payload = json.loads(body)
+    assert status == 200
+    assert payload["model"] == str(model_path)
+    assert payload["choices"][0]["message"]["content"] == "raw path works"
+    assert captured["entry"].id == str(model_path)
+    assert captured["entry"].path == model_path
+    assert captured["request"]["messages"][0]["content"] == "hi"
+
+
+def test_gateway_active_text_model_alias_uses_runner(monkeypatch, tmp_path):
+    model_path = tmp_path / "active.gguf"
+    model_path.write_text("model", encoding="utf-8")
+    captured = {}
+
+    monkeypatch.setattr(gateway.models, "get_model", lambda model_id: None)
+
+    def fake_chat_completion(runner_entry, request):
+        captured["entry"] = runner_entry
+        captured["request"] = request
+        return {"ok": True, "type": "text", "text": "active model works", "metrics": {}}
+
+    monkeypatch.setattr(gateway.native_runner, "chat_completion", fake_chat_completion)
+
+    status, _headers, body = gateway.handle_openai_request(
+        "POST",
+        "/v1/chat/completions",
+        {"model": "utopic", "messages": [{"role": "user", "content": "hi"}]},
+        native_base_url=None,
+        active_text_model_path=model_path,
+    )
+
+    payload = json.loads(body)
+    assert status == 200
+    assert payload["model"] == "utopic"
+    assert payload["choices"][0]["message"]["content"] == "active model works"
+    assert captured["entry"].id == "utopic"
+    assert captured["entry"].path == model_path
+
+
 def test_gateway_native_base_url_still_takes_priority_over_runner(monkeypatch, tmp_path):
     entry = gateway.models.ModelEntry(
         id="unit-text",

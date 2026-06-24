@@ -491,7 +491,13 @@ def _run_server(
         return code if code and code > 0 else 1
 
 
-def _run_gateway_only(host: str, port: str, entry: Optional[models.ModelEntry] = None) -> int:
+def _run_gateway_only(
+    host: str,
+    port: str,
+    entry: Optional[models.ModelEntry] = None,
+    active_text_model_path: Optional[Path] = None,
+    active_text_model_id: str = "utopic",
+) -> int:
     if entry is None or entry.modality == "text":
         print(f"OpenAI-compatible URL: {_server_url(host, port)}", flush=True)
     else:
@@ -502,7 +508,13 @@ def _run_gateway_only(host: str, port: str, entry: Optional[models.ModelEntry] =
     if entry is None or entry.modality == "text":
         print(f"Chat with this server: utopic chat --server {_server_base_url(host, port)}", flush=True)
     try:
-        gateway.serve(host, int(port), native_base_url=None)
+        gateway.serve(
+            host,
+            int(port),
+            native_base_url=None,
+            active_text_model_path=active_text_model_path,
+            active_text_model_id=active_text_model_id,
+        )
     except KeyboardInterrupt:
         return 130
     except OSError as exc:
@@ -1028,8 +1040,14 @@ def _run(argv: Sequence[str]) -> int:
 
         _ensure_setup(setup_enabled, "utopic_runner")
         _native.binary_path("utopic_runner")
-        models.ensure_model(model_arg)
-        return _run_gateway_only(host, port)
+        model_path = models.ensure_model(model_arg)
+        active_model_id = model_arg if model_arg and models.get_model(model_arg) is not None else "utopic"
+        return _run_gateway_only(
+            host,
+            port,
+            active_text_model_path=model_path,
+            active_text_model_id=active_model_id,
+        )
     except RuntimeError as exc:
         print(f"utopic run: {exc}", file=sys.stderr)
         return 1

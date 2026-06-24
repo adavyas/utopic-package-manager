@@ -1206,8 +1206,16 @@ def test_cli_run_without_prompt_starts_runner_gateway(monkeypatch):
     monkeypatch.setattr(cli, "_ensure_setup", lambda enabled=True, binary_name="utopic": calls.append(("setup", enabled, binary_name)))
     monkeypatch.setattr(cli._native, "binary_path", lambda name: calls.append(("binary", name)) or Path(f"/fake/bin/{name}"))
     monkeypatch.setattr(cli.models, "ensure_model", lambda value=None: calls.append(("model", value)) or Path("/models/dream.gguf"))
+    monkeypatch.setattr(cli.models, "get_model", lambda _model_id: None)
     monkeypatch.setattr(cli, "_run_server", lambda *args: pytest.fail("should not start utopic_server"))
-    monkeypatch.setattr(cli, "_run_gateway_only", lambda host, port, entry=None: calls.append(("gateway", host, port, entry)) or 0)
+    monkeypatch.setattr(
+        cli,
+        "_run_gateway_only",
+        lambda host, port, entry=None, active_text_model_path=None, active_text_model_id="utopic": calls.append(
+            ("gateway", host, port, entry, active_text_model_path, active_text_model_id)
+        )
+        or 0,
+    )
 
     assert cli.main(["run", "dream-7b-q4", "--port", "8999", "-ngl", "99"]) == 0
 
@@ -1215,7 +1223,7 @@ def test_cli_run_without_prompt_starts_runner_gateway(monkeypatch):
         ("setup", True, "utopic_runner"),
         ("binary", "utopic_runner"),
         ("model", "dream-7b-q4"),
-        ("gateway", "127.0.0.1", "8999", None),
+        ("gateway", "127.0.0.1", "8999", None, Path("/models/dream.gguf"), "utopic"),
     ]
 
 
@@ -1225,8 +1233,16 @@ def test_cli_run_allows_server_flags_before_positional_model(monkeypatch):
     monkeypatch.setattr(cli, "_ensure_setup", lambda enabled=True, binary_name="utopic": calls.append(("setup", enabled, binary_name)))
     monkeypatch.setattr(cli._native, "binary_path", lambda name: calls.append(("binary", name)) or Path(f"/fake/bin/{name}"))
     monkeypatch.setattr(cli.models, "ensure_model", lambda value=None: calls.append(("model", value)) or Path(f"/models/{value}.gguf"))
+    monkeypatch.setattr(cli.models, "get_model", lambda _model_id: None)
     monkeypatch.setattr(cli, "_run_server", lambda *args: pytest.fail("should not start utopic_server"))
-    monkeypatch.setattr(cli, "_run_gateway_only", lambda host, port, entry=None: calls.append(("gateway", host, port, entry)) or 0)
+    monkeypatch.setattr(
+        cli,
+        "_run_gateway_only",
+        lambda host, port, entry=None, active_text_model_path=None, active_text_model_id="utopic": calls.append(
+            ("gateway", host, port, entry, active_text_model_path, active_text_model_id)
+        )
+        or 0,
+    )
 
     assert cli.main(["run", "--port", "8999", "-ngl", "99", "dream-7b-q4"]) == 0
 
@@ -1234,7 +1250,7 @@ def test_cli_run_allows_server_flags_before_positional_model(monkeypatch):
         ("setup", True, "utopic_runner"),
         ("binary", "utopic_runner"),
         ("model", "dream-7b-q4"),
-        ("gateway", "127.0.0.1", "8999", None),
+        ("gateway", "127.0.0.1", "8999", None, Path("/models/dream-7b-q4.gguf"), "utopic"),
     ]
 
 
@@ -1266,7 +1282,7 @@ def test_cli_run_bridge_model_starts_gateway_without_native_server(monkeypatch, 
     monkeypatch.setattr(
         cli.gateway,
         "serve",
-        lambda host, port, native_base_url=None: calls.append(("gateway", host, port, native_base_url)) or None,
+        lambda host, port, native_base_url=None, **_kwargs: calls.append(("gateway", host, port, native_base_url)) or None,
     )
 
     assert cli.main(["run", "qwen-image", "--host", "0.0.0.0", "--port", "8999"]) == 0
@@ -1583,12 +1599,20 @@ def test_cli_run_normalizes_wildcard_host_for_client_url(monkeypatch):
     monkeypatch.setattr(cli, "_ensure_setup", lambda enabled=True, binary_name="utopic": None)
     monkeypatch.setattr(cli._native, "binary_path", lambda name: Path(f"/fake/bin/{name}"))
     monkeypatch.setattr(cli.models, "ensure_model", lambda value=None: Path("/models/dream.gguf"))
+    monkeypatch.setattr(cli.models, "get_model", lambda _model_id: None)
     monkeypatch.setattr(cli, "_run_server", lambda *args: pytest.fail("should not start utopic_server"))
-    monkeypatch.setattr(cli, "_run_gateway_only", lambda host, port, entry=None: calls.append(("gateway", host, port, entry)) or 0)
+    monkeypatch.setattr(
+        cli,
+        "_run_gateway_only",
+        lambda host, port, entry=None, active_text_model_path=None, active_text_model_id="utopic": calls.append(
+            ("gateway", host, port, entry, active_text_model_path, active_text_model_id)
+        )
+        or 0,
+    )
 
     assert cli.main(["run", "dream-7b-q4", "--host", "0.0.0.0", "--port", "8999"]) == 0
     assert calls == [
-        ("gateway", "0.0.0.0", "8999", None)
+        ("gateway", "0.0.0.0", "8999", None, Path("/models/dream.gguf"), "utopic")
     ]
     assert cli._server_url("0.0.0.0", "8999") == "http://127.0.0.1:8999/v1/chat/completions"
     assert cli._server_health_url("::", "8999") == "http://127.0.0.1:8999/health"
@@ -1601,7 +1625,14 @@ def test_cli_run_without_arguments_uses_default_model_and_starts_runner_gateway(
     monkeypatch.setattr(cli._native, "binary_path", lambda name: calls.append(("binary", name)) or Path(f"/fake/bin/{name}"))
     monkeypatch.setattr(cli.models, "ensure_model", lambda value=None: calls.append(("model", value)) or Path("/models/default.gguf"))
     monkeypatch.setattr(cli, "_run_server", lambda *args: pytest.fail("should not start utopic_server"))
-    monkeypatch.setattr(cli, "_run_gateway_only", lambda host, port, entry=None: calls.append(("gateway", host, port, entry)) or 0)
+    monkeypatch.setattr(
+        cli,
+        "_run_gateway_only",
+        lambda host, port, entry=None, active_text_model_path=None, active_text_model_id="utopic": calls.append(
+            ("gateway", host, port, entry, active_text_model_path, active_text_model_id)
+        )
+        or 0,
+    )
 
     assert cli.main(["run"]) == 0
 
@@ -1609,7 +1640,7 @@ def test_cli_run_without_arguments_uses_default_model_and_starts_runner_gateway(
         ("setup", True, "utopic_runner"),
         ("binary", "utopic_runner"),
         ("model", None),
-        ("gateway", "127.0.0.1", "8910", None),
+        ("gateway", "127.0.0.1", "8910", None, Path("/models/default.gguf"), "utopic"),
     ]
 
 
@@ -1620,12 +1651,19 @@ def test_cli_run_allows_explicit_native_backend_port(monkeypatch):
     monkeypatch.setattr(cli._native, "binary_path", lambda name: Path(f"/fake/bin/{name}"))
     monkeypatch.setattr(cli.models, "ensure_model", lambda value=None: Path("/models/default.gguf"))
     monkeypatch.setattr(cli, "_run_server", lambda *args: pytest.fail("should not start utopic_server"))
-    monkeypatch.setattr(cli, "_run_gateway_only", lambda host, port, entry=None: calls.append(("gateway", host, port, entry)) or 0)
+    monkeypatch.setattr(
+        cli,
+        "_run_gateway_only",
+        lambda host, port, entry=None, active_text_model_path=None, active_text_model_id="utopic": calls.append(
+            ("gateway", host, port, entry, active_text_model_path, active_text_model_id)
+        )
+        or 0,
+    )
 
     assert cli.main(["run", "--port", "8999", "--native-port", "9900", "--ctx-size", "2048"]) == 0
 
     assert calls == [
-        ("gateway", "127.0.0.1", "8999", None),
+        ("gateway", "127.0.0.1", "8999", None, Path("/models/default.gguf"), "utopic"),
     ]
 
 

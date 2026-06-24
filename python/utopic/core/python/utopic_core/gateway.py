@@ -6,6 +6,7 @@ import subprocess
 import sys
 import time
 import uuid
+from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Optional
@@ -53,6 +54,33 @@ OPENAI_TOOL_BY_ENDPOINT = {
     "/v1/videos/generations": "utopic_generate_video",
     "/v1/utopic/misc/generations": "utopic_generate_misc",
 }
+
+
+@dataclass(frozen=True)
+class _AdHocTextModel:
+    id: str
+    name: str
+    path: Path
+    family: str = "local-gguf"
+    filename: str = ""
+    url: str = ""
+    size: str = "local"
+    recommended: bool = False
+    description: str = "Local GGUF text model selected at runtime."
+    bytes: Optional[int] = None
+    modality: str = "text"
+    engine: str = "native-gguf"
+    runtime: str = "native"
+    hardware: tuple[str, ...] = ("local",)
+    supported_backends: tuple[str, ...] = ("metal", "cuda", "cpu")
+    runner: str = "utopic_runner"
+    native_status: str = "ready"
+    expected_vram_gib: Optional[float] = None
+    expected_ram_gib: Optional[float] = None
+    endpoints: tuple[str, ...] = ("/v1/chat/completions", "/v1/responses")
+    outputs: tuple[str, ...] = ("text",)
+    repo: Optional[str] = None
+    requirements: Optional[dict[str, object]] = None
 
 
 def _schema(required: list[str], properties: dict[str, str | dict[str, Any]]) -> dict[str, Any]:
@@ -293,17 +321,66 @@ def model_cache_path(model_id: str) -> Path:
     return entry.path
 
 
+def _active_text_entry(active_text_model_path: Optional[Path], active_text_model_id: str = "utopic") -> Optional[_AdHocTextModel]:
+    if active_text_model_path is None:
+        return None
+    model_path = active_text_model_path.expanduser()
+    return _AdHocTextModel(
+        id=active_text_model_id or "utopic",
+        name=f"Local GGUF ({model_path.name})",
+        filename=model_path.name,
+        path=model_path,
+    )
+
+
+def _resolve_request_model(
+    model_id: str,
+    active_text_model_path: Optional[Path],
+    active_text_model_id: str = "utopic",
+) -> Any:
+    entry = models.get_model(model_id)
+    if entry is not None:
+        return entry
+    active_entry = _active_text_entry(active_text_model_path, active_text_model_id)
+    if active_entry is not None and model_id in {active_entry.id, "utopic"}:
+        return active_entry
+    if _looks_like_gguf_path(model_id):
+        model_path = Path(model_id).expanduser()
+        return _AdHocTextModel(
+            id=model_id,
+            name=f"Local GGUF ({model_path.name})",
+            filename=model_path.name,
+            path=model_path,
+        )
+    return None
+
+
+def _looks_like_gguf_path(value: str) -> bool:
+    return (
+        value.endswith(".gguf")
+        or value.endswith(".GGUF")
+        or "/" in value
+        or "\\" in value
+    )
+
+
 def handle_openai_request(
     method: str,
     path: str,
     body: Optional[dict[str, Any]],
     *,
     native_base_url: Optional[str] = None,
+    active_text_model_path: Optional[Path] = None,
+    active_text_model_id: str = "utopic",
 ) -> tuple[int, dict[str, str], bytes]:
     if method == "GET" and path == "/health":
         return _json(200, {"status": "ok", "version": __version__})
     if method == "GET" and path == "/v1/models":
-        return _json(200, {"object": "list", "data": [_model_payload(entry) for entry in models.list_models()]})
+        entries: list[Any] = list(models.list_models())
+        active_entry = _active_text_entry(active_text_model_path, active_text_model_id)
+        if active_entry is not None:
+            entries.append(active_entry)
+        return _json(200, {"object": "list", "data": [_model_payload(entry) for entry in entries]})
     if method == "GET" and path.startswith("/v1/utopic/runs/") and path.endswith("/events"):
         run_id = path.removeprefix("/v1/utopic/runs/").removesuffix("/events").strip("/")
         return _run_progress_response(run_id)
@@ -313,7 +390,7 @@ def handle_openai_request(
         return _json(404, {"error": {"message": f"unknown route: {path}", "code": "not_found"}})
     request = body or {}
     model_id = str(request.get("model") or _default_model_for_endpoint(path))
-    entry = models.get_model(model_id)
+    entry = _resolve_request_model(model_id, active_text_model_path, active_text_model_id)
     if entry is None:
         return _json(404, {"error": {"message": f"unknown model: {model_id}", "code": "model_not_found"}})
     if path not in entry.endpoints:
@@ -1379,6 +1456,8 @@ def _json(status: int, payload: dict[str, Any]) -> tuple[int, dict[str, str], by
 
 class GatewayHandler(BaseHTTPRequestHandler):
     native_base_url: Optional[str] = None
+    active_text_model_path: Optional[Path] = None
+    active_text_model_id: str = "utopic"
 
     def do_GET(self) -> None:
         self._send(
@@ -1387,6 +1466,8 @@ class GatewayHandler(BaseHTTPRequestHandler):
                 self.path,
                 None,
                 native_base_url=self.native_base_url,
+                active_text_model_path=self.active_text_model_path,
+                active_text_model_id=self.active_text_model_id,
             )
         )
 
@@ -1407,6 +1488,8 @@ class GatewayHandler(BaseHTTPRequestHandler):
                 self.path,
                 body,
                 native_base_url=self.native_base_url,
+                active_text_model_path=self.active_text_model_path,
+                active_text_model_id=self.active_text_model_id,
             )
         )
 
@@ -1422,11 +1505,19 @@ class GatewayHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
-def serve(host: str = "127.0.0.1", port: int = 8911, native_base_url: Optional[str] = None) -> None:
+def serve(
+    host: str = "127.0.0.1",
+    port: int = 8911,
+    native_base_url: Optional[str] = None,
+    active_text_model_path: Optional[Path] = None,
+    active_text_model_id: str = "utopic",
+) -> None:
     class ConfiguredGatewayHandler(GatewayHandler):
         pass
 
     ConfiguredGatewayHandler.native_base_url = native_base_url
+    ConfiguredGatewayHandler.active_text_model_path = active_text_model_path
+    ConfiguredGatewayHandler.active_text_model_id = active_text_model_id
     server = ThreadingHTTPServer((host, port), ConfiguredGatewayHandler)
     try:
         server.serve_forever()
