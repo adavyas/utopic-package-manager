@@ -86,6 +86,9 @@ def _invoke_runner(
         )
     if payload.get("ok") is False:
         return payload
+    invalid_response = _validate_success_response(payload)
+    if invalid_response is not None:
+        return invalid_response
 
     metrics = payload.get("metrics")
     if not isinstance(metrics, dict):
@@ -188,6 +191,41 @@ def _load_runner_stdout(stdout: str) -> dict[str, Any]:
             raise ValueError("native runner returned a non-object response")
         return payload
     raise ValueError("native runner did not write a response")
+
+
+def _validate_success_response(payload: dict[str, Any]) -> dict[str, Any] | None:
+    if payload.get("ok") is not True:
+        return _error(
+            "runner_failed",
+            f"native runner response did not match {SCHEMA_VERSION}",
+            {"missing": ["ok"], "schema_version": SCHEMA_VERSION},
+        )
+
+    required = ["type", "artifacts", "metrics", "backend"]
+    missing = [field for field in required if field not in payload]
+    if missing:
+        return _error(
+            "runner_failed",
+            f"native runner response did not match {SCHEMA_VERSION}",
+            {"missing": missing, "schema_version": SCHEMA_VERSION},
+        )
+
+    invalid: dict[str, Any] = {}
+    if payload["type"] not in {"text", "image", "audio", "video", "artifact"}:
+        invalid["type"] = payload["type"]
+    if not isinstance(payload["artifacts"], list):
+        invalid["artifacts"] = type(payload["artifacts"]).__name__
+    if not isinstance(payload["metrics"], dict):
+        invalid["metrics"] = type(payload["metrics"]).__name__
+    if payload["backend"] not in {"metal", "cuda", "cpu"}:
+        invalid["backend"] = payload["backend"]
+    if invalid:
+        return _error(
+            "runner_failed",
+            f"native runner response did not match {SCHEMA_VERSION}",
+            {"invalid": invalid, "schema_version": SCHEMA_VERSION},
+        )
+    return None
 
 
 def native_readiness_error(entry: models.ModelEntry) -> dict[str, Any]:

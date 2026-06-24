@@ -142,6 +142,42 @@ def test_runner_request_matches_versioned_chat_fixture():
     assert _normalize_runner_request(payload) == _load_fixture("chat_request.json")
 
 
+def test_runner_rejects_invalid_success_response(monkeypatch, tmp_path):
+    model_path = tmp_path / "model.gguf"
+    model_path.write_text("fake", encoding="utf-8")
+    runner_path = tmp_path / "utopic-runner"
+    runner_path.write_text("runner", encoding="utf-8")
+    entry = models.ModelEntry(
+        id="unit-text",
+        name="Unit Text",
+        family="unit",
+        filename="model.gguf",
+        url="https://example.invalid/model.gguf",
+        size="1 MiB",
+        recommended=True,
+        description="unit",
+        modality="text",
+        engine="native-text",
+        runtime="native",
+        runner="utopic-runner",
+        native_status="ready",
+    )
+    monkeypatch.setattr(type(entry), "path", property(lambda self: model_path))
+    monkeypatch.setattr(native_runner._native, "binary_path", lambda _name: runner_path)
+
+    def fake_run(command, **kwargs):
+        return subprocess.CompletedProcess(command, 0, stdout=json.dumps({"ok": True, "type": "text"}) + "\n", stderr="")
+
+    monkeypatch.setattr(native_runner.subprocess, "run", fake_run)
+
+    payload = native_runner.chat_completion(entry, {"messages": [{"role": "user", "content": "hello"}]})
+
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "runner_failed"
+    assert payload["error"]["message"] == "native runner response did not match utopic-runner/v1"
+    assert payload["error"]["detail"]["missing"] == ["artifacts", "metrics", "backend"]
+
+
 def test_runner_request_emits_stable_contract_for_artifact_generation():
     entry = models.ModelEntry(
         id="unit-image",
