@@ -262,7 +262,7 @@
     "repo": "city96/FLUX.1-schnell-gguf",
     "size": "native stable-diffusion.cpp component bundle",
     "recommended": false,
-    "description": "Experimental native stable-diffusion.cpp image path for FLUX.1-schnell Q4. Uses component artifacts instead of the Python Diffusers bridge.",
+    "description": "Ready native stable-diffusion.cpp image path for FLUX.1-schnell Q4. Uses component artifacts and the local utopic_runner image engine instead of the Python Diffusers bridge.",
     "modality": "image",
     "engine": "stable-diffusion-cpp",
     "runtime": "native",
@@ -279,7 +279,7 @@
       "image/png"
     ],
     "runner": "utopic_runner",
-    "native_status": "experimental",
+    "native_status": "ready",
     "supported_backends": [
       "metal",
       "cuda",

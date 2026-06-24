@@ -18,7 +18,7 @@ CORE_CATALOG_PATH = (
     / "utopic_core"
     / "models.json"
 )
-EXPECTED_NATIVE_REF = "7e2f8410481bdd94edd9dd5f603877d8397e591f"
+EXPECTED_NATIVE_REF = "449db7dd72c0f0b71a35e7c18b0eab88f7d272da"
 
 REQUIRED_NATIVE_RUNNER_FILES = {
     "runner.cpp",
@@ -87,6 +87,16 @@ def test_native_ref_metadata_matches_installer_pin():
 
     assert pyproject["tool"]["utopic"]["native-ref"] == installer.UTOPIC_NATIVE_REF
     assert installer.UTOPIC_NATIVE_REF == EXPECTED_NATIVE_REF
+
+
+def test_vendored_core_marks_native_image_model_ready():
+    catalog = json.loads(CORE_CATALOG_PATH.read_text(encoding="utf-8"))
+    entry = next(item for item in catalog if item["id"] == "flux-1-schnell-q4-native")
+
+    assert entry["runtime"] == "native"
+    assert entry["engine"] == "stable-diffusion-cpp"
+    assert entry["runner"] == "utopic_runner"
+    assert entry["native_status"] == "ready"
 
 
 def test_package_manager_no_longer_owns_legacy_native_source():
