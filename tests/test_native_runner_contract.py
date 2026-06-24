@@ -58,8 +58,12 @@ def test_runner_contract_schema_and_fixtures_are_packaged():
     assert success_schema["properties"]["type"]["enum"] == ["text", "image", "audio", "video", "artifact"]
     assert success_schema["properties"]["backend"]["enum"] == ["metal", "cuda", "cpu"]
     assert success_schema["properties"]["artifacts"]["items"]["properties"]["mime_type"]["type"] == "string"
+    for field in ("run_id", "output_dir", "progress_path", "progress_url"):
+        assert success_schema["properties"][field]["type"] == "string"
     assert error_schema["required"] == ["ok", "error"]
     assert error_schema["properties"]["ok"]["const"] is False
+    for field in ("run_id", "output_dir", "progress_path", "progress_url"):
+        assert error_schema["properties"][field]["type"] == "string"
     error_properties = error_schema["properties"]["error"]["properties"]
     assert error_properties["code"]["enum"] == [
         "missing_model",

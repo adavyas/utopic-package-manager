@@ -556,6 +556,22 @@ static json planned_native_response(const runner_request & req) {
     });
 }
 
+static void attach_run_metadata(json & response, const runner_request & req) {
+    if (!response.is_object()) {
+        return;
+    }
+    if (!req.run_id.empty()) {
+        response["run_id"] = req.run_id;
+        response["progress_url"] = string("/v1/utopic/runs/") + req.run_id + "/events";
+    }
+    if (!req.output_dir.empty()) {
+        response["output_dir"] = req.output_dir;
+    }
+    if (!req.progress_path.empty()) {
+        response["progress_path"] = req.progress_path;
+    }
+}
+
 static json run_request(const runner_request & req, const json & root) {
     if (req.task == "chat") {
         return run_chat(root);
@@ -616,6 +632,7 @@ int main(int argc, char ** argv) {
     } catch (const std::exception & exc) {
         response = error_response("runner_failed", string("request handling failed: ") + exc.what());
     }
+    attach_run_metadata(response, req);
 
     if (response.value("ok", false)) {
         append_progress_event(req, "completed", {{"type", response.value("type", "")}});

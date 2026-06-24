@@ -421,6 +421,46 @@ def test_native_runner_writes_progress_events_for_planned_task(tmp_path):
     assert events[1]["error"]["code"] == "unsupported_model"
 
 
+def test_native_runner_response_includes_run_metadata_for_planned_task(tmp_path):
+    output_dir = tmp_path / "run" / "outputs"
+    progress_path = tmp_path / "run" / "progress.jsonl"
+    request_path = tmp_path / "planned-image-with-run-metadata.json"
+    request_path.write_text(
+        json.dumps(
+            _contract_request(
+                tmp_path,
+                {
+                    "run_id": "run_response_metadata",
+                    "task": "image",
+                    "model": "unit-image",
+                    "input": {"prompt": "a red cube"},
+                    "output_dir": str(output_dir),
+                    "progress_path": str(progress_path),
+                    "options": {
+                        "modality": "image",
+                        "engine": "diffusers",
+                        "runtime": "planned_native",
+                        "runner": "utopic-runner",
+                        "native_status": "planned",
+                    },
+                },
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    completed = _run_runner(_runner_binary(), request_path)
+    payload = _last_json(completed.stdout)
+
+    assert completed.returncode != 0
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "unsupported_model"
+    assert payload["run_id"] == "run_response_metadata"
+    assert payload["output_dir"] == str(output_dir)
+    assert payload["progress_path"] == str(progress_path)
+    assert payload["progress_url"] == "/v1/utopic/runs/run_response_metadata/events"
+
+
 def test_modality_runner_entrypoint_reports_planned_readiness(tmp_path):
     request_path = tmp_path / "planned-image.json"
     request_path.write_text(

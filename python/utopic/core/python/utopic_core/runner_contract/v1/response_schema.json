@@ -11,6 +11,18 @@
         "ok": {
           "const": true
         },
+        "run_id": {
+          "type": "string"
+        },
+        "output_dir": {
+          "type": "string"
+        },
+        "progress_path": {
+          "type": "string"
+        },
+        "progress_url": {
+          "type": "string"
+        },
         "type": {
           "enum": ["text", "image", "audio", "video", "artifact"]
         },
@@ -60,6 +72,18 @@
       "properties": {
         "ok": {
           "const": false
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "output_dir": {
+          "type": "string"
+        },
+        "progress_path": {
+          "type": "string"
+        },
+        "progress_url": {
+          "type": "string"
         },
         "error": {
           "type": "object",
