@@ -128,6 +128,14 @@ static json invalid_request(const string & message, const string & field) {
     });
 }
 
+static string context_init_error_code(const llama_model_params & mp) {
+    const string backend = host_backend();
+    if (mp.n_gpu_layers > 0 && backend != "cpu") {
+        return "backend_unavailable";
+    }
+    return "runner_failed";
+}
+
 static json detected_capacity() {
     const char * raw_memory = getenv("UTOPIC_GPU_MEMORY_GIB");
     json detected = json::object();
@@ -345,11 +353,13 @@ static json run_chat(const json & root) {
     }
     llama_context * ctx = llama_init_from_model(model, cp);
     if (!ctx) {
+        const string error_code = context_init_error_code(mp);
         llama_model_free(model);
         llama_backend_free();
-        return error_response("runner_failed", "context initialization failed", {
+        return error_response(error_code, "context initialization failed", {
             {"model", model_id},
             {"model_path", model_path},
+            {"backend", host_backend()},
         });
     }
 
