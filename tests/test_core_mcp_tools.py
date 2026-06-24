@@ -196,7 +196,7 @@ def test_runtime_stdio_mcp_model_check_reports_missing_model():
 
     assert mcp._runtime_stdio(stdin, stdout, native_base_url=None) == 0
     response = json.loads(stdout.getvalue())
-    assert response["result"]["isError"] is True
+    assert response["result"]["isError"] is False
     payload = json.loads(response["result"]["content"][0]["text"])
     assert payload["id"] == "diffusiongemma-26b-a4b-q4"
     assert payload["ready"] is False

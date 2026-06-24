@@ -838,7 +838,7 @@ def test_runtime_stdio_mcp_reports_packaged_model_readiness():
     response = json.loads(stdout.getvalue())
     payload = json.loads(response["result"]["content"][0]["text"])
 
-    assert response["result"]["isError"] is True
+    assert response["result"]["isError"] is False
     assert payload["id"] == "diffusiongemma-26b-a4b-q4"
     assert payload["status"] in {"missing_model_file", "size_mismatch"}
     assert "utopic models pull diffusiongemma-26b-a4b-q4" in payload["next_steps"]
@@ -888,7 +888,7 @@ def test_gateway_mcp_checks_model_readiness(monkeypatch):
     )
 
     assert status == 200
-    assert payload["result"]["isError"] is True
+    assert payload["result"]["isError"] is False
     result = json.loads(payload["result"]["content"][0]["text"])
     assert result["object"] == "utopic.model_check.list"
     assert result["summary"] == {"ready": 1, "not_ready": 1, "total": 2}

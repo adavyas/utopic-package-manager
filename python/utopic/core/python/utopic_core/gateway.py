@@ -516,7 +516,7 @@ def _mcp_tool_call(
         return _mcp_text_result(
             request_id,
             json.dumps(payload, indent=2, sort_keys=True),
-            is_error=not bool(payload.get("ready")),
+            is_error=False,
         )
     if name == "utopic_models_pull":
         model_id = str(arguments.get("model") or "")
