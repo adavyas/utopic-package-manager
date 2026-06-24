@@ -266,8 +266,18 @@ int main(int argc, char ** argv) {
         if (task == "chat") {
             response = run_chat(root);
         } else {
-            response = error_response("unsupported_model", "native runner task is not supported yet", {
+            const json opts = root.value("options", json::object());
+            response = error_response("unsupported_model", "native runner task is not implemented yet", {
                 {"task", task},
+                {"model", root.value("model", "")},
+                {"modality", opts.value("modality", task)},
+                {"engine", opts.value("engine", "")},
+                {"runtime", opts.value("runtime", "")},
+                {"runner", opts.value("runner", "")},
+                {"native_status", opts.value("native_status", "")},
+                {"supported_backends", opts.value("supported_backends", json::array())},
+                {"expected_vram_gib", opts.value("expected_vram_gib", json())},
+                {"expected_ram_gib", opts.value("expected_ram_gib", json())},
             });
         }
     } catch (const std::exception & exc) {

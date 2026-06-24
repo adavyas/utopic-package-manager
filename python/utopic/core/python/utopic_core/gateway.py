@@ -326,7 +326,13 @@ def handle_openai_request(
         command = _explicit_bridge_command(entry)
         if command is not None:
             return _run_bridge(entry, path, runtime_request, command)
-        return _json(503, native_runner.native_readiness_error(entry))
+        runner_payload = native_runner.generation(entry, path, runtime_request)
+        if runner_payload.get("ok") is False:
+            return _json(_native_runner_error_status(runner_payload), runner_payload)
+        artifact_payload = _native_runner_to_artifact_response(entry, path, runtime_request, runner_payload)
+        if path == "/v1/responses":
+            return _json(200, _artifact_response_to_responses(entry, artifact_payload))
+        return _json(200, artifact_payload)
     if native_base_url and entry.modality == "text":
         native_path = "/v1/chat/completions" if path == "/v1/responses" else path
         status, headers, response_body = _forward_native_text(native_base_url, native_path, runtime_request)
@@ -1177,6 +1183,39 @@ def _native_runner_to_chat_completion(entry: models.ModelEntry, payload: dict[st
             "metrics": metrics,
         },
     }
+
+
+def _native_runner_to_artifact_response(
+    entry: models.ModelEntry,
+    endpoint: str,
+    request: dict[str, Any],
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    artifacts = payload.get("artifacts")
+    if not isinstance(artifacts, list):
+        artifacts = []
+    normalized_artifacts = [artifact for artifact in artifacts if isinstance(artifact, dict)]
+    response = {
+        "id": f"run_{uuid.uuid4().hex}",
+        "object": "utopic.artifact.response",
+        "created": int(time.time()),
+        "model": entry.id,
+        "modality": entry.modality,
+        "engine": entry.engine,
+        "artifacts": normalized_artifacts,
+        "progress": [],
+        "metadata": {
+            "runtime": "native-runner",
+            "backend": payload.get("backend"),
+            "metrics": payload.get("metrics") if isinstance(payload.get("metrics"), dict) else {},
+            "native_status": entry.native_status,
+            "runner": entry.runner,
+            "endpoint": endpoint,
+        },
+    }
+    if entry.modality == "image":
+        response["data"] = _image_generation_data(normalized_artifacts, request)
+    return response
 
 
 def _native_chat_payload_to_response(entry: models.ModelEntry, payload: dict[str, Any]) -> dict[str, Any]:

@@ -20,12 +20,29 @@ def chat_completion(entry: models.ModelEntry, request: dict[str, Any]) -> dict[s
             {"model": entry.id, "model_path": str(entry.path)},
         )
 
+    return _invoke_runner(_runner_request(entry, "chat", {"messages": request.get("messages", [])}, request))
+
+
+def generation(entry: models.ModelEntry, endpoint: str, request: dict[str, Any]) -> dict[str, Any]:
+    runner_input = _generation_input(entry, request)
+    return _invoke_runner(
+        _runner_request(entry, entry.modality, runner_input, request, endpoint=endpoint),
+        binary_unavailable_payload=native_readiness_error(entry),
+    )
+
+
+def _invoke_runner(
+    runner_request: dict[str, Any],
+    *,
+    binary_unavailable_payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     try:
         runner = _native.binary_path("utopic_runner")
     except RuntimeError as exc:
+        if binary_unavailable_payload is not None:
+            return binary_unavailable_payload
         return _error("backend_unavailable", str(exc), {"binary": "utopic_runner"})
 
-    runner_request = _runner_request(entry, request)
     with tempfile.TemporaryDirectory(prefix="utopic-runner-") as tmp:
         request_path = Path(tmp) / "request.json"
         request_path.write_text(json.dumps(runner_request), encoding="utf-8")
@@ -42,7 +59,7 @@ def chat_completion(entry: models.ModelEntry, request: dict[str, Any]) -> dict[s
             return _error(
                 "runner_failed",
                 f"native runner timed out after {_runner_timeout_seconds()} seconds",
-                {"model": entry.id},
+                {"model": runner_request.get("model")},
             )
 
     try:
@@ -73,27 +90,70 @@ def chat_completion(entry: models.ModelEntry, request: dict[str, Any]) -> dict[s
     return payload
 
 
-def _runner_request(entry: models.ModelEntry, request: dict[str, Any]) -> dict[str, Any]:
+def _runner_request(
+    entry: models.ModelEntry,
+    task: str,
+    runner_input: dict[str, Any],
+    request: dict[str, Any],
+    *,
+    endpoint: str | None = None,
+) -> dict[str, Any]:
+    cache_path = _entry_path_string(entry)
     options: dict[str, Any] = {
-        "model_path": str(entry.path),
+        "endpoint": endpoint or "/v1/chat/completions",
+        "modality": entry.modality,
+        "engine": entry.engine,
+        "runtime": entry.runtime,
+        "runner": entry.runner,
+        "native_status": entry.native_status,
+        "outputs": list(entry.outputs),
+        "supported_backends": list(entry.supported_backends),
     }
+    if cache_path is not None:
+        options["model_cache_path"] = cache_path
+    if entry.runtime == "native":
+        options["model_path"] = str(entry.path)
+    if entry.expected_vram_gib is not None:
+        options["expected_vram_gib"] = entry.expected_vram_gib
+    if entry.expected_ram_gib is not None:
+        options["expected_ram_gib"] = entry.expected_ram_gib
     _copy_option(request, options, "max_tokens", "max_tokens")
     _copy_option(request, options, "temperature", "temperature")
     _copy_option(request, options, "seed", "seed")
     _copy_option(request, options, "diffusion_canvas_tokens", "canvas")
     _copy_option(request, options, "diffusion_steps", "steps")
     _copy_option(request, options, "diffusion_block_length", "diffusion_block_length")
+    _copy_option(request, options, "size", "size")
+    _copy_option(request, options, "response_format", "response_format")
+    _copy_option(request, options, "voice", "voice")
+    _copy_option(request, options, "duration", "duration")
 
     return {
         "schema_version": SCHEMA_VERSION,
-        "task": "chat",
+        "task": task,
         "model": entry.id,
-        "input": {
-            "messages": request.get("messages", []),
-        },
+        "input": runner_input,
         "options": options,
         "output_dir": str(_runs_dir()),
     }
+
+
+def _generation_input(entry: models.ModelEntry, request: dict[str, Any]) -> dict[str, Any]:
+    if entry.modality == "tts":
+        return {"input": request.get("input", "")}
+    if entry.modality == "misc":
+        return {
+            "artifact": request.get("artifact") or request.get("input_file") or "",
+            "artifact_type": request.get("artifact_type", ""),
+        }
+    return {"prompt": request.get("prompt", "")}
+
+
+def _entry_path_string(entry: models.ModelEntry) -> str | None:
+    try:
+        return str(entry.path)
+    except RuntimeError:
+        return None
 
 
 def _load_runner_stdout(stdout: str) -> dict[str, Any]:
