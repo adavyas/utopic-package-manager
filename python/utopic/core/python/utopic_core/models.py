@@ -58,6 +58,33 @@ class ModelEntry:
             object.__setattr__(self, "native_status", "planned" if self.runtime == "bridge" else "ready")
 
 
+@dataclass(frozen=True)
+class LocalTextEntry:
+    id: str
+    name: str
+    path: Path
+    family: str = "local-gguf"
+    filename: str = ""
+    url: str = ""
+    size: str = "local"
+    recommended: bool = False
+    description: str = "Local GGUF text model selected at runtime."
+    bytes: Optional[int] = None
+    modality: str = "text"
+    engine: str = "native-gguf"
+    runtime: str = "native"
+    hardware: tuple[str, ...] = ("local",)
+    supported_backends: tuple[str, ...] = ("metal", "cuda", "cpu")
+    runner: str = "utopic_runner"
+    native_status: str = "ready"
+    expected_vram_gib: Optional[float] = None
+    expected_ram_gib: Optional[float] = None
+    endpoints: tuple[str, ...] = ("/v1/chat/completions", "/v1/responses")
+    outputs: tuple[str, ...] = ("text",)
+    repo: Optional[str] = None
+    requirements: Optional[dict[str, object]] = None
+
+
 VALID_MODALITIES = {"text", "image", "tts", "music", "video", "misc"}
 VALID_RUNTIMES = {"native", "bridge"}
 VALID_NATIVE_STATUSES = {"ready", "planned", "experimental", "unsupported_on_device"}
@@ -266,6 +293,16 @@ def default_model() -> ModelEntry:
     if not catalog:
         raise RuntimeError("Utopic model catalog is empty.")
     return catalog[0]
+
+
+def local_text_entry(model_id: str, model_path: Path) -> LocalTextEntry:
+    path = model_path.expanduser()
+    return LocalTextEntry(
+        id=model_id or "utopic",
+        name=f"Local GGUF ({path.name})",
+        filename=path.name,
+        path=path,
+    )
 
 
 def _copy_stream_with_progress(url: str, destination: Path) -> None:

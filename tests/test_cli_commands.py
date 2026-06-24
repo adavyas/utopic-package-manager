@@ -26,6 +26,24 @@ def _stub_server_binary(monkeypatch):
     monkeypatch.setattr(cli._native, "binary_path", lambda name: Path(f"/fake/bin/{name}"))
 
 
+def _stub_prompt_runner(monkeypatch, calls, model_path=Path("/models/dream.gguf")):
+    def fake_ensure_model(value=None):
+        calls.append(("model", value))
+        return model_path
+
+    def fake_chat_completion(entry, request):
+        calls.append(("runner", entry.id, entry.path, request))
+        return {"ok": True, "type": "text", "text": "runner ok", "metrics": {}}
+
+    monkeypatch.setattr(cli, "_ensure_setup", lambda enabled=True, binary_name="utopic": calls.append(("setup", enabled, binary_name)))
+    monkeypatch.setattr(cli._native, "binary_path", lambda name: calls.append(("binary", name)) or Path(f"/fake/bin/{name}"))
+    monkeypatch.setattr(cli._native, "main", lambda *_args: pytest.fail("legacy utopic binary should not run"))
+    monkeypatch.setattr(cli.models, "ensure_model", fake_ensure_model)
+    monkeypatch.setattr(cli.models, "get_model", lambda _model_id: None)
+    monkeypatch.setattr(cli.models, "default_model", lambda: cli.models.local_text_entry("default-model", model_path))
+    monkeypatch.setattr(cli.native_runner, "chat_completion", fake_chat_completion)
+
+
 def test_chat_launch_sets_runtime_paths_and_executes_node(monkeypatch, tmp_path):
     script = tmp_path / "utopic-chat.js"
     script.write_text("console.log('chat')\n", encoding="utf-8")
@@ -714,114 +732,120 @@ def test_cli_run_help_after_no_setup_does_not_run_setup_or_native(monkeypatch, c
     assert captured.err == ""
 
 
-def test_cli_run_with_prompt_delegates_to_native_one_shot(monkeypatch):
+def test_cli_run_with_prompt_delegates_to_runner_contract(monkeypatch, capsys):
     calls = []
 
-    monkeypatch.setattr(cli, "_ensure_setup", lambda enabled=True, binary_name="utopic": calls.append(("setup", enabled, binary_name)))
-    monkeypatch.setattr(cli._native, "main", lambda name, argv: calls.append((name, list(argv))))
+    _stub_prompt_runner(monkeypatch, calls, Path("model.gguf"))
 
     cli.main(["run", "-m", "model.gguf", "-p", "hello", "-n", "8"])
 
-    assert calls == [
-        ("setup", True, "utopic"),
-        ("utopic", ["-m", "model.gguf", "-p", "hello", "-n", "8"]),
+    assert calls[0:3] == [
+        ("setup", True, "utopic_runner"),
+        ("binary", "utopic_runner"),
+        ("model", "model.gguf"),
     ]
+    assert calls[3][0:3] == ("runner", "model.gguf", Path("model.gguf"))
+    assert calls[3][3]["messages"] == [{"role": "user", "content": "hello"}]
+    assert calls[3][3]["max_tokens"] == 8
+    assert capsys.readouterr().out == "runner ok\n"
 
 
 def test_cli_run_with_prompt_resolves_model_alias(monkeypatch):
     calls = []
 
-    monkeypatch.setattr(cli, "_ensure_setup", lambda enabled=True, binary_name="utopic": calls.append(("setup", enabled, binary_name)))
-    monkeypatch.setattr(cli.models, "ensure_model", lambda value=None: calls.append(("model", value)) or Path("/models/dream.gguf"))
-    monkeypatch.setattr(cli._native, "main", lambda name, argv: calls.append((name, list(argv))))
+    _stub_prompt_runner(monkeypatch, calls)
 
     cli.main(["run", "-m", "dream-7b-q4", "-p", "hello"])
 
-    assert calls == [
-        ("setup", True, "utopic"),
+    assert calls[0:3] == [
+        ("setup", True, "utopic_runner"),
+        ("binary", "utopic_runner"),
         ("model", "dream-7b-q4"),
-        ("utopic", ["-m", "/models/dream.gguf", "-p", "hello"]),
     ]
+    assert calls[3][0:3] == ("runner", "dream-7b-q4", Path("/models/dream.gguf"))
+    assert calls[3][3]["messages"] == [{"role": "user", "content": "hello"}]
 
 
 def test_cli_run_with_prompt_normalizes_long_model_and_prompt_flags(monkeypatch):
     calls = []
 
-    monkeypatch.setattr(cli, "_ensure_setup", lambda enabled=True, binary_name="utopic": calls.append(("setup", enabled, binary_name)))
-    monkeypatch.setattr(cli.models, "ensure_model", lambda value=None: calls.append(("model", value)) or Path("/models/dream.gguf"))
-    monkeypatch.setattr(cli._native, "main", lambda name, argv: calls.append((name, list(argv))))
+    _stub_prompt_runner(monkeypatch, calls)
 
     cli.main(["run", "--model", "dream-7b-q4", "--prompt", "hello", "-n", "8"])
 
-    assert calls == [
-        ("setup", True, "utopic"),
+    assert calls[0:3] == [
+        ("setup", True, "utopic_runner"),
+        ("binary", "utopic_runner"),
         ("model", "dream-7b-q4"),
-        ("utopic", ["-m", "/models/dream.gguf", "-p", "hello", "-n", "8"]),
     ]
+    assert calls[3][3]["messages"] == [{"role": "user", "content": "hello"}]
+    assert calls[3][3]["max_tokens"] == 8
 
 
 def test_cli_run_with_prompt_normalizes_equals_form_native_flags(monkeypatch):
     calls = []
 
-    monkeypatch.setattr(cli, "_ensure_setup", lambda enabled=True, binary_name="utopic": calls.append(("setup", enabled, binary_name)))
-    monkeypatch.setattr(cli.models, "ensure_model", lambda value=None: calls.append(("model", value)) or Path("/models/dream.gguf"))
-    monkeypatch.setattr(cli._native, "main", lambda name, argv: calls.append((name, list(argv))))
+    _stub_prompt_runner(monkeypatch, calls)
 
     cli.main(["run", "--model=dream-7b-q4", "--prompt=hello", "--temp=0.1", "--seed=7"])
 
-    assert calls == [
-        ("setup", True, "utopic"),
+    assert calls[0:3] == [
+        ("setup", True, "utopic_runner"),
+        ("binary", "utopic_runner"),
         ("model", "dream-7b-q4"),
-        ("utopic", ["-m", "/models/dream.gguf", "-p", "hello", "--temp", "0.1", "--seed", "7"]),
     ]
+    assert calls[3][3]["messages"] == [{"role": "user", "content": "hello"}]
+    assert calls[3][3]["temperature"] == 0.1
+    assert calls[3][3]["seed"] == 7
 
 
 def test_cli_run_with_prompt_resolves_positional_model_alias(monkeypatch):
     calls = []
 
-    monkeypatch.setattr(cli, "_ensure_setup", lambda enabled=True, binary_name="utopic": calls.append(("setup", enabled, binary_name)))
-    monkeypatch.setattr(cli.models, "ensure_model", lambda value=None: calls.append(("model", value)) or Path("/models/dream.gguf"))
-    monkeypatch.setattr(cli._native, "main", lambda name, argv: calls.append((name, list(argv))))
+    _stub_prompt_runner(monkeypatch, calls)
 
     cli.main(["run", "dream-7b-q4", "-p", "hello", "-n", "8"])
 
-    assert calls == [
-        ("setup", True, "utopic"),
+    assert calls[0:3] == [
+        ("setup", True, "utopic_runner"),
+        ("binary", "utopic_runner"),
         ("model", "dream-7b-q4"),
-        ("utopic", ["-m", "/models/dream.gguf", "-p", "hello", "-n", "8"]),
     ]
+    assert calls[3][3]["messages"] == [{"role": "user", "content": "hello"}]
+    assert calls[3][3]["max_tokens"] == 8
 
 
 def test_cli_run_with_prompt_without_model_uses_default_model(monkeypatch):
     calls = []
 
-    monkeypatch.setattr(cli, "_ensure_setup", lambda enabled=True, binary_name="utopic": calls.append(("setup", enabled, binary_name)))
-    monkeypatch.setattr(cli.models, "ensure_model", lambda value=None: calls.append(("model", value)) or Path("/models/default.gguf"))
-    monkeypatch.setattr(cli._native, "main", lambda name, argv: calls.append((name, list(argv))))
+    _stub_prompt_runner(monkeypatch, calls, Path("/models/default.gguf"))
 
     cli.main(["run", "-p", "hello", "-n", "8"])
 
-    assert calls == [
-        ("setup", True, "utopic"),
+    assert calls[0:3] == [
+        ("setup", True, "utopic_runner"),
+        ("binary", "utopic_runner"),
         ("model", None),
-        ("utopic", ["-m", "/models/default.gguf", "-p", "hello", "-n", "8"]),
     ]
+    assert calls[3][0:3] == ("runner", "default-model", Path("/models/default.gguf"))
+    assert calls[3][3]["messages"] == [{"role": "user", "content": "hello"}]
+    assert calls[3][3]["max_tokens"] == 8
 
 
 def test_cli_run_prompt_allows_negative_numeric_prompt_values(monkeypatch):
     calls = []
 
-    monkeypatch.setattr(cli, "_ensure_setup", lambda enabled=True, binary_name="utopic": calls.append(("setup", enabled, binary_name)))
-    monkeypatch.setattr(cli.models, "ensure_model", lambda value=None: calls.append(("model", value)) or Path("/models/default.gguf"))
-    monkeypatch.setattr(cli._native, "main", lambda name, argv: calls.append((name, list(argv))))
+    _stub_prompt_runner(monkeypatch, calls, Path("/models/default.gguf"))
 
     cli.main(["run", "-p", "hello", "--seed", "-1"])
 
-    assert calls == [
-        ("setup", True, "utopic"),
+    assert calls[0:3] == [
+        ("setup", True, "utopic_runner"),
+        ("binary", "utopic_runner"),
         ("model", None),
-        ("utopic", ["-m", "/models/default.gguf", "-p", "hello", "--seed", "-1"]),
     ]
+    assert calls[3][3]["messages"] == [{"role": "user", "content": "hello"}]
+    assert calls[3][3]["seed"] == -1
 
 
 @pytest.mark.parametrize("args", [["--model="], ["-m", ""]])
@@ -1773,11 +1797,10 @@ def test_cli_run_prompt_no_setup_checks_binary_before_default_model_download(mon
 
 def test_cli_run_prompt_reports_missing_binary_without_traceback(monkeypatch, capsys):
     monkeypatch.setattr(cli, "_ensure_setup", lambda enabled=True, binary_name="utopic": None)
-    monkeypatch.setattr(cli._native, "binary_path", lambda name: Path("/fake/bin/utopic"))
     monkeypatch.setattr(
         cli._native,
-        "main",
-        lambda name, argv: (_ for _ in ()).throw(RuntimeError("native binary missing")),
+        "binary_path",
+        lambda name: (_ for _ in ()).throw(RuntimeError("native binary missing")),
     )
 
     assert cli.main(["run", "--no-setup", "-m", "/models/default.gguf", "-p", "hi"]) == 1

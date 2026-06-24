@@ -12,7 +12,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Optional, Sequence
 
-from . import __version__, _native, bridge, chat, gateway, installer, mcp, models
+from . import __version__, _native, bridge, chat, gateway, installer, mcp, models, native_runner
 
 
 _RUN_VALUE_FLAGS = {"--host", "--port", "--native-port", "-ngl", "--ctx-size"}
@@ -363,6 +363,16 @@ def _extract_prompt_positional_model(args: Sequence[str]) -> tuple[Optional[str]
     return None, remaining
 
 
+def _extract_prompt_model(args: Sequence[str]) -> tuple[Optional[str], list[str]]:
+    remaining = list(args)
+    for index, arg in enumerate(remaining):
+        if arg == "-m":
+            value = remaining[index + 1]
+            del remaining[index : index + 2]
+            return value, remaining
+    return _extract_prompt_positional_model(remaining)
+
+
 def _value_after(args: Sequence[str], flag: str, default: str) -> str:
     for index, arg in enumerate(args):
         if arg == flag and index + 1 < len(args):
@@ -370,6 +380,102 @@ def _value_after(args: Sequence[str], flag: str, default: str) -> str:
         if arg.startswith(flag + "="):
             return arg.split("=", 1)[1]
     return default
+
+
+def _prompt_value(args: Sequence[str], flag: str) -> Optional[str]:
+    for index, arg in enumerate(args):
+        if arg == flag and index + 1 < len(args):
+            return args[index + 1]
+    return None
+
+
+def _prompt_flag(args: Sequence[str], flag: str) -> bool:
+    return flag in args
+
+
+def _set_int_option(request: dict[str, Any], args: Sequence[str], flag: str, key: str) -> None:
+    value = _prompt_value(args, flag)
+    if value is not None:
+        request[key] = int(value)
+
+
+def _set_float_option(request: dict[str, Any], args: Sequence[str], flag: str, key: str) -> None:
+    value = _prompt_value(args, flag)
+    if value is not None:
+        request[key] = float(value)
+
+
+def _set_string_option(request: dict[str, Any], args: Sequence[str], flag: str, key: str) -> None:
+    value = _prompt_value(args, flag)
+    if value is not None:
+        request[key] = value
+
+
+def _prompt_runner_entry(model_arg: Optional[str], model_path: Path) -> Any:
+    if model_arg:
+        entry = models.get_model(model_arg)
+        if entry is not None:
+            return entry
+        return models.local_text_entry(model_arg, model_path)
+    return models.default_model()
+
+
+def _prompt_runner_request(args: Sequence[str]) -> tuple[Any, dict[str, Any]]:
+    normalized = _normalize_prompt_native_args(args)
+    model_arg, remaining = _extract_prompt_model(normalized)
+    prompt = _prompt_value(remaining, "-p") or ""
+    model_path = models.ensure_model(model_arg)
+    entry = _prompt_runner_entry(model_arg, model_path)
+
+    messages: list[dict[str, str]] = []
+    system_prompt = _prompt_value(remaining, "--system")
+    if system_prompt is not None:
+        messages.append({"role": "system", "content": system_prompt})
+    messages.append({"role": "user", "content": prompt})
+
+    request: dict[str, Any] = {
+        "model": entry.id,
+        "messages": messages,
+    }
+    _set_int_option(request, remaining, "-n", "max_tokens")
+    _set_float_option(request, remaining, "--temp", "temperature")
+    _set_int_option(request, remaining, "--seed", "seed")
+    _set_int_option(request, remaining, "--steps", "diffusion_steps")
+    _set_int_option(request, remaining, "--diffusion-block-length", "diffusion_block_length")
+    _set_int_option(request, remaining, "--canvas", "diffusion_canvas_tokens")
+    _set_float_option(request, remaining, "--confidence", "confidence")
+    _set_int_option(request, remaining, "--converge", "converge")
+    _set_int_option(request, remaining, "--eb-steps", "eb_steps")
+    _set_int_option(request, remaining, "--slot-len", "slot_len")
+    _set_int_option(request, remaining, "-ngl", "gpu_layers")
+    _set_string_option(request, remaining, "--schema", "schema")
+    if _prompt_flag(remaining, "--soft-schema"):
+        request["schema_mode"] = "prompt"
+    if _prompt_value(remaining, "--tools") is not None:
+        request["tools"] = True
+    return entry, request
+
+
+def _run_prompt(args: Sequence[str], setup_enabled: bool) -> int:
+    _validate_prompt_value_flags(args)
+    _validate_run_value_flags(args)
+    _validate_model_argument_count(args, _PROMPT_VALUE_FLAGS)
+    _ensure_setup(setup_enabled, "utopic_runner")
+    _native.binary_path("utopic_runner")
+    entry, request = _prompt_runner_request(args)
+    payload = native_runner.chat_completion(entry, request)
+    if payload.get("ok") is False:
+        error = payload.get("error")
+        message = error.get("message") if isinstance(error, dict) else "native runner failed"
+        print(f"utopic run: {message}", file=sys.stderr)
+        return 1
+    text = payload.get("text", "")
+    if not isinstance(text, str):
+        print("utopic run: native runner returned non-text output", file=sys.stderr)
+        return 1
+    if text:
+        print(text)
+    return 0
 
 
 def _client_host(host: str) -> str:
@@ -1017,14 +1123,7 @@ def _run(argv: Sequence[str]) -> int:
 
     try:
         if _has_prompt(args):
-            _validate_prompt_value_flags(args)
-            _validate_run_value_flags(args)
-            _validate_model_argument_count(args, _PROMPT_VALUE_FLAGS)
-            _ensure_setup(setup_enabled)
-            if not setup_enabled:
-                _native.binary_path("utopic")
-            _native.main("utopic", _resolve_prompt_model_args(args))
-            return 0
+            return _run_prompt(args, setup_enabled)
 
         _validate_run_value_flags(args)
         _validate_model_argument_count(args, _RUN_VALUE_FLAGS)
