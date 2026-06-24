@@ -9,10 +9,21 @@ setup(
     packages=find_packages(where="python"),
     package_data={
         "utopic": [
-            "cmake/*",
-            "core/native/*",
-            "core/python/utopic_core/*",
-            "core/python/utopic_core/node/*",
+            "cmake/**/*",
+            "core/native/**/*",
+            "core/python/**/*",
+        ]
+    },
+    exclude_package_data={
+        "utopic": [
+            "core/python/**/__pycache__/*",
+            "core/python/**/*.pyc",
+            "core/python/**/*.pyo",
+            "core/python/**/*.pyd",
+            "**/__pycache__/*",
+            "**/*.pyc",
+            "**/*.pyo",
+            "**/*.pyd",
         ]
     },
     python_requires=">=3.10,<3.13",

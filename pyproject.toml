@@ -114,10 +114,21 @@ where = ["python"]
 
 [tool.setuptools.package-data]
 utopic = [
-  "cmake/*",
-  "core/native/*",
-  "core/python/utopic_core/*",
-  "core/python/utopic_core/node/*",
+  "cmake/**/*",
+  "core/native/**/*",
+  "core/python/**/*",
+]
+
+[tool.setuptools.exclude-package-data]
+utopic = [
+  "core/python/**/__pycache__/*",
+  "core/python/**/*.pyc",
+  "core/python/**/*.pyo",
+  "core/python/**/*.pyd",
+  "**/__pycache__/*",
+  "**/*.pyc",
+  "**/*.pyo",
+  "**/*.pyd",
 ]
 
 [tool.utopic]

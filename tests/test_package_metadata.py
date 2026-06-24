@@ -109,11 +109,53 @@ def test_package_data_globs_match_across_packaging_metadata():
 
     assert setup_globs is not None
     assert pyproject_globs == setup_globs
+    assert pyproject_globs == [
+        "cmake/**/*",
+        "core/native/**/*",
+        "core/python/**/*",
+    ]
+    assert all("*/*" in glob for glob in pyproject_globs)
 
     manifest = (REPO_ROOT / "MANIFEST.in").read_text(encoding="utf-8")
     assert "recursive-include python/utopic/core *" in manifest
     assert "recursive-include python/utopic/cmake *" in manifest
     assert "prune node" in manifest
+
+
+def test_package_data_excludes_bytecode_cache_artifacts():
+    if sys.version_info >= (3, 11):
+        import tomllib
+    else:
+        import tomli as tomllib
+
+    pyproject = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    pyproject_excludes = pyproject["tool"]["setuptools"]["exclude-package-data"]["utopic"]
+
+    setup_tree = ast.parse((REPO_ROOT / "setup.py").read_text(encoding="utf-8"))
+    setup_call = next(
+        node
+        for node in ast.walk(setup_tree)
+        if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "setup"
+    )
+    exclude_package_data = next(
+        keyword.value for keyword in setup_call.keywords if keyword.arg == "exclude_package_data"
+    )
+    assert isinstance(exclude_package_data, ast.Dict)
+    setup_excludes: list[str] | None = None
+    for key, value in zip(exclude_package_data.keys, exclude_package_data.values):
+        if isinstance(key, ast.Constant) and key.value == "utopic":
+            setup_excludes = [item.value for item in value.elts if isinstance(item, ast.Constant)]
+            break
+
+    assert setup_excludes == pyproject_excludes
+    assert "core/python/**/__pycache__/*" in pyproject_excludes
+    assert "core/python/**/*.pyc" in pyproject_excludes
+    assert "core/python/**/*.pyo" in pyproject_excludes
+    assert "core/python/**/*.pyd" in pyproject_excludes
+    assert "**/__pycache__/*" in pyproject_excludes
+    assert "**/*.pyc" in pyproject_excludes
+    assert "**/*.pyo" in pyproject_excludes
+    assert "**/*.pyd" in pyproject_excludes
 
 
 def test_package_manager_no_longer_owns_legacy_native_source():
