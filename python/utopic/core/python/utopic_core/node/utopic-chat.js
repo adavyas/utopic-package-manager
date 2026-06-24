@@ -171,6 +171,12 @@ function binDir() {
 function runnerBinary() {
     return path.join(binDir(), process.platform === "win32" ? "utopic_runner.exe" : "utopic_runner");
 }
+function cliBinary() {
+    if (process.env.UTOPIC_CLI)
+        return resolveLocalPath(process.env.UTOPIC_CLI);
+    const binary = path.join(binDir(), process.platform === "win32" ? "utopic.exe" : "utopic");
+    return fs.existsSync(binary) ? binary : "utopic";
+}
 function requireRunnerBinary() {
     const binary = runnerBinary();
     if (!fs.existsSync(binary))
@@ -601,7 +607,7 @@ async function startServer(options, runModel) {
     const logPath = serverLogPath();
     fs.mkdirSync(path.dirname(logPath), { recursive: true });
     const log = fs.openSync(logPath, "a");
-    const child = (0, node_child_process_1.spawn)(process.env.UTOPIC_CLI ?? "utopic", [
+    const child = (0, node_child_process_1.spawn)(cliBinary(), [
         "run",
         runModel,
         "--host", options.host,
