@@ -90,6 +90,10 @@ def _contract_request(tmp_path: Path, payload: dict[str, object]) -> dict[str, o
     return request
 
 
+def _progress_events(progress_path: Path) -> list[dict[str, object]]:
+    return [json.loads(line) for line in progress_path.read_text(encoding="utf-8").splitlines()]
+
+
 def test_native_runner_rejects_malformed_json(tmp_path):
     request_path = tmp_path / "bad-request.json"
     request_path.write_text("{not json", encoding="utf-8")
@@ -373,6 +377,48 @@ def test_native_runner_reports_planned_non_text_task_readiness(tmp_path):
         "min_ram_gib": 16.0,
         "allow_cpu": False,
     }
+
+
+def test_native_runner_writes_progress_events_for_planned_task(tmp_path):
+    progress_path = tmp_path / "run" / "progress.jsonl"
+    request_path = tmp_path / "planned-image-with-progress.json"
+    request_path.write_text(
+        json.dumps(
+            _contract_request(
+                tmp_path,
+                {
+                    "run_id": "run_progress",
+                    "task": "image",
+                    "model": "unit-image",
+                    "input": {"prompt": "a red cube"},
+                    "progress_path": str(progress_path),
+                    "options": {
+                        "modality": "image",
+                        "engine": "diffusers",
+                        "runtime": "planned_native",
+                        "runner": "utopic-runner",
+                        "native_status": "planned",
+                    },
+                },
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    completed = _run_runner(_runner_binary(), request_path)
+    payload = _last_json(completed.stdout)
+
+    assert completed.returncode != 0
+    assert payload["error"]["code"] == "unsupported_model"
+    events = _progress_events(progress_path)
+    assert [event["event"] for event in events] == ["started", "failed"]
+    assert events[0]["schema_version"] == "utopic-runner/v1"
+    assert events[0]["run_id"] == "run_progress"
+    assert events[0]["task"] == "image"
+    assert events[0]["model"] == "unit-image"
+    assert events[0]["runner"] == "utopic-runner"
+    assert isinstance(events[0]["time_ms"], int)
+    assert events[1]["error"]["code"] == "unsupported_model"
 
 
 def test_modality_runner_entrypoint_reports_planned_readiness(tmp_path):

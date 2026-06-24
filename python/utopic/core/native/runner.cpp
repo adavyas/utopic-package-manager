@@ -20,12 +20,15 @@
 #include <cstdlib>
 #include <cstring>
 #include <exception>
+#include <filesystem>
 #include <fstream>
 #include <string>
+#include <system_error>
 #include <vector>
 
 using namespace utopic;
 using json = nlohmann::json;
+namespace fs = std::filesystem;
 using std::pair;
 using std::string;
 using std::vector;
@@ -364,6 +367,44 @@ static runner_request make_runner_request(const json & root, const string & runn
     };
 }
 
+static bool append_progress_event(const runner_request & req, const char * event_name, const json & detail = json::object()) {
+    if (req.progress_path.empty()) {
+        return false;
+    }
+    try {
+        fs::path path(req.progress_path);
+        if (path.has_parent_path()) {
+            std::error_code ec;
+            fs::create_directories(path.parent_path(), ec);
+            if (ec) {
+                return false;
+            }
+        }
+        std::ofstream out(req.progress_path, std::ios::app);
+        if (!out) {
+            return false;
+        }
+        json event = {
+            {"schema_version", RUNNER_SCHEMA_VERSION},
+            {"run_id", req.run_id},
+            {"task", req.task},
+            {"model", req.model},
+            {"runner", req.runner},
+            {"event", event_name},
+            {"time_ms", (long long) now_ms()},
+        };
+        if (detail.is_object()) {
+            for (auto it = detail.begin(); it != detail.end(); ++it) {
+                event[it.key()] = it.value();
+            }
+        }
+        out << event.dump() << "\n";
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
 static vector<pair<string, string>> request_messages(const json & input) {
     vector<pair<string, string>> messages;
     if (input.contains("messages") && input["messages"].is_array()) {
@@ -561,18 +602,26 @@ int main(int argc, char ** argv) {
         printf("%s\n", response.dump().c_str());
         return 2;
     }
+    const runner_request req = make_runner_request(root, runner_name);
+    append_progress_event(req, "started");
+
     response = capacity_preflight_error(root, runner_name);
     if (!response.is_null()) {
+        append_progress_event(req, "failed", {{"error", response.value("error", json::object())}});
         printf("%s\n", response.dump().c_str());
         return 1;
     }
     try {
-        const runner_request req = make_runner_request(root, runner_name);
         response = run_request(req, root);
     } catch (const std::exception & exc) {
         response = error_response("runner_failed", string("request handling failed: ") + exc.what());
     }
 
+    if (response.value("ok", false)) {
+        append_progress_event(req, "completed", {{"type", response.value("type", "")}});
+    } else {
+        append_progress_event(req, "failed", {{"error", response.value("error", json::object())}});
+    }
     printf("%s\n", response.dump().c_str());
     return response.value("ok", false) ? 0 : 1;
 }
