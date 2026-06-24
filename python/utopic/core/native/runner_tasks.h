@@ -25,6 +25,6 @@ string host_device();
 
 json backend_preflight_error(const json & root, const string & runner_name);
 json capacity_preflight_error(const json & root, const string & runner_name);
-json run_planned_native_task(const runner_request & req);
+json run_artifact_task(const runner_request & req, const json & root);
 
 }  // namespace utopic_runner

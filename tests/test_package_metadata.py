@@ -187,7 +187,7 @@ def test_native_runner_errors_echo_oom_policy_from_contract():
 
     assert '{"oom_policy", opts.value("oom_policy", json::object())}' in runner_tasks
     assert '{"oom_policy", req.options.value("oom_policy", json::object())}' in runner_tasks
-    assert "run_planned_native_task(req)" in runner
+    assert "run_artifact_task(req, root)" in runner
 
 
 def test_vendor_script_sources_chat_artifact_from_typescript_build_output():

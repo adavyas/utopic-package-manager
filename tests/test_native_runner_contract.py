@@ -43,6 +43,8 @@ def test_runner_contract_schema_and_fixtures_are_packaged():
     option_schema = schema["properties"]["options"]
     option_properties = option_schema["properties"]
     assert option_schema["additionalProperties"] is True
+    assert option_properties["task_runner_path"]["type"] == "string"
+    assert option_properties["task_runner_path"]["minLength"] == 1
     assert option_properties["requirements"]["type"] == "object"
     assert option_properties["requirements"]["properties"]["min_gpu_memory_gib"]["type"] == "number"
     assert option_properties["requirements"]["properties"]["allow_cpu"]["type"] == "boolean"

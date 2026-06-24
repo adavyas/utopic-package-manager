@@ -1,5 +1,6 @@
 import json
 import os
+import stat
 import subprocess
 from pathlib import Path
 
@@ -755,3 +756,77 @@ def test_native_runner_reports_backend_unavailable_before_planned_modality(tmp_p
     events = _progress_events(progress_path)
     assert [event["event"] for event in events] == ["started", "failed"]
     assert events[-1]["error"]["code"] == "backend_unavailable"
+
+
+def test_native_runner_dispatches_ready_artifact_task_to_local_native_helper(tmp_path):
+    helper = tmp_path / "image-helper"
+    artifact = tmp_path / "outputs" / "image.txt"
+    helper.write_text(
+        "\n".join(
+            [
+                "#!/bin/sh",
+                "set -eu",
+                "while [ \"$#\" -gt 0 ]; do",
+                "  case \"$1\" in",
+                "    --json-request) request=\"$2\"; shift 2 ;;",
+                "    *) shift ;;",
+                "  esac",
+                "done",
+                "mkdir -p \"$(dirname \"$UTOPIC_TEST_ARTIFACT\")\"",
+                "printf 'native image artifact' > \"$UTOPIC_TEST_ARTIFACT\"",
+                "printf '%s\\n' 'helper log: starting local native image task'",
+                "printf '%s\\n' '{\"ok\":true,\"type\":\"image\",\"artifacts\":[{\"type\":\"image\",\"path\":\"'$UTOPIC_TEST_ARTIFACT'\",\"mime_type\":\"text/plain\"}],\"metrics\":{\"helper\":\"local-native\"},\"backend\":\"metal\",\"device\":\"helper-device\"}'",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    helper.chmod(helper.stat().st_mode | stat.S_IXUSR)
+    request_path = tmp_path / "ready-image-request.json"
+    progress_path = tmp_path / "progress.jsonl"
+    request_path.write_text(
+        json.dumps(
+            _contract_request(
+                tmp_path,
+                {
+                    "task": "image",
+                    "model": "ready-image",
+                    "input": {"prompt": "a local native helper"},
+                    "progress_path": str(progress_path),
+                    "options": {
+                        "modality": "image",
+                        "runtime": "native",
+                        "runner": "utopic-runner",
+                        "native_status": "ready",
+                        "task_runner_path": str(helper),
+                        "supported_backends": ["metal"],
+                        "expected_vram_gib": 1.0,
+                        "expected_ram_gib": 2.0,
+                    },
+                },
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    completed = _run_runner_with_env(
+        _runner_binary(),
+        request_path,
+        {
+            "UTOPIC_RUNTIME_BACKEND": "metal",
+            "UTOPIC_RUNTIME_DEVICE": "Apple test GPU",
+            "UTOPIC_GPU_MEMORY_GIB": "48",
+            "UTOPIC_TEST_ARTIFACT": str(artifact),
+        },
+    )
+    payload = _last_json(completed.stdout)
+
+    assert completed.returncode == 0
+    assert payload["ok"] is True
+    assert payload["type"] == "image"
+    assert payload["run_id"] == "run_unit"
+    assert payload["artifacts"][0]["path"] == str(artifact)
+    assert payload["metrics"]["helper"] == "local-native"
+    assert artifact.read_text(encoding="utf-8") == "native image artifact"
+
+    events = _progress_events(progress_path)
+    assert [event["event"] for event in events] == ["started", "completed"]

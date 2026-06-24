@@ -2,10 +2,18 @@
 
 #include "llama.h"
 
+#include <cerrno>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <sstream>
+#include <sys/wait.h>
 
 namespace utopic_runner {
+
+namespace fs = std::filesystem;
 
 static bool json_dopt(const json & obj, const char * key, double & out) {
     if (!obj.contains(key) || !obj[key].is_number()) {
@@ -94,6 +102,45 @@ static json error_response(const string & code, const string & message, const js
             {"detail", detail.is_object() ? detail : json::object()},
         }},
     };
+}
+
+static string shell_quote(const string & value) {
+    string out = "'";
+    for (const char c : value) {
+        if (c == '\'') {
+            out += "'\\''";
+        } else {
+            out += c;
+        }
+    }
+    out += "'";
+    return out;
+}
+
+static json parse_last_json_line(const string & stdout_text, string & error) {
+    std::istringstream in(stdout_text);
+    string line;
+    json last;
+    bool found = false;
+    while (std::getline(in, line)) {
+        if (line.empty()) {
+            continue;
+        }
+        try {
+            json candidate = json::parse(line);
+            if (candidate.is_object()) {
+                last = candidate;
+                found = true;
+            }
+        } catch (const std::exception &) {
+            continue;
+        }
+    }
+    if (!found) {
+        error = "native task runner did not write a JSON object";
+        return json();
+    }
+    return last;
 }
 
 static json detected_capacity() {
@@ -237,7 +284,98 @@ json capacity_preflight_error(const json & root, const string & runner_name) {
     });
 }
 
-json run_planned_native_task(const runner_request & req) {
+static json run_native_task_helper(const runner_request & req, const json & root, const string & helper_path) {
+    if (helper_path.empty()) {
+        return error_response("backend_unavailable", "native task runner path is required for ready artifact tasks", {
+            {"task", req.task},
+            {"model", req.model},
+            {"runner", req.runner},
+            {"native_status", req.options.value("native_status", "")},
+        });
+    }
+    if (!fs::exists(helper_path)) {
+        return error_response("backend_unavailable", "native task runner is not installed", {
+            {"task", req.task},
+            {"model", req.model},
+            {"runner", req.runner},
+            {"task_runner_path", helper_path},
+            {"native_status", req.options.value("native_status", "")},
+        });
+    }
+
+    std::error_code ec;
+    fs::create_directories(req.output_dir, ec);
+    if (ec) {
+        return error_response("runner_failed", string("failed to create output directory: ") + ec.message(), {
+            {"output_dir", req.output_dir},
+        });
+    }
+
+    const fs::path request_path = fs::path(req.output_dir) / (req.run_id + "-" + req.task + "-request.json");
+    {
+        std::ofstream out(request_path);
+        if (!out) {
+            return error_response("runner_failed", string("failed to write native task request: ") + strerror(errno), {
+                {"request_path", request_path.string()},
+            });
+        }
+        out << root.dump();
+    }
+
+    const string command = shell_quote(helper_path) + " --json-request " + shell_quote(request_path.string());
+    FILE * pipe = popen(command.c_str(), "r");
+    if (!pipe) {
+        return error_response("backend_unavailable", string("failed to launch native task runner: ") + strerror(errno), {
+            {"task_runner_path", helper_path},
+        });
+    }
+
+    string stdout_text;
+    char buffer[4096];
+    while (fgets(buffer, sizeof(buffer), pipe)) {
+        stdout_text += buffer;
+    }
+    const int status = pclose(pipe);
+    if (status != 0) {
+        int exit_status = status;
+        if (WIFEXITED(status)) {
+            exit_status = WEXITSTATUS(status);
+        }
+        return error_response("runner_failed", "native task runner failed", {
+            {"task", req.task},
+            {"model", req.model},
+            {"task_runner_path", helper_path},
+            {"exit_status", exit_status},
+            {"stdout", stdout_text},
+        });
+    }
+
+    string parse_error;
+    json response = parse_last_json_line(stdout_text, parse_error);
+    if (!parse_error.empty()) {
+        return error_response("runner_failed", parse_error, {
+            {"task", req.task},
+            {"model", req.model},
+            {"task_runner_path", helper_path},
+            {"stdout", stdout_text},
+        });
+    }
+    if (!response.contains("ok") || !response["ok"].is_boolean()) {
+        return error_response("runner_failed", "native task runner response must contain boolean ok", {
+            {"task", req.task},
+            {"model", req.model},
+            {"task_runner_path", helper_path},
+        });
+    }
+    return response;
+}
+
+json run_artifact_task(const runner_request & req, const json & root) {
+    const string native_status = req.options.value("native_status", "");
+    const string helper_path = req.options.value("task_runner_path", "");
+    if (native_status == "ready" || native_status == "experimental") {
+        return run_native_task_helper(req, root, helper_path);
+    }
     return error_response("unsupported_model", "native task is not implemented behind utopic-runner yet", {
         {"task", req.task},
         {"model", req.model},

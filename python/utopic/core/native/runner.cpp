@@ -37,7 +37,7 @@ using utopic_runner::backend_preflight_error;
 using utopic_runner::capacity_preflight_error;
 using utopic_runner::host_backend;
 using utopic_runner::host_device;
-using utopic_runner::run_planned_native_task;
+using utopic_runner::run_artifact_task;
 using utopic_runner::runner_request;
 
 static const char * RUNNER_SCHEMA_VERSION = "utopic-runner/v1";
@@ -395,7 +395,7 @@ static json run_request(const runner_request & req, const json & root) {
     if (req.task == "chat") {
         return run_chat(root);
     }
-    return run_planned_native_task(req);
+    return run_artifact_task(req, root);
 }
 
 int main(int argc, char ** argv) {

@@ -75,6 +75,10 @@
         "model_path": {
           "type": "string"
         },
+        "task_runner_path": {
+          "type": "string",
+          "minLength": 1
+        },
         "expected_vram_gib": {
           "type": "number",
           "exclusiveMinimum": 0
