@@ -324,6 +324,75 @@ def test_bundled_chat_posts_messages_to_openai_compatible_server(fake_openai_ser
     ]
 
 
+def test_bundled_chat_models_command_shows_native_readiness(fake_openai_server, tmp_path):
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not installed")
+    base_url, requests, paths = fake_openai_server
+    catalog = tmp_path / "models.json"
+    catalog.write_text(
+        json.dumps(
+            [
+                {
+                    "id": "diffusiongemma-26b-a4b-q4",
+                    "name": "DiffusionGemma 26B-A4B IT Q4_K_M",
+                    "family": "diffusion-gemma",
+                    "filename": "diffusiongemma.gguf",
+                    "url": "https://example.invalid/diffusiongemma.gguf",
+                    "size": "15.65 GiB",
+                    "recommended": True,
+                    "description": "Default chat model",
+                    "modality": "text",
+                    "runtime": "native",
+                    "runner": "utopic_runner",
+                    "native_status": "ready",
+                    "supported_backends": ["metal", "cuda", "cpu"],
+                    "expected_vram_gib": 24,
+                    "expected_ram_gib": 32,
+                },
+                {
+                    "id": "cosmos3-super",
+                    "name": "Cosmos3 Super Text2Image",
+                    "family": "cosmos3",
+                    "filename": "cosmos3-super",
+                    "url": "https://example.invalid/cosmos3",
+                    "size": "64.6B BF16 parameters",
+                    "recommended": False,
+                    "description": "High memory image model",
+                    "modality": "image",
+                    "runtime": "bridge",
+                    "runner": "image_runner",
+                    "native_status": "planned",
+                    "supported_backends": ["cuda"],
+                    "expected_vram_gib": 96,
+                    "expected_ram_gib": 128,
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    completed = subprocess.run(
+        [node, str(CHAT_SCRIPT), "--server", base_url],
+        input="/models\n/exit\n",
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=15,
+        env={**os.environ, "UTOPIC_MODELS_CATALOG": str(catalog)},
+    )
+
+    assert "Catalog models:" in completed.stdout
+    assert "diffusiongemma-26b-a4b-q4" in completed.stdout
+    assert "text / native / ready / utopic_runner" in completed.stdout
+    assert "backends: metal, cuda, cpu; VRAM 24 GiB, RAM 32 GiB" in completed.stdout
+    assert "cosmos3-super" in completed.stdout
+    assert "image / bridge / planned / image_runner" in completed.stdout
+    assert "backends: cuda; VRAM 96 GiB, RAM 128 GiB" in completed.stdout
+    assert requests == []
+    assert paths == []
+
+
 def test_bundled_chat_streams_interactive_responses_with_crlf_sse_boundaries():
     node = shutil.which("node")
     if node is None:

@@ -30,6 +30,9 @@ Options:
 
 Chat commands:
   /help                 Show chat commands.
+  /models               Show catalog models with native readiness.
+  /pull MODEL           Download a native text model. Restart chat to switch.
+  /serve                Show local OpenAI-compatible endpoints.
   /clear                Clear this session's conversation.
   /system TEXT          Set or replace the system prompt.
   /exit                 Quit.
@@ -255,20 +258,72 @@ function validateCatalogEntry(item, index) {
         (!Number.isInteger(entry.bytes) || entry.bytes <= 0)) {
         throw new Error(`Invalid model catalog entry ${index}: bytes must be a positive integer`);
     }
-    for (const field of ["hardware", "endpoints", "outputs"]) {
+    for (const field of ["hardware", "supported_backends", "endpoints", "outputs"]) {
         const value = entry[field];
         if (value !== undefined &&
             (!Array.isArray(value) || value.length === 0 || value.some((part) => typeof part !== "string" || part.length === 0))) {
             throw new Error(`Invalid model catalog entry ${index}: ${field} must be a non-empty string list`);
         }
     }
-    if (entry.modality !== undefined && !["text", "image", "tts", "music", "video"].includes(entry.modality)) {
+    if (entry.modality !== undefined && !["text", "image", "tts", "music", "video", "misc"].includes(entry.modality)) {
         throw new Error(`Invalid model catalog entry ${index}: modality is not supported`);
     }
     if (entry.runtime !== undefined && !["native", "bridge"].includes(entry.runtime)) {
         throw new Error(`Invalid model catalog entry ${index}: runtime is not supported`);
     }
+    if (entry.native_status !== undefined &&
+        !["ready", "planned", "experimental", "unsupported_on_device"].includes(entry.native_status)) {
+        throw new Error(`Invalid model catalog entry ${index}: native_status is not supported`);
+    }
+    for (const field of ["expected_vram_gib", "expected_ram_gib"]) {
+        const value = entry[field];
+        if (value !== undefined && (typeof value !== "number" || !Number.isFinite(value) || value <= 0)) {
+            throw new Error(`Invalid model catalog entry ${index}: ${field} must be a positive number`);
+        }
+    }
     return entry;
+}
+function modelModality(entry) {
+    return entry.modality ?? "text";
+}
+function modelRuntime(entry) {
+    return entry.runtime ?? "native";
+}
+function modelNativeStatus(entry) {
+    return entry.native_status ?? (modelRuntime(entry) === "bridge" ? "planned" : "ready");
+}
+function modelRunner(entry) {
+    return entry.runner ?? (modelRuntime(entry) === "bridge" ? `${modelModality(entry)}_runner` : "utopic_runner");
+}
+function modelBackends(entry) {
+    return (entry.supported_backends && entry.supported_backends.length > 0 ? entry.supported_backends : ["metal", "cuda", "cpu"]).join(", ");
+}
+function modelMemory(entry) {
+    const parts = [];
+    if (entry.expected_vram_gib !== undefined)
+        parts.push(`VRAM ${entry.expected_vram_gib} GiB`);
+    if (entry.expected_ram_gib !== undefined)
+        parts.push(`RAM ${entry.expected_ram_gib} GiB`);
+    return parts.length > 0 ? parts.join(", ") : "memory TBD";
+}
+function isNativeTextModel(entry) {
+    return modelModality(entry) === "text" && modelRuntime(entry) === "native";
+}
+function printModelCatalog(catalog, options) {
+    const visible = options.chatOnly ? catalog.filter(isNativeTextModel) : catalog;
+    if (visible.length === 0) {
+        console.log(options.chatOnly ? "No native text models are available in this catalog." : "No models are available in this catalog.");
+        return;
+    }
+    console.log(options.chatOnly ? "\nAvailable chat models:" : "\nCatalog models:");
+    visible.forEach((entry, index) => {
+        const marker = entry.recommended ? "*" : " ";
+        const downloaded = isModelDownloaded(entry) ? "downloaded" : "not downloaded";
+        console.log(`${index + 1}. ${marker} ${entry.id} (${entry.size}, ${downloaded})`);
+        console.log(`   ${entry.name}`);
+        console.log(`   ${modelModality(entry)} / ${modelRuntime(entry)} / ${modelNativeStatus(entry)} / ${modelRunner(entry)}`);
+        console.log(`   backends: ${modelBackends(entry)}; ${modelMemory(entry)}`);
+    });
 }
 function safeModelFilename(entry) {
     if (!entry.filename ||
@@ -358,26 +413,21 @@ function ask(rl, text) {
     return new Promise((resolve) => rl.question(text, resolve));
 }
 async function chooseModel(catalog) {
-    const recommended = catalog.find((entry) => entry.recommended) ?? catalog[0];
+    const chatModels = catalog.filter(isNativeTextModel);
+    const recommended = chatModels.find((entry) => entry.recommended) ?? chatModels[0];
+    if (!recommended)
+        throw new Error("no native text models are available in this catalog");
     if (!isInteractiveInput())
         return recommended.id;
-    console.log("\nAvailable models:");
-    catalog.forEach((entry, index) => {
-        const marker = entry.recommended ? "*" : " ";
-        const exists = isModelDownloaded(entry) ? "downloaded" : "not downloaded";
-        const modality = entry.modality ?? "text";
-        const runtime = entry.runtime ?? "native";
-        console.log(`${index + 1}. ${marker} ${entry.id} (${modality}, ${runtime}, ${entry.size}, ${exists})`);
-        console.log(`   ${entry.name}`);
-    });
+    printModelCatalog(catalog, { chatOnly: true });
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
     try {
         const answer = (await ask(rl, `\nChoose a model [${recommended.id}]: `)).trim();
         if (!answer)
             return recommended.id;
         const numeric = Number(answer);
-        if (Number.isInteger(numeric) && numeric >= 1 && numeric <= catalog.length) {
-            return catalog[numeric - 1].id;
+        if (Number.isInteger(numeric) && numeric >= 1 && numeric <= chatModels.length) {
+            return chatModels[numeric - 1].id;
         }
         return answer;
     }
@@ -393,8 +443,9 @@ async function resolveModel(value, beforeDownload) {
     const entry = catalog.find((item) => item.id === modelId);
     if (!entry)
         throw new Error(`unknown model '${modelId}'. Run 'utopic models list' to see aliases.`);
-    if (entry.runtime === "bridge") {
-        throw new Error(`model '${modelId}' uses the ${entry.modality ?? "bridge"} runtime; use the unified Utopic runtime gateway for this modality.`);
+    if (!isNativeTextModel(entry)) {
+        throw new Error(`model '${modelId}' is ${modelModality(entry)} / ${modelRuntime(entry)} / ${modelNativeStatus(entry)}; ` +
+            "use `utopic serve` or the runtime gateway for non-chat modalities.");
     }
     const destination = localModelPath(entry);
     if (isModelDownloaded(entry))
@@ -680,7 +731,7 @@ async function chatLoop(baseUrl, options) {
     const interactive = isInteractiveInput();
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout, prompt: interactive ? ">>> " : "" });
     const messages = [{ role: "system", content: DEFAULT_SYSTEM_PROMPT }];
-    console.log("Type /help for commands, /clear to reset, /exit to quit.\n");
+    console.log("Type /help for commands, /models for catalog, /serve for endpoints, /exit to quit.\n");
     if (interactive)
         rl.prompt();
     for await (const line of rl) {
@@ -701,9 +752,50 @@ async function chatLoop(baseUrl, options) {
             continue;
         }
         if (input === "/help") {
+            console.log("/models       Show catalog models with native readiness.");
+            console.log("/pull MODEL   Download a native text model. Restart chat to switch.");
+            console.log("/serve        Show local OpenAI-compatible endpoints.");
             console.log("/clear        Clear conversation history.");
             console.log("/system TEXT  Set or replace the system prompt.");
             console.log("/exit         Quit.");
+            if (interactive)
+                rl.prompt();
+            continue;
+        }
+        if (input === "/models") {
+            try {
+                printModelCatalog(readCatalog(), { chatOnly: false });
+            }
+            catch (error) {
+                console.error(`catalog failed: ${error.message}`);
+            }
+            if (interactive)
+                rl.prompt();
+            continue;
+        }
+        if (input === "/serve") {
+            console.log(`Chat completions: ${chatCompletionsUrl(baseUrl)}`);
+            console.log(`Models: ${joinServerPath(baseUrl, "v1/models")}`);
+            console.log(`MCP: ${joinServerPath(baseUrl, "mcp")}`);
+            if (interactive)
+                rl.prompt();
+            continue;
+        }
+        if (input.startsWith("/pull ")) {
+            const model = input.slice("/pull ".length).trim();
+            if (!model) {
+                console.error("usage: /pull MODEL");
+            }
+            else {
+                try {
+                    const modelPath = await resolveModel(model);
+                    console.log(`Pulled ${model} to ${modelPath}`);
+                    console.log("Restart chat with that model to switch the running server.");
+                }
+                catch (error) {
+                    console.error(`pull failed: ${error.message}`);
+                }
+            }
             if (interactive)
                 rl.prompt();
             continue;
