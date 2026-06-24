@@ -9,6 +9,7 @@ from utopic import installer
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+CORE_NATIVE_DIR = REPO_ROOT / "python" / "utopic" / "core" / "native"
 CORE_CATALOG_PATH = (
     REPO_ROOT
     / "python"
@@ -18,7 +19,7 @@ CORE_CATALOG_PATH = (
     / "utopic_core"
     / "models.json"
 )
-EXPECTED_NATIVE_REF = "449db7dd72c0f0b71a35e7c18b0eab88f7d272da"
+EXPECTED_NATIVE_REF = "0deddc085043eea73a4c6494928e57b6b1e7ae27"
 
 REQUIRED_NATIVE_RUNNER_FILES = {
     "runner.cpp",
@@ -26,6 +27,7 @@ REQUIRED_NATIVE_RUNNER_FILES = {
     "runner_contract.h",
     "runner_plugin.cpp",
     "runner_plugin.h",
+    "runner_plugin_api.h",
     "runner_tasks.cpp",
     "runner_tasks.h",
     "audio_engine.cpp",
@@ -97,6 +99,15 @@ def test_vendored_core_marks_native_image_model_ready():
     assert entry["engine"] == "stable-diffusion-cpp"
     assert entry["runner"] == "utopic_runner"
     assert entry["native_status"] == "ready"
+
+
+def test_vendored_core_exposes_native_plugin_abi_header():
+    header = CORE_NATIVE_DIR / "runner_plugin_api.h"
+
+    assert header.is_file()
+    source = header.read_text(encoding="utf-8")
+    assert "UTOPIC_NATIVE_PLUGIN_DEFAULT_ENTRYPOINT" in source
+    assert "utopic_native_generate_fn" in source
 
 
 def test_package_manager_no_longer_owns_legacy_native_source():

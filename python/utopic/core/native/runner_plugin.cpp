@@ -1,5 +1,7 @@
 #include "runner_plugin.h"
 
+#include "runner_plugin_api.h"
+
 #include <algorithm>
 #include <cstring>
 #include <exception>
@@ -15,8 +17,6 @@
 namespace utopic_runner {
 
 using std::string;
-
-typedef int (*runner_plugin_generate_fn)(const char * request_json, char * response_json, size_t response_json_size);
 
 static const char * runner_plugin_task_name(utopic::runner_task task) {
     switch (task) {
@@ -133,7 +133,7 @@ json runner_plugin_generate(const runner_request & req) {
         return json();
     }
     const string entrypoint = runner_plugin_option_string(req, "native_entrypoint").empty()
-        ? string("utopic_native_generate")
+        ? string(UTOPIC_NATIVE_PLUGIN_DEFAULT_ENTRYPOINT)
         : runner_plugin_option_string(req, "native_entrypoint");
 
     runner_plugin_library lib;
@@ -154,7 +154,7 @@ json runner_plugin_generate(const runner_request & req) {
             { "detail", symbol_error },
         });
     }
-    runner_plugin_generate_fn generate = reinterpret_cast<runner_plugin_generate_fn>(symbol);
+    utopic_native_generate_fn generate = reinterpret_cast<utopic_native_generate_fn>(symbol);
 
     const string request_json = runner_plugin_request_json(req).dump();
     std::vector<char> response_buffer(1024 * 1024, 0);
@@ -162,7 +162,7 @@ json runner_plugin_generate(const runner_request & req) {
     for (int attempt = 0; attempt < 5; ++attempt) {
         std::fill(response_buffer.begin(), response_buffer.end(), 0);
         rc = generate(request_json.c_str(), response_buffer.data(), response_buffer.size());
-        if (rc != 2) {
+        if (rc != UTOPIC_NATIVE_PLUGIN_BUFFER_TOO_SMALL) {
             break;
         }
         response_buffer.resize(response_buffer.size() * 2);
