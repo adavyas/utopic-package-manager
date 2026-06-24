@@ -1,3 +1,4 @@
+import json
 import subprocess
 from pathlib import Path
 
@@ -741,6 +742,34 @@ def test_native_installation_is_current_when_metadata_matches(monkeypatch, tmp_p
     )
 
     assert installer.native_installation_is_current(("utopic_server",)) is True
+
+
+def test_native_installation_is_not_current_without_device_metadata(monkeypatch, tmp_path):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _write_executable(bin_dir / "utopic_server")
+    decision = installer.BackendDecision(
+        backend="cpu",
+        reason="No usable Metal device or CUDA compiler found",
+        device="CPU",
+    )
+
+    monkeypatch.setattr(installer, "bin_dir", lambda: bin_dir)
+    monkeypatch.setattr(installer, "default_llama_dir", lambda: tmp_path / "src" / "llama.cpp")
+    monkeypatch.setattr(installer, "default_native_dir", lambda: tmp_path / "site" / "utopic" / "native")
+    monkeypatch.setattr(installer, "_resolve_backend", lambda requested, arch: decision)
+    installer._write_install_metadata(
+        decision,
+        requested_backend="auto",
+        llama_dir=installer.default_llama_dir(),
+        native_dir=installer.default_native_dir(),
+    )
+    metadata_path = installer.install_metadata_path()
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    del metadata["device"]
+    metadata_path.write_text(json.dumps(metadata, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    assert installer.native_installation_is_current(("utopic_server",)) is False
 
 
 def test_native_installation_is_not_current_when_packaged_native_source_changes(monkeypatch, tmp_path):

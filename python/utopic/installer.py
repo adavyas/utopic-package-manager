@@ -36,7 +36,7 @@ BIN_NAMES = (
     "utopic_acp",
 )
 INSTALL_METADATA_NAME = "install.json"
-INSTALL_METADATA_SCHEMA_VERSION = 3
+INSTALL_METADATA_SCHEMA_VERSION = 4
 INSTALL_METADATA_MATCH_KEYS = (
     "schema_version",
     "package_version",
@@ -610,6 +610,9 @@ def native_installation_is_current(binary_names: Sequence[str] = BIN_NAMES) -> b
     cuda_architectures = os.environ.get("UTOPIC_CUDA_ARCHITECTURES")
     metadata_backend = metadata.get("backend")
     if not isinstance(metadata_backend, str):
+        return False
+    metadata_device = metadata.get("device")
+    if not isinstance(metadata_device, str) or not metadata_device:
         return False
     metadata_cuda_architectures = metadata.get("cuda_architectures")
     if metadata_cuda_architectures is not None and not isinstance(metadata_cuda_architectures, str):
