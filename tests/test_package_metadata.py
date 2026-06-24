@@ -18,6 +18,19 @@ CORE_CATALOG_PATH = (
     / "utopic_core"
     / "models.json"
 )
+REQUIRED_NATIVE_RUNTIME_FILES = (
+    "main.cpp",
+    "runner.cpp",
+    "server.cpp",
+    "mcp_server.cpp",
+    "acp_server.cpp",
+    "diffusion_driver.cpp",
+    "diffusion_driver.h",
+    "schema_utils.h",
+    "tool_extract.h",
+    "utopic_core.h",
+    "utopic_identity.h",
+)
 
 
 def test_native_mcp_server_info_uses_package_version_constant():
@@ -91,8 +104,8 @@ def test_vendor_script_sources_chat_artifact_from_typescript_build_output():
 def test_vendored_core_layout_exists():
     assert (REPO_ROOT / "python" / "utopic" / "cmake" / "CMakeLists.txt").exists()
     assert not (REPO_ROOT / "python" / "utopic" / "core" / "native" / "CMakeLists.txt").exists()
-    assert (REPO_ROOT / "python" / "utopic" / "core" / "native" / "main.cpp").exists()
-    assert (REPO_ROOT / "python" / "utopic" / "core" / "native" / "runner.cpp").exists()
+    for filename in REQUIRED_NATIVE_RUNTIME_FILES:
+        assert (REPO_ROOT / "python" / "utopic" / "core" / "native" / filename).exists()
     assert (
         REPO_ROOT
         / "python"
@@ -293,11 +306,13 @@ def test_ci_workflow_runs_on_commits_without_publishing():
     assert "python -m twine check dist/*" in workflow
     assert "python/utopic/core/python/utopic_core/models.json" in workflow
     assert "python/utopic/cmake/CMakeLists.txt" in workflow
-    assert "python/utopic/core/native/main.cpp" in workflow
+    for filename in REQUIRED_NATIVE_RUNTIME_FILES:
+        assert f"python/utopic/core/native/{filename}" in workflow
     assert "python/utopic/core/python/utopic_core/node/utopic-chat.js" in workflow
     assert "utopic/core/python/utopic_core/models.json" in workflow
     assert "utopic/cmake/CMakeLists.txt" in workflow
-    assert "utopic/core/native/main.cpp" in workflow
+    for filename in REQUIRED_NATIVE_RUNTIME_FILES:
+        assert f"utopic/core/native/{filename}" in workflow
     assert "utopic/core/python/utopic_core/node/utopic-chat.js" in workflow
     assert "Smoke test built distributions" in workflow
     assert "Smoke test uv tool install" in workflow
@@ -336,11 +351,13 @@ def test_release_workflow_smokes_installed_node_free_chat_fallback():
 
     assert "python/utopic/core/python/utopic_core/models.json" in workflow
     assert "python/utopic/cmake/CMakeLists.txt" in workflow
-    assert "python/utopic/core/native/main.cpp" in workflow
+    for filename in REQUIRED_NATIVE_RUNTIME_FILES:
+        assert f"python/utopic/core/native/{filename}" in workflow
     assert "python/utopic/core/python/utopic_core/node/utopic-chat.js" in workflow
     assert "utopic/core/python/utopic_core/models.json" in workflow
     assert "utopic/cmake/CMakeLists.txt" in workflow
-    assert "utopic/core/native/main.cpp" in workflow
+    for filename in REQUIRED_NATIVE_RUNTIME_FILES:
+        assert f"utopic/core/native/{filename}" in workflow
     assert "utopic/core/python/utopic_core/node/utopic-chat.js" in workflow
     assert "Installed Node-free chat fallback smoke failed" in workflow
     assert 'PATH=""' in workflow

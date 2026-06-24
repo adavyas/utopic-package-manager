@@ -108,6 +108,16 @@ jobs:
               "python/utopic/core/python/utopic_core/models.json",
               "python/utopic/cmake/CMakeLists.txt",
               "python/utopic/core/native/main.cpp",
+              "python/utopic/core/native/runner.cpp",
+              "python/utopic/core/native/server.cpp",
+              "python/utopic/core/native/mcp_server.cpp",
+              "python/utopic/core/native/acp_server.cpp",
+              "python/utopic/core/native/diffusion_driver.cpp",
+              "python/utopic/core/native/diffusion_driver.h",
+              "python/utopic/core/native/schema_utils.h",
+              "python/utopic/core/native/tool_extract.h",
+              "python/utopic/core/native/utopic_core.h",
+              "python/utopic/core/native/utopic_identity.h",
               "python/utopic/core/python/utopic_core/node/utopic-chat.js",
           ]
           required_wheel = [
@@ -115,6 +125,16 @@ jobs:
               "utopic/core/python/utopic_core/models.json",
               "utopic/cmake/CMakeLists.txt",
               "utopic/core/native/main.cpp",
+              "utopic/core/native/runner.cpp",
+              "utopic/core/native/server.cpp",
+              "utopic/core/native/mcp_server.cpp",
+              "utopic/core/native/acp_server.cpp",
+              "utopic/core/native/diffusion_driver.cpp",
+              "utopic/core/native/diffusion_driver.h",
+              "utopic/core/native/schema_utils.h",
+              "utopic/core/native/tool_extract.h",
+              "utopic/core/native/utopic_core.h",
+              "utopic/core/native/utopic_identity.h",
               "utopic/core/python/utopic_core/node/utopic-chat.js",
           ]
 
