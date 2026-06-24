@@ -49,6 +49,24 @@ def _run_runner_with_env(
     )
 
 
+def test_native_runner_help_describes_task_contract():
+    completed = subprocess.run(
+        [str(_runner_binary()), "--help"],
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+    text = completed.stdout + completed.stderr
+
+    assert completed.returncode == 0
+    assert "--json-request request.json" in text
+    assert "schema_version=utopic-runner/v1" in text
+    assert "chat: native GGUF text generation" in text
+    assert "image, tts, music, video, misc: planned native tasks" in text
+    assert "structured unsupported_model readiness errors" in text
+
+
 def _last_json(stdout: str) -> dict[str, object]:
     for line in reversed(stdout.splitlines()):
         if not line.strip():

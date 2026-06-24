@@ -528,6 +528,15 @@ int main(int argc, char ** argv) {
 
     if (flag_set(argc, argv, "--help") || flag_set(argc, argv, "-h")) {
         fprintf(stderr, "usage: %s --json-request request.json\n", argv[0]);
+        fprintf(stderr, "\n");
+        fprintf(stderr, "Utopic native runner JSON contract\n");
+        fprintf(stderr, "  schema_version=utopic-runner/v1\n");
+        fprintf(stderr, "  required fields: run_id, task, model, input, options, output_dir, progress_path\n");
+        fprintf(stderr, "\n");
+        fprintf(stderr, "Tasks:\n");
+        fprintf(stderr, "  chat: native GGUF text generation\n");
+        fprintf(stderr, "  image, tts, music, video, misc: planned native tasks\n");
+        fprintf(stderr, "    planned tasks return structured unsupported_model readiness errors\n");
         return 0;
     }
     const char * request_path = arg(argc, argv, "--json-request", nullptr);
