@@ -53,7 +53,7 @@ class ModelEntry:
 
     def __post_init__(self) -> None:
         if not self.runner:
-            object.__setattr__(self, "runner", f"{self.modality}_runner" if self.modality != "text" else TEXT_RUNNER)
+            object.__setattr__(self, "runner", TEXT_RUNNER)
         if not self.native_status:
             object.__setattr__(self, "native_status", "ready" if self.runtime == "native" else "planned")
 
@@ -176,7 +176,7 @@ def _validate_catalog_entry(item: object, index: int) -> ModelEntry:
     runtime = _string_field(item, "runtime", "native", index)
     hardware = _string_list_field(item, "hardware", ["local"], index)
     supported_backends = _string_list_field(item, "supported_backends", ["metal", "cuda", "cpu"], index)
-    runner = _string_field(item, "runner", f"{modality}_runner" if modality != "text" else TEXT_RUNNER, index)
+    runner = _string_field(item, "runner", TEXT_RUNNER, index)
     native_status = _string_field(item, "native_status", "ready" if runtime == "native" else "planned", index)
     expected_vram_gib = _number_field(item, "expected_vram_gib", index)
     expected_ram_gib = _number_field(item, "expected_ram_gib", index)

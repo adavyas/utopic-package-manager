@@ -372,7 +372,7 @@ def test_runner_binary_is_owned_by_package_build():
     assert "UTOPIC_BACKEND_NAME" in native
 
 
-def test_modality_runner_binaries_are_package_build_outputs():
+def test_modality_runner_binaries_are_not_package_build_outputs():
     cmake = (
         Path(__file__).resolve().parents[1]
         / "python"
@@ -384,8 +384,8 @@ def test_modality_runner_binaries_are_package_build_outputs():
     assert "function(add_utopic_json_runner target_name)" in cmake
     assert "${UTOPIC_NATIVE_SOURCE_DIR}/runner.cpp" in cmake
     for name in ("image_runner", "tts_runner", "music_runner", "video_runner", "misc_runner"):
-        assert name in installer.BIN_NAMES
-        assert f"add_utopic_json_runner({name})" in cmake
+        assert name not in installer.BIN_NAMES
+        assert f"add_utopic_json_runner({name})" not in cmake
 
 
 def test_managed_source_checkout_recovers_non_git_cache(monkeypatch, tmp_path):

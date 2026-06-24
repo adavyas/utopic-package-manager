@@ -494,7 +494,7 @@ def test_gateway_native_runner_oom_maps_to_capacity_status(monkeypatch):
                 "detail": {
                     "task": "image",
                     "model": runner_entry.id,
-                    "runner": "image_runner",
+                    "runner": "utopic-runner",
                     "required_gpu_memory_gib": 96,
                     "detected": {
                         "backend": "cuda",

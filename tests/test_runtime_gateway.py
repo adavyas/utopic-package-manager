@@ -92,13 +92,13 @@ def test_gateway_models_endpoint_keeps_planned_models_native_only(monkeypatch):
     for item in planned_models:
         assert item["runtime"] == "planned_native"
         assert item["native_status"] == "planned"
-        assert item["runner"].endswith("_runner")
+        assert item["runner"] == "utopic-runner"
         assert "experimental_bridge" not in item
 
     by_id = {item["id"]: item for item in planned_models}
     assert by_id["ltx-video"]["repo"] == "Lightricks/LTX-Video"
-    assert by_id["ltx-video"]["runner"] == "video_runner"
-    assert by_id["cosmos3-super"]["runner"] == "image_runner"
+    assert by_id["ltx-video"]["runner"] == "utopic-runner"
+    assert by_id["cosmos3-super"]["runner"] == "utopic-runner"
     assert by_id["cosmos3-super"]["requirements"]["min_gpu_memory_gib"] == 96
 
 
@@ -147,7 +147,7 @@ def test_gateway_image_generation_reports_native_runner_not_ready_by_default():
     assert payload["error"]["modality"] == "image"
     assert payload["error"]["engine"] == "diffusers"
     assert payload["error"]["native_status"] == "planned"
-    assert "native C++ runner" in payload["error"]["message"]
+    assert "behind utopic-runner" in payload["error"]["message"]
 
 
 def test_gateway_native_artifact_model_routes_to_native_runner(monkeypatch):
@@ -164,7 +164,7 @@ def test_gateway_native_artifact_model_routes_to_native_runner(monkeypatch):
         engine="native-image",
         runtime="native",
         native_status="ready",
-        runner="image_runner",
+        runner="utopic-runner",
         endpoints=("/v1/images/generations",),
         outputs=("image/png",),
     )
@@ -196,7 +196,7 @@ def test_gateway_native_artifact_model_routes_to_native_runner(monkeypatch):
     assert status == 200
     assert payload["model"] == entry.id
     assert payload["metadata"]["runtime"] == "native-runner"
-    assert payload["metadata"]["runner"] == "image_runner"
+    assert payload["metadata"]["runner"] == "utopic-runner"
     assert payload["data"] == [{"url": "file:///tmp/unit-native-image.png"}]
     assert captured["entry"] is entry
     assert captured["endpoint"] == "/v1/images/generations"
@@ -361,7 +361,7 @@ def test_gateway_native_artifact_model_supports_b64_json_response_format(monkeyp
         engine="native-image",
         runtime="native",
         native_status="ready",
-        runner="image_runner",
+        runner="utopic-runner",
         endpoints=("/v1/images/generations", "/v1/responses"),
         outputs=("image/png",),
     )
@@ -395,7 +395,7 @@ def test_gateway_native_artifact_model_supports_b64_json_response_format(monkeyp
     assert payload["data"] == [{"b64_json": base64.b64encode(b"png").decode("ascii")}]
 
 
-def test_responses_endpoint_normalizes_structured_input_for_native_image_runner(monkeypatch):
+def test_responses_endpoint_normalizes_structured_input_for_native_runner(monkeypatch):
     entry = gateway.models.ModelEntry(
         id="unit-native-image-responses",
         name="Unit Native Image Responses",
@@ -409,7 +409,7 @@ def test_responses_endpoint_normalizes_structured_input_for_native_image_runner(
         engine="native-image",
         runtime="native",
         native_status="ready",
-        runner="image_runner",
+        runner="utopic-runner",
         endpoints=("/v1/images/generations", "/v1/responses"),
         outputs=("image/png",),
     )

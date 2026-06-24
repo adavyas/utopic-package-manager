@@ -25,11 +25,9 @@ def test_catalog_entries_expose_native_readiness_metadata():
         assert set(entry.supported_backends).issubset(models.VALID_BACKENDS)
         assert entry.expected_vram_gib is not None
         assert entry.expected_ram_gib is not None
+        assert entry.runner == "utopic-runner"
         if entry.native_status == "ready":
             assert entry.runtime == "native"
-            assert entry.runner == "utopic-runner"
-        else:
-            assert entry.runner.endswith("_runner")
 
 
 def test_catalog_non_text_entries_are_planned_native_not_bridge_runtime():
@@ -108,7 +106,7 @@ def test_large_planned_model_check_reports_oom_preflight(monkeypatch, tmp_path):
 
     assert payload["ready"] is False
     assert payload["status"] == "native_runner_oom_preflight"
-    assert payload["runner"] == "image_runner"
+    assert payload["runner"] == "utopic-runner"
     assert payload["modality"] == "image"
     assert payload["required_gpu_memory_gib"] == 96
     assert payload["detected"]["gpu_memory_gib"] == 40

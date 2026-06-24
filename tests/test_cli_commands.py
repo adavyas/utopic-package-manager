@@ -396,7 +396,7 @@ def test_python_chat_fallback_supports_catalog_and_endpoint_commands(monkeypatch
         modality="image",
         runtime="planned_native",
         native_status="planned",
-        runner="image_runner",
+        runner="utopic-runner",
         supported_backends=("cuda",),
         recommended=False,
     )
@@ -472,7 +472,7 @@ def test_chat_python_fallback_prompts_for_model_when_interactive(monkeypatch, tm
             description="Image generation model.",
             modality="image",
             runtime="planned_native",
-            runner="image_runner",
+            runner="utopic-runner",
             native_status="planned",
         ),
     ]
@@ -1525,7 +1525,7 @@ def test_cli_generate_planned_modality_reports_native_readiness_without_pull(mon
                     "ok": False,
                     "error": {
                         "code": "unsupported_model",
-                        "message": "image generation for qwen-image is cataloged but does not have a native C++ runner yet",
+                        "message": "image generation for qwen-image is cataloged but does not have a ready native implementation behind utopic-runner yet",
                         "detail": {"native_status": "planned"},
                     },
                 }
@@ -1545,7 +1545,7 @@ def test_cli_generate_planned_modality_reports_native_readiness_without_pull(mon
             {"model": "qwen-image", "prompt": "a tiny robot"},
         )
     ]
-    assert "does not have a native C++ runner yet" in capsys.readouterr().err
+    assert "does not have a ready native implementation behind utopic-runner yet" in capsys.readouterr().err
 
 
 def test_generate_default_model_can_select_native_artifact_runner(monkeypatch):
@@ -2787,7 +2787,7 @@ def test_planned_model_pull_prepares_metadata_cache(monkeypatch, tmp_path):
         "native_status": "planned",
         "outputs": ["image/png"],
         "repo": "Qwen/Qwen-Image",
-        "runner": "image_runner",
+        "runner": "utopic-runner",
         "runtime": "planned_native",
         "supported_backends": ["metal", "cuda", "cpu"],
         "url": "https://huggingface.co/Qwen/Qwen-Image",
@@ -2923,7 +2923,7 @@ def test_models_check_reports_pulled_planned_model_as_native_runner_not_ready(mo
     assert payload["cache"]["path"] == str(models_dir / "qwen-image")
     assert "experimental_bridge" not in payload
     assert payload["next_steps"] == [
-        "image_runner for image is cataloged but not native-ready yet"
+        "utopic-runner for image is cataloged but not native-ready yet"
     ]
 
 
@@ -2966,7 +2966,7 @@ def test_models_check_reports_planned_native_runner_gap(monkeypatch, tmp_path, c
     assert payload["cache"]["prepared"] is False
     assert "experimental_bridge" not in payload
     assert payload["next_steps"] == [
-        "tts_runner for tts is cataloged but not native-ready yet"
+        "utopic-runner for tts is cataloged but not native-ready yet"
     ]
 
 
@@ -3034,7 +3034,7 @@ def test_models_check_all_reports_every_model_and_fails_when_any_not_ready(monke
     assert payload["data"][0]["ready"] is True
     assert payload["data"][1]["ready"] is False
     assert payload["data"][1]["next_steps"] == [
-        "tts_runner for tts is cataloged but not native-ready yet"
+        "utopic-runner for tts is cataloged but not native-ready yet"
     ]
 
 

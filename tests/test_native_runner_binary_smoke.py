@@ -247,7 +247,7 @@ def test_native_runner_reports_planned_non_text_task_readiness(tmp_path):
                     "modality": "image",
                     "engine": "diffusers",
                     "runtime": "planned_native",
-                    "runner": "image_runner",
+                    "runner": "utopic-runner",
                     "native_status": "planned",
                     "supported_backends": ["metal", "cuda"],
                     "expected_vram_gib": 8.0,
@@ -265,13 +265,13 @@ def test_native_runner_reports_planned_non_text_task_readiness(tmp_path):
     assert completed.returncode != 0
     assert payload["ok"] is False
     assert payload["error"]["code"] == "unsupported_model"
-    assert payload["error"]["message"] == "native C++ runner task is not implemented yet"
+    assert payload["error"]["message"] == "native task is not implemented behind utopic-runner yet"
     assert payload["error"]["detail"]["task"] == "image"
     assert payload["error"]["detail"]["model"] == "unit-image"
     assert payload["error"]["detail"]["modality"] == "image"
     assert payload["error"]["detail"]["engine"] == "diffusers"
     assert payload["error"]["detail"]["runtime"] == "planned_native"
-    assert payload["error"]["detail"]["runner"] == "image_runner"
+    assert payload["error"]["detail"]["runner"] == "utopic-runner"
     assert payload["error"]["detail"]["native_status"] == "planned"
     assert payload["error"]["detail"]["supported_backends"] == ["metal", "cuda"]
     assert payload["error"]["detail"]["expected_vram_gib"] == 8.0
@@ -290,7 +290,7 @@ def test_modality_runner_entrypoint_reports_planned_readiness(tmp_path):
                     "modality": "image",
                     "engine": "diffusers",
                     "runtime": "planned_native",
-                    "runner": "image_runner",
+                    "runner": "utopic-runner",
                     "native_status": "planned",
                     "supported_backends": ["metal", "cuda"],
                 },
@@ -300,13 +300,13 @@ def test_modality_runner_entrypoint_reports_planned_readiness(tmp_path):
         encoding="utf-8",
     )
 
-    completed = _run_runner(_runner_binary("image_runner"), request_path)
+    completed = _run_runner(_runner_binary("utopic-runner"), request_path)
     payload = _last_json(completed.stdout)
 
     assert completed.returncode != 0
     assert payload["ok"] is False
     assert payload["error"]["code"] == "unsupported_model"
-    assert payload["error"]["detail"]["runner"] == "image_runner"
+    assert payload["error"]["detail"]["runner"] == "utopic-runner"
     assert payload["error"]["detail"]["task"] == "image"
 
 
@@ -332,7 +332,7 @@ def test_modality_runner_readiness_includes_detected_runtime(tmp_path):
     )
 
     completed = _run_runner_with_env(
-        _runner_binary("image_runner"),
+        _runner_binary("utopic-runner"),
         request_path,
         {
             "UTOPIC_RUNTIME_BACKEND": "cuda",
@@ -344,7 +344,7 @@ def test_modality_runner_readiness_includes_detected_runtime(tmp_path):
     assert completed.returncode != 0
     assert payload["ok"] is False
     assert payload["error"]["code"] == "unsupported_model"
-    assert payload["error"]["detail"]["runner"] == "image_runner"
+    assert payload["error"]["detail"]["runner"] == "utopic-runner"
     assert payload["error"]["detail"]["detected"] == {
         "backend": "cuda",
         "device": "unit-test-gpu",
@@ -372,13 +372,13 @@ def test_modality_runner_entrypoint_reports_its_own_name_without_runner_option(t
         encoding="utf-8",
     )
 
-    completed = _run_runner(_runner_binary("image_runner"), request_path)
+    completed = _run_runner(_runner_binary("utopic-runner"), request_path)
     payload = _last_json(completed.stdout)
 
     assert completed.returncode != 0
     assert payload["ok"] is False
     assert payload["error"]["code"] == "unsupported_model"
-    assert payload["error"]["detail"]["runner"] == "image_runner"
+    assert payload["error"]["detail"]["runner"] == "utopic-runner"
     assert payload["error"]["detail"]["task"] == "image"
 
 
@@ -394,7 +394,7 @@ def test_native_runner_reports_oom_preflight_before_planned_readiness(tmp_path):
                     "modality": "image",
                     "engine": "cosmos",
                     "runtime": "planned_native",
-                    "runner": "image_runner",
+                    "runner": "utopic-runner",
                     "native_status": "planned",
                     "supported_backends": ["cuda"],
                     "expected_vram_gib": 96.0,
@@ -410,7 +410,7 @@ def test_native_runner_reports_oom_preflight_before_planned_readiness(tmp_path):
     )
 
     completed = _run_runner_with_env(
-        _runner_binary("image_runner"),
+        _runner_binary("utopic-runner"),
         request_path,
         {
             "UTOPIC_GPU_MEMORY_GIB": "40",
@@ -426,7 +426,7 @@ def test_native_runner_reports_oom_preflight_before_planned_readiness(tmp_path):
     assert "requires at least 96 GiB GPU memory" in payload["error"]["message"]
     detail = payload["error"]["detail"]
     assert detail["model"] == "cosmos3-super"
-    assert detail["runner"] == "image_runner"
+    assert detail["runner"] == "utopic-runner"
     assert detail["required_gpu_memory_gib"] == 96
     assert detail["detected"]["gpu_memory_gib"] == 40
     assert detail["detected"]["backend"] == "cuda"
@@ -474,7 +474,7 @@ def test_native_runner_reports_unsupported_modality_with_readiness_detail(tmp_pa
                     "modality": "image",
                     "engine": "diffusers",
                     "runtime": "planned_native",
-                    "runner": "image_runner",
+                    "runner": "utopic-runner",
                     "native_status": "planned",
                     "supported_backends": ["metal", "cuda"],
                     "expected_vram_gib": 8.0,
@@ -495,7 +495,7 @@ def test_native_runner_reports_unsupported_modality_with_readiness_detail(tmp_pa
     assert detail["task"] == "image"
     assert detail["model"] == "unit-image"
     assert detail["runtime"] == "planned_native"
-    assert detail["runner"] == "image_runner"
+    assert detail["runner"] == "utopic-runner"
     assert detail["native_status"] == "planned"
     assert detail["supported_backends"] == ["metal", "cuda"]
     assert detail["expected_vram_gib"] == 8.0

@@ -26,11 +26,6 @@ LLAMA_FETCH_REF = "refs/pull/24423/head"
 BIN_NAMES = (
     "utopic",
     "utopic_runner",
-    "image_runner",
-    "tts_runner",
-    "music_runner",
-    "video_runner",
-    "misc_runner",
     "utopic_server",
     "utopic_mcp",
     "utopic_acp",

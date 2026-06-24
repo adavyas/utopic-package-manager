@@ -89,7 +89,8 @@ SPEECH_INPUT_SCHEMA = _schema(
 SPEECH_DESCRIPTION = (
     "Call the planned native runner surface for local speech audio from text. Current "
     "TTS models are cataloged for readiness checks and return a native runner planned "
-    "error until the C++ TTS runner exists. Returns artifact JSON once native support is ready."
+    "error until speech generation lands behind the stable utopic-runner contract. "
+    "Returns artifact JSON once native support is ready."
 )
 
 
@@ -127,7 +128,8 @@ MCP_TOOLS = [
             "Call the planned native runner surface for image creation from a text prompt. "
             "Image models such as FLUX, Qwen-Image, Krea, and Cosmos are cataloged for "
             "readiness, hardware, and OOM checks and return a native runner planned error "
-            "until the C++ image runner exists. Returns OpenAI-compatible artifact JSON once native support is ready."
+            "until image generation lands behind the stable utopic-runner contract. "
+            "Returns OpenAI-compatible artifact JSON once native support is ready."
         ),
         "inputSchema": _schema(
             ["prompt"],
@@ -162,7 +164,8 @@ MCP_TOOLS = [
         "description": (
             "Call the planned native runner surface for music audio from a text prompt. "
             "Music models are cataloged for readiness checks and return a native runner "
-            "planned error until the C++ music runner exists. Returns artifact JSON once native support is ready."
+            "planned error until music generation lands behind the stable utopic-runner "
+            "contract. Returns artifact JSON once native support is ready."
         ),
         "inputSchema": _schema(
             ["prompt"],
@@ -183,7 +186,8 @@ MCP_TOOLS = [
         "description": (
             "Call the planned native runner surface for video from a text prompt. Video models "
             "are cataloged for readiness and OOM checks and return a native runner planned error "
-            "until the C++ video runner exists. Some video models require GB10 or high-memory CUDA; use "
+            "until video generation lands behind the stable utopic-runner contract. Some video "
+            "models require GB10 or high-memory CUDA; use "
             "utopic_models_check before running large jobs."
         ),
         "inputSchema": _schema(
@@ -209,8 +213,8 @@ MCP_TOOLS = [
         "description": (
             "Call the planned native runner surface for miscellaneous artifact workflows such "
             "as ZUNA signal processing. Misc models are cataloged for readiness checks and "
-            "return a native runner planned error until the C++ misc runner exists. Returns "
-            "artifact JSON once native support is ready."
+            "return a native runner planned error until the workflow lands behind the stable "
+            "utopic-runner contract. Returns artifact JSON once native support is ready."
         ),
         "inputSchema": _schema(
             ["artifact"],

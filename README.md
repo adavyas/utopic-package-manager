@@ -163,7 +163,7 @@ type.
 | `diffusiongemma-26b-a4b-q8` | DiffusionGemma 26B-A4B IT Q8_0 | text | native | Near-lossless 8-bit DiffusionGemma weights for GB10 and high-memory CUDA hosts. |
 | `qwen-image` | Qwen-Image | image | planned_native | Open-weight image generation model with strong prompt following and text rendering. |
 | `flux-1-schnell` | FLUX.1-schnell | image | planned_native | Fast Apache-licensed image generation model for local 1-4 step generation. |
-| `krea-2-raw` | Krea 2 Raw | image | planned_native | High-quality Krea text-to-image model; GB10 or high-memory CUDA recommended for the future native runner. |
+| `krea-2-raw` | Krea 2 Raw | image | planned_native | High-quality Krea text-to-image model; GB10 or high-memory CUDA recommended for the future native implementation. |
 | `cosmos3-super` | Cosmos3 Super Text2Image | image | planned_native | Agentic high-memory NVIDIA Cosmos3 image model; preflights GPU memory before loading. |
 | `kokoro-82m` | Kokoro 82M | tts | planned_native | Tiny, fast open-weight TTS model for local speech synthesis. |
 | `chatterbox` | Chatterbox | tts | planned_native | Higher-quality open-weight TTS and voice cloning model. |
@@ -175,7 +175,7 @@ type.
 | `zuna` | ZUNA | misc | planned_native | Open-weight EEG and signal foundation model exposed as a generic file-in/file-out artifact workflow. |
 
 The native text path is centered on DiffusionGemma canvas / entropy-bound GGUF
-models. Other modalities are cataloged as planned native runners and share the
+models. Other modalities are cataloged as planned native implementations and share the
 same model cache, OpenAI-compatible gateway, and MCP tool contract that the
 future C++ engines will use.
 
@@ -280,7 +280,8 @@ For most users, pull the single native text model they plan to run first.
 model and exits nonzero if any model is not ready. `utopic models check <alias>`
 prints the same readiness shape for one selected model. For native GGUF models
 it checks the local file and expected byte size when known. For planned non-text
-models it reports `native_runner_not_ready` until a C++ runner exists, plus the
+models it reports `native_runner_not_ready` until native support lands behind
+`utopic-runner`, plus the
 declared endpoints, model metadata, and hardware requirements. Optional Python
 bridge dependency checks are available only when `UTOPIC_EXPERIMENTAL_BRIDGE=1`
 or by running `utopic-bridge <engine> --check` directly.
@@ -348,9 +349,9 @@ utopic generate misc zuna --artifact /path/to/input.bin -o output.bin
 `utopic generate video --quality high` selects the higher-quality
 `wan2.1-t2v-14b` catalog entry when no explicit video model is provided.
 `--quality fast` selects the smaller `wan2.1-t2v-1.3b` model. The `speech`
-subcommand also accepts the `tts` alias. Until native C++ runners exist for
-these non-text modalities, the default response is a structured
-native-readiness error. Use `--param KEY=JSON` only for explicit experimental
+subcommand also accepts the `tts` alias. Until native implementations land
+behind `utopic-runner` for these non-text modalities, the default response is a
+structured native-readiness error. Use `--param KEY=JSON` only for explicit experimental
 bridge runs enabled with `UTOPIC_EXPERIMENTAL_BRIDGE=1`.
 
 Start the local runtime and print the live OpenAI-compatible and MCP URLs:
@@ -397,7 +398,8 @@ utopic run qwen-image --port 8910
 For planned non-text models, the command prints the OpenAI-compatible
 endpoint(s) declared by that model, such as `/v1/images/generations` and
 `/v1/responses`, plus `/v1/models` and `/mcp`. Requests return
-native-readiness errors until the matching C++ runner is available.
+native-readiness errors until the matching native implementation is available
+behind `utopic-runner`.
 
 `utopic gateway` remains available for advanced setups where you already have a
 native text server running separately:
@@ -477,13 +479,15 @@ GET /v1/utopic/runs/{run_id}/events
 translated to native chat-completions input and wrapped back into a
 Responses-style object. Image, TTS, music, video, and misc requests translate
 Responses `input` text into the planned modality request shape. By default they
-return native-readiness errors until a C++ runner exists; explicit experimental
+return native-readiness errors until native support lands behind `utopic-runner`;
+explicit experimental
 bridge runs return a Responses-style artifact message, while the
 modality-specific endpoints return the richer `utopic.artifact.response` object.
 
 The gateway does not run Python bridge adapters by default. Planned image, TTS,
 music, video, and misc models route through the native runner contract and
-return native runner readiness errors until their C++ runners exist. This keeps
+return native runner readiness errors until their native implementations land behind
+`utopic-runner`. This keeps
 production generation local-native by default and prevents a normal install from
 silently falling back to Torch or Diffusers.
 
@@ -534,7 +538,7 @@ Current release smoke coverage:
 | Runtime gateway | `/v1/models`, `/v1/responses`, modality-specific OpenAI-style routes, `/mcp`, and MCP `tools/list` / `tools/call` |
 | Hardware surface | Apple Silicon, GB10/DGX Spark, RTX 4090 CUDA, and 4x A100 CUDA smoke tests for installed wheel, catalog, MCP tools, native-readiness diagnostics, and artifact contract |
 | Native text generation | DiffusionGemma Q4_K_M native C++ smoke tests on GB10/DGX Spark, 6x RTX 4090 CUDA, and 4x A100 CUDA; Q5_K_M, Q6_K, and Q8_0 native C++ smoke tests on 4x A100 CUDA, using the package-managed llama.cpp build |
-| Planned artifact modalities | Qwen-Image, FLUX, Krea, Cosmos3, Kokoro, Chatterbox, Dia, ACE-Step, Wan, LTX, and ZUNA expose stable routes, MCP tools, hardware preflight metadata, and native-readiness errors until native C++ runners land |
+| Planned artifact modalities | Qwen-Image, FLUX, Krea, Cosmos3, Kokoro, Chatterbox, Dia, ACE-Step, Wan, LTX, and ZUNA expose stable routes, MCP tools, hardware preflight metadata, and native-readiness errors until native implementations land behind `utopic-runner` |
 | Experimental bridge adapters | Optional `utopic-bridge` commands expose dependency diagnostics and local Python adapter entrypoints when `UTOPIC_EXPERIMENTAL_BRIDGE=1`; they are compatibility testbeds, not the default production runtime |
 
 The packaged `utopic-bridge` command provides stable adapter entrypoints and

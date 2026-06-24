@@ -61,7 +61,7 @@ def test_runner_request_emits_stable_contract_for_artifact_generation():
         endpoints=("/v1/images/generations",),
         outputs=("image/png",),
         supported_backends=("metal", "cuda"),
-        runner="image_runner",
+        runner="utopic-runner",
         native_status="ready",
         expected_vram_gib=8.0,
         requirements={"min_gpu_memory_gib": 96, "allow_cpu": False},
@@ -82,7 +82,7 @@ def test_runner_request_emits_stable_contract_for_artifact_generation():
     assert payload["input"] == {"prompt": "a native image"}
     assert isinstance(payload["options"], dict)
     assert payload["options"]["endpoint"] == "/v1/images/generations"
-    assert payload["options"]["runner"] == "image_runner"
+    assert payload["options"]["runner"] == "utopic-runner"
     assert payload["options"]["requirements"] == {"min_gpu_memory_gib": 96, "allow_cpu": False}
     assert payload["options"]["size"] == "1024x1024"
     assert isinstance(payload["output_dir"], str)
@@ -121,7 +121,7 @@ def test_runner_request_allocates_unique_output_dir_per_invocation(monkeypatch, 
 
 
 def test_generation_uses_catalog_runner_binary(monkeypatch, tmp_path):
-    runner_path = tmp_path / "image_runner"
+    runner_path = tmp_path / "utopic-runner"
     runner_path.write_text("runner", encoding="utf-8")
     monkeypatch.setenv("UTOPIC_MODELS_DIR", str(tmp_path / "models"))
     entry = models.ModelEntry(
@@ -139,7 +139,7 @@ def test_generation_uses_catalog_runner_binary(monkeypatch, tmp_path):
         endpoints=("/v1/images/generations",),
         outputs=("image/png",),
         supported_backends=("metal", "cuda"),
-        runner="image_runner",
+        runner="utopic-runner",
         native_status="ready",
         expected_vram_gib=8.0,
     )
@@ -173,17 +173,17 @@ def test_generation_uses_catalog_runner_binary(monkeypatch, tmp_path):
         {"model": entry.id, "prompt": "a native image", "size": "1024x1024"},
     )
 
-    assert captured["binary"] == "image_runner"
+    assert captured["binary"] == "utopic-runner"
     assert payload["ok"] is False
     assert payload["error"]["code"] == "unsupported_model"
     assert captured["request"]["task"] == "image"
-    assert captured["request"]["options"]["runner"] == "image_runner"
+    assert captured["request"]["options"]["runner"] == "utopic-runner"
     assert captured["request"]["options"]["model_path"].endswith("unit-image")
     assert captured["request"]["options"]["size"] == "1024x1024"
 
 
 def test_generation_passes_installed_runtime_env(monkeypatch, tmp_path):
-    runner_path = tmp_path / "image_runner"
+    runner_path = tmp_path / "utopic-runner"
     runner_path.write_text("runner", encoding="utf-8")
     entry = models.ModelEntry(
         id="unit-image",
@@ -200,7 +200,7 @@ def test_generation_passes_installed_runtime_env(monkeypatch, tmp_path):
         endpoints=("/v1/images/generations",),
         outputs=("image/png",),
         supported_backends=("metal", "cuda"),
-        runner="image_runner",
+        runner="utopic-runner",
         native_status="planned",
     )
     captured = {}
@@ -262,7 +262,7 @@ def test_generation_reports_missing_catalog_runner_binary_as_setup_error(monkeyp
         endpoints=("/v1/images/generations",),
         outputs=("image/png",),
         supported_backends=("metal", "cuda"),
-        runner="image_runner",
+        runner="utopic-runner",
         native_status="planned",
         expected_vram_gib=8.0,
     )
@@ -283,7 +283,7 @@ def test_generation_reports_missing_catalog_runner_binary_as_setup_error(monkeyp
     assert payload["error"]["code"] == "backend_unavailable"
     assert payload["error"]["model"] == entry.id
     assert payload["error"]["modality"] == "image"
-    assert payload["error"]["runner"] == "image_runner"
+    assert payload["error"]["runner"] == "utopic-runner"
     assert payload["error"]["native_status"] == "planned"
-    assert payload["error"]["detail"]["binary"] == "image_runner"
+    assert payload["error"]["detail"]["binary"] == "utopic-runner"
     assert payload["error"]["detail"]["setup_command"] == "utopic setup"

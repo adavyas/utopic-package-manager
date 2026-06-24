@@ -192,7 +192,7 @@ def native_readiness_error(entry: models.ModelEntry) -> dict[str, Any]:
         "unsupported_model",
         (
             f"{entry.modality} generation for {entry.id} is cataloged but does not "
-            "have a native C++ runner yet"
+            "have a ready native implementation behind utopic-runner yet"
         ),
         {
             "model": entry.id,

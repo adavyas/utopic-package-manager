@@ -300,7 +300,7 @@ function modelNativeStatus(entry) {
     return entry.native_status ?? (modelRuntime(entry) === "native" ? "ready" : "planned");
 }
 function modelRunner(entry) {
-    return entry.runner ?? (modelModality(entry) !== "text" ? `${modelModality(entry)}_runner` : "utopic-runner");
+    return entry.runner ?? "utopic-runner";
 }
 function modelBackends(entry) {
     return (entry.supported_backends && entry.supported_backends.length > 0 ? entry.supported_backends : ["metal", "cuda", "cpu"]).join(", ");

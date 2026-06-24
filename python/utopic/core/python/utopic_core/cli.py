@@ -740,7 +740,7 @@ def _generate(argv: Sequence[str]) -> int:
         description=(
             "Request image, speech, music, video, or misc artifacts through the "
             "native-runner contract. Planned modalities report readiness until "
-            "their C++ runners exist."
+            "their native implementations land behind utopic-runner."
         ),
     )
     parser.add_argument("--version", action="store_true", help="Show version.")

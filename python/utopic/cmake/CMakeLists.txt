@@ -84,15 +84,8 @@ function(add_utopic_json_runner target_name)
     BUILD_RPATH "${LLAMA_BIN}" INSTALL_RPATH "${LLAMA_BIN}")
 endfunction()
 
-# JSON runners: one-shot native execution contract used by the Python MCP/CLI.
-# Modality-specific entrypoints share the same contract until their native
-# engines replace the planned-readiness path.
+# JSON runner: one-shot native execution contract used by the Python MCP/CLI.
 add_utopic_json_runner(utopic_runner)
-add_utopic_json_runner(image_runner)
-add_utopic_json_runner(tts_runner)
-add_utopic_json_runner(music_runner)
-add_utopic_json_runner(video_runner)
-add_utopic_json_runner(misc_runner)
 
 # Server: resident model, OpenAI-compatible /v1/chat/completions
 # cpp-httplib is split-mode (.h + .cpp); compile its impl TU in (same as llama.cpp's server lib).

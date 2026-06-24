@@ -5,7 +5,8 @@ and uses one runtime schema for all local modalities. Native text models are
 GGUF files driven by the C++ runtime. Image, TTS, music, video, and misc entries
 are cataloged as planned native-runner surfaces: they expose stable model
 metadata, OpenAI-compatible endpoints, MCP tools, hardware fit, and structured
-native-readiness errors until their C++ runners exist. Experimental bridge
+native-readiness errors until native implementations land behind `utopic-runner`.
+Experimental bridge
 commands remain opt-in only and are not the production runtime.
 
 | Model family | Modality | Runtime | Release status |

@@ -575,11 +575,11 @@ def test_readme_documents_supported_models_without_prohibited_mentions():
     assert "UTOPIC_BRIDGE_DIFFUSERS_COMMAND" in readme
     assert "does not run Python bridge adapters by default" in readme
     assert "native runner readiness errors" in readme
-    assert "until their C++ runners exist" in readme
+    assert "until their native implementations land behind" in readme
     assert "UTOPIC_EXPERIMENTAL_BRIDGE=1" in readme
     assert "utopic models check qwen-image" in readme
     assert "utopic models check --all" in readme
-    assert "reports `native_runner_not_ready` until a C++ runner exists" in readme
+    assert "reports `native_runner_not_ready` until native support lands behind" in readme
     assert "bridge dependency checks are available only when `UTOPIC_EXPERIMENTAL_BRIDGE=1`" in readme
     assert "utopic_models_check" in readme
     assert 'uv pip install "utopic[image]"' in readme
@@ -644,10 +644,7 @@ def test_model_catalog_declares_runtime_schema_for_every_entry():
         assert isinstance(entry["supported_backends"], list) and entry["supported_backends"]
         assert set(entry["supported_backends"]).issubset(valid_backends)
         assert isinstance(entry["runner"], str) and entry["runner"]
-        if entry["modality"] == "text":
-            assert entry["runner"] == "utopic-runner"
-        else:
-            assert entry["runner"].endswith("_runner")
+        assert entry["runner"] == "utopic-runner"
         assert entry["native_status"] in valid_native_statuses
         assert isinstance(entry["expected_vram_gib"], (int, float)) and entry["expected_vram_gib"] > 0
         assert isinstance(entry["expected_ram_gib"], (int, float)) and entry["expected_ram_gib"] > 0
