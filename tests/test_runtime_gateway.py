@@ -890,6 +890,7 @@ def test_gateway_mcp_checks_model_readiness(monkeypatch):
     assert status == 200
     assert payload["result"]["isError"] is False
     result = json.loads(payload["result"]["content"][0]["text"])
+    assert payload["result"]["structuredContent"] == result
     assert result["object"] == "utopic.model_check.list"
     assert result["summary"] == {"ready": 1, "not_ready": 1, "total": 2}
 
@@ -920,6 +921,7 @@ def test_gateway_mcp_checks_model_readiness(monkeypatch):
     assert status == 200
     assert payload["result"]["isError"] is False
     result = json.loads(payload["result"]["content"][0]["text"])
+    assert payload["result"]["structuredContent"] == result
     assert result == {"id": "qwen-image", "object": "utopic.model_check", "ready": True}
 
 
@@ -1067,6 +1069,7 @@ def test_gateway_mcp_dispatches_planned_tools_to_native_readiness_runtime(tmp_pa
         assert payload["id"] == request_id
         assert payload["result"]["isError"] is True
         tool_payload = json.loads(payload["result"]["content"][0]["text"])
+        assert payload["result"]["structuredContent"] == tool_payload
         assert tool_payload["error"]["code"] == "unsupported_model"
         assert tool_payload["error"]["model"] == arguments["model"]
         assert tool_payload["error"]["modality"] in {"tts", "music", "misc"}

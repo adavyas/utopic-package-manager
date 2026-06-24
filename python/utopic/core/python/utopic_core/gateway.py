@@ -496,8 +496,9 @@ def _mcp_tool_call(
         active_entry = _active_text_entry(active_text_model_path, active_text_model_id)
         if active_entry is not None:
             entries.append(active_entry)
-        content = json.dumps([_model_payload(entry) for entry in entries], indent=2)
-        return _mcp_text_result(request_id, content, is_error=False)
+        payload = [_model_payload(entry) for entry in entries]
+        content = json.dumps(payload, indent=2)
+        return _mcp_text_result(request_id, content, is_error=False, structured_content=payload)
     if name == "utopic_models_check":
         try:
             if arguments.get("all") is True:
@@ -517,6 +518,7 @@ def _mcp_tool_call(
             request_id,
             json.dumps(payload, indent=2, sort_keys=True),
             is_error=False,
+            structured_content=payload,
         )
     if name == "utopic_models_pull":
         model_id = str(arguments.get("model") or "")
@@ -529,6 +531,7 @@ def _mcp_tool_call(
                     request_id,
                     json.dumps(payload, indent=2, sort_keys=True),
                     is_error=False,
+                    structured_content=payload,
                 )
             if not model_id:
                 raise RuntimeError("utopic_models_pull requires model or all=true")
@@ -558,7 +561,12 @@ def _mcp_tool_call(
         active_text_model_id=active_text_model_id,
     )
     payload = json.loads(body.decode("utf-8"))
-    return _mcp_text_result(request_id, json.dumps(payload, sort_keys=True), is_error=status >= 400)
+    return _mcp_text_result(
+        request_id,
+        json.dumps(payload, sort_keys=True),
+        is_error=status >= 400,
+        structured_content=payload,
+    )
 
 
 def _local_text_model_check(entry: models.LocalTextEntry) -> dict[str, object]:
@@ -599,8 +607,14 @@ def _normalize_mcp_tool_arguments(name: str, arguments: dict[str, Any]) -> dict[
     return normalized
 
 
-def _mcp_text_result(request_id: Any, text: str, *, is_error: bool) -> dict[str, Any]:
-    return {
+def _mcp_text_result(
+    request_id: Any,
+    text: str,
+    *,
+    is_error: bool,
+    structured_content: Optional[Any] = None,
+) -> dict[str, Any]:
+    result: dict[str, Any] = {
         "jsonrpc": "2.0",
         "id": request_id,
         "result": {
@@ -608,6 +622,9 @@ def _mcp_text_result(request_id: Any, text: str, *, is_error: bool) -> dict[str,
             "content": [{"type": "text", "text": text}],
         },
     }
+    if structured_content is not None:
+        result["result"]["structuredContent"] = structured_content
+    return result
 
 
 def _default_model_for_endpoint(path: str) -> str:
