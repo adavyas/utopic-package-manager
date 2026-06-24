@@ -982,6 +982,8 @@ def _native_runner_error_status(payload: dict[str, Any]) -> int:
     code = error.get("code")
     if code == "missing_model":
         return 404
+    if code == "oom":
+        return 507
     if code in {"backend_unavailable", "unsupported_model"}:
         return 503
     return 502

@@ -467,6 +467,60 @@ def test_gateway_planned_generation_reports_native_runner_not_ready(monkeypatch)
     assert captured["request"]["prompt"] == "a native runner test"
 
 
+def test_gateway_native_runner_oom_maps_to_capacity_status(monkeypatch):
+    entry = gateway.models.ModelEntry(
+        id="unit-large-image",
+        name="Unit Large Image",
+        family="unit",
+        filename="unit-large-image",
+        url="https://example.invalid/unit-large-image",
+        size="100 GiB",
+        recommended=False,
+        description="unit",
+        modality="image",
+        engine="diffusers",
+        runtime="planned_native",
+        endpoints=("/v1/images/generations",),
+        outputs=("image",),
+    )
+    monkeypatch.setattr(gateway.models, "get_model", lambda model_id: entry if model_id == entry.id else None)
+
+    def fake_generation(runner_entry, endpoint, request):
+        return {
+            "ok": False,
+            "error": {
+                "code": "oom",
+                "message": "model is too large for this host",
+                "detail": {
+                    "task": "image",
+                    "model": runner_entry.id,
+                    "runner": "image_runner",
+                    "required_gpu_memory_gib": 96,
+                    "detected": {
+                        "backend": "cuda",
+                        "device": "unit-test-gpu",
+                        "gpu_memory_gib": 40,
+                    },
+                },
+            },
+        }
+
+    monkeypatch.setattr(gateway.native_runner, "generation", fake_generation)
+
+    status, _headers, body = gateway.handle_openai_request(
+        "POST",
+        "/v1/images/generations",
+        {"model": entry.id, "prompt": "a native runner capacity test"},
+    )
+
+    payload = json.loads(body)
+    assert status == 507
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "oom"
+    assert payload["error"]["detail"]["required_gpu_memory_gib"] == 96
+    assert payload["error"]["detail"]["detected"]["gpu_memory_gib"] == 40
+
+
 def test_gateway_ignores_bridge_command_without_experimental_gate(monkeypatch):
     entry = gateway.models.ModelEntry(
         id="unit-image",
