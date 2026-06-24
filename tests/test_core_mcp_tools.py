@@ -367,6 +367,27 @@ def test_gateway_responses_for_native_text_preserves_runner_metadata(monkeypatch
     assert payload["metadata"]["progress_path"] == "/tmp/utopic/run_native_response/progress.jsonl"
 
 
+def test_gateway_run_progress_endpoint_identifies_run(monkeypatch, tmp_path):
+    run_id = "run_progress"
+    progress_dir = tmp_path / "runs" / run_id
+    progress_dir.mkdir(parents=True)
+    (progress_dir / "progress.jsonl").write_text(
+        '{"event":"started","run_id":"run_progress"}\n'
+        'not json\n'
+        '{"event":"completed","run_id":"run_progress"}\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(gateway, "_runs_dir", lambda: tmp_path / "runs")
+
+    status, _headers, body = gateway.handle_openai_request("GET", f"/v1/utopic/runs/{run_id}/events", None)
+
+    payload = json.loads(body)
+    assert status == 200
+    assert payload["object"] == "list"
+    assert payload["run_id"] == run_id
+    assert [event["event"] for event in payload["data"]] == ["started", "completed"]
+
+
 def test_gateway_active_text_model_alias_uses_runner(monkeypatch, tmp_path):
     model_path = tmp_path / "active.gguf"
     model_path.write_text("model", encoding="utf-8")

@@ -1083,7 +1083,7 @@ def _run_progress_response(run_id: str) -> tuple[int, dict[str, str], bytes]:
     progress_path = _runs_dir() / run_id / "progress.jsonl"
     if not progress_path.is_file():
         return _json(404, {"error": {"message": f"unknown run: {run_id}", "code": "run_not_found"}})
-    return _json(200, {"object": "list", "data": _read_progress(progress_path)})
+    return _json(200, {"object": "list", "run_id": run_id, "data": _read_progress(progress_path)})
 
 
 def _is_safe_run_id(run_id: str) -> bool:
