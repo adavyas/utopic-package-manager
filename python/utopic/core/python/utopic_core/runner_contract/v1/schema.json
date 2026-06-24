@@ -54,6 +54,10 @@
           "type": "string",
           "minLength": 1
         },
+        "task_runner": {
+          "type": "string",
+          "minLength": 1
+        },
         "native_status": {
           "enum": ["ready", "planned", "experimental", "unsupported_on_device"]
         },

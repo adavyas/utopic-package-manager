@@ -38,6 +38,7 @@ class ModelEntry:
     hardware: tuple[str, ...] = ("local",)
     supported_backends: tuple[str, ...] = ("metal", "cuda", "cpu")
     runner: str = ""
+    task_runner: str = ""
     native_status: str = ""
     expected_vram_gib: Optional[float] = None
     expected_ram_gib: Optional[float] = None
@@ -81,6 +82,7 @@ class LocalTextEntry:
     hardware: tuple[str, ...] = ("local",)
     supported_backends: tuple[str, ...] = ("metal", "cuda", "cpu")
     runner: str = TEXT_RUNNER
+    task_runner: str = ""
     native_status: str = "ready"
     expected_vram_gib: Optional[float] = None
     expected_ram_gib: Optional[float] = None
@@ -186,6 +188,7 @@ def _validate_catalog_entry(item: object, index: int) -> ModelEntry:
     hardware = _string_list_field(item, "hardware", ["local"], index)
     supported_backends = _string_list_field(item, "supported_backends", ["metal", "cuda", "cpu"], index)
     runner = _string_field(item, "runner", TEXT_RUNNER, index)
+    task_runner = _optional_string_field(item, "task_runner", index)
     native_status = _string_field(item, "native_status", "ready" if runtime == "native" else "planned", index)
     expected_vram_gib = _number_field(item, "expected_vram_gib", index)
     expected_ram_gib = _number_field(item, "expected_ram_gib", index)
@@ -230,6 +233,7 @@ def _validate_catalog_entry(item: object, index: int) -> ModelEntry:
         hardware=tuple(hardware),
         supported_backends=tuple(supported_backends),
         runner=runner,
+        task_runner=task_runner,
         native_status=native_status,
         expected_vram_gib=expected_vram_gib,
         expected_ram_gib=expected_ram_gib,
@@ -277,6 +281,15 @@ def _string_field(item: dict[str, object], field: str, default: str, index: int)
     value = item.get(field, default)
     if not isinstance(value, str) or not value:
         raise RuntimeError(f"Invalid model catalog entry {index}: {field} must be a non-empty string")
+    return value
+
+
+def _optional_string_field(item: dict[str, object], field: str, index: int) -> str:
+    value = item.get(field, "")
+    if value == "":
+        return ""
+    if not isinstance(value, str):
+        raise RuntimeError(f"Invalid model catalog entry {index}: {field} must be a string")
     return value
 
 
@@ -408,6 +421,8 @@ def _planned_model_metadata(entry: ModelEntry) -> dict[str, object]:
         payload["expected_ram_gib"] = entry.expected_ram_gib
     if entry.requirements:
         payload["requirements"] = entry.requirements
+    if entry.task_runner:
+        payload["task_runner"] = entry.task_runner
     return payload
 
 
@@ -516,6 +531,7 @@ def _native_model_check(entry: ModelEntry) -> dict[str, object]:
         "modality": entry.modality,
         "engine": entry.engine,
         "runner": entry.runner,
+        "task_runner": entry.task_runner,
         "native_status": entry.native_status,
         "supported_backends": list(entry.supported_backends),
         "expected_vram_gib": entry.expected_vram_gib,
@@ -546,6 +562,7 @@ def _planned_model_check(entry: ModelEntry) -> dict[str, object]:
         "modality": entry.modality,
         "engine": entry.engine,
         "runner": entry.runner,
+        "task_runner": entry.task_runner,
         "native_status": entry.native_status,
         "supported_backends": list(entry.supported_backends),
         "expected_vram_gib": entry.expected_vram_gib,
@@ -593,6 +610,7 @@ def _model_capacity_preflight(entry: ModelEntry) -> Optional[dict[str, object]]:
         "modality": entry.modality,
         "engine": entry.engine,
         "runner": entry.runner,
+        "task_runner": entry.task_runner,
         "native_status": entry.native_status,
         "supported_backends": list(entry.supported_backends),
         "expected_vram_gib": entry.expected_vram_gib,

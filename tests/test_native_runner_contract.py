@@ -43,6 +43,8 @@ def test_runner_contract_schema_and_fixtures_are_packaged():
     option_schema = schema["properties"]["options"]
     option_properties = option_schema["properties"]
     assert option_schema["additionalProperties"] is True
+    assert option_properties["task_runner"]["type"] == "string"
+    assert option_properties["task_runner"]["minLength"] == 1
     assert option_properties["task_runner_path"]["type"] == "string"
     assert option_properties["task_runner_path"]["minLength"] == 1
     assert option_properties["requirements"]["type"] == "object"
@@ -302,6 +304,83 @@ def test_runner_request_allocates_versioned_run_layout(monkeypatch, tmp_path):
     assert payload["progress_path"] == str(runs_dir / payload["run_id"] / "progress.jsonl")
     assert Path(payload["output_dir"]).is_dir()
     assert Path(payload["progress_path"]).parent.is_dir()
+
+
+def test_runner_request_resolves_ready_artifact_task_runner_path(monkeypatch, tmp_path):
+    helper_path = tmp_path / "utopic-image-runner"
+    helper_path.write_text("runner", encoding="utf-8")
+    entry = models.ModelEntry(
+        id="unit-image-helper",
+        name="Unit Image Helper",
+        family="unit",
+        filename="unit-image-helper",
+        url="https://example.invalid/unit-image-helper",
+        size="1 GiB",
+        recommended=False,
+        description="unit",
+        modality="image",
+        engine="native-image",
+        runtime="native",
+        endpoints=("/v1/images/generations",),
+        outputs=("image/png",),
+        runner="utopic-runner",
+        native_status="ready",
+        task_runner="utopic-image-runner",
+    )
+    monkeypatch.setattr(
+        native_runner._native,
+        "binary_path",
+        lambda name: helper_path if name == "utopic-image-runner" else tmp_path / name,
+    )
+
+    payload = native_runner._runner_request(
+        entry,
+        "image",
+        {"prompt": "a native image"},
+        {},
+        endpoint="/v1/images/generations",
+    )
+
+    assert payload["options"]["task_runner"] == "utopic-image-runner"
+    assert payload["options"]["task_runner_path"] == str(helper_path)
+
+
+def test_runner_request_uses_package_manager_helper_path_when_missing(monkeypatch, tmp_path):
+    entry = models.ModelEntry(
+        id="unit-image-helper-missing",
+        name="Unit Image Helper Missing",
+        family="unit",
+        filename="unit-image-helper-missing",
+        url="https://example.invalid/unit-image-helper-missing",
+        size="1 GiB",
+        recommended=False,
+        description="unit",
+        modality="image",
+        engine="native-image",
+        runtime="native",
+        endpoints=("/v1/images/generations",),
+        outputs=("image/png",),
+        runner="utopic-runner",
+        native_status="ready",
+        task_runner="utopic-image-runner",
+    )
+    monkeypatch.setattr(native_runner._native.installer, "bin_dir", lambda: tmp_path / "bin")
+    monkeypatch.setattr(
+        native_runner._native,
+        "binary_path",
+        lambda name: (_ for _ in ()).throw(RuntimeError(f"missing {name}")),
+    )
+
+    payload = native_runner._runner_request(
+        entry,
+        "image",
+        {"prompt": "a native image"},
+        {},
+        endpoint="/v1/images/generations",
+    )
+
+    assert payload["options"]["task_runner"] == "utopic-image-runner"
+    assert payload["options"]["task_runner_path"] == str(tmp_path / "bin" / "utopic-image-runner")
 
 
 def test_generation_uses_catalog_runner_binary(monkeypatch, tmp_path):

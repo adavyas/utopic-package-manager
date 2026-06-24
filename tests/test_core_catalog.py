@@ -52,6 +52,29 @@ def test_model_payload_exposes_native_readiness_fields():
     assert payload["oom_policy"]["action"] == "fail_before_runner"
 
 
+def test_model_payload_exposes_native_artifact_task_runner_when_present():
+    entry = models.ModelEntry(
+        id="unit-image-helper",
+        name="Unit Image Helper",
+        family="unit",
+        filename="unit-image-helper",
+        url="https://example.invalid/unit-image-helper",
+        size="1 GiB",
+        recommended=False,
+        description="unit",
+        modality="image",
+        engine="native-image",
+        runtime="native",
+        native_status="ready",
+        task_runner="utopic-image-runner",
+    )
+
+    payload = gateway._model_payload(entry)
+
+    assert payload["runner"] == "utopic-runner"
+    assert payload["task_runner"] == "utopic-image-runner"
+
+
 def test_planned_model_payload_hides_experimental_bridge_metadata_by_default(monkeypatch):
     monkeypatch.delenv("UTOPIC_EXPERIMENTAL_BRIDGE", raising=False)
     entry = next(entry for entry in models.list_models() if entry.runtime == "planned_native")

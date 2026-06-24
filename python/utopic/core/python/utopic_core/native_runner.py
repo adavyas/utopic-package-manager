@@ -126,6 +126,12 @@ def _runner_request(
         "outputs": list(entry.outputs),
         "supported_backends": list(entry.supported_backends),
     }
+    if entry.task_runner:
+        options["task_runner"] = entry.task_runner
+        try:
+            options["task_runner_path"] = str(_native.binary_path(entry.task_runner))
+        except RuntimeError:
+            options["task_runner_path"] = str(_native.installer.bin_dir() / entry.task_runner)
     if cache_path is not None:
         options["model_cache_path"] = cache_path
         if entry.runtime == "native":

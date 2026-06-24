@@ -1393,6 +1393,8 @@ def _model_payload(entry: models.ModelEntry) -> dict[str, Any]:
         "url": entry.url,
         "description": entry.description,
     }
+    if entry.task_runner:
+        payload["task_runner"] = entry.task_runner
     return payload
 
 
