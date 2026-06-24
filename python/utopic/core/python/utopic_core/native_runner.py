@@ -58,6 +58,7 @@ def _invoke_runner(
                 capture_output=True,
                 text=True,
                 timeout=_runner_timeout_seconds(),
+                env=_runner_environment(),
             )
         except subprocess.TimeoutExpired:
             return _error(
@@ -302,6 +303,20 @@ def _runner_timeout_seconds() -> int:
     except ValueError:
         return 600
     return parsed if parsed > 0 else 600
+
+
+def _runner_environment() -> dict[str, str]:
+    env = os.environ.copy()
+    try:
+        runner_env = models.installer.runner_environment()
+    except (AttributeError, RuntimeError):
+        return env
+    if not isinstance(runner_env, dict):
+        return env
+    for key, value in runner_env.items():
+        if isinstance(key, str) and isinstance(value, str) and value:
+            env.setdefault(key, value)
+    return env
 
 
 def _error(code: str, message: str, detail: dict[str, Any] | None = None) -> dict[str, Any]:

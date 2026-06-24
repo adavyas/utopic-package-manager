@@ -2,11 +2,12 @@ import json
 import subprocess
 from pathlib import Path
 
+from utopic import installer
 from utopic.core_loader import load_core_module
 
 
-native_runner = load_core_module("native_runner")
-models = load_core_module("models")
+native_runner = load_core_module("native_runner", installer_api=installer)
+models = load_core_module("models", installer_api=installer)
 
 
 def test_runner_request_emits_stable_contract_for_chat(tmp_path):
@@ -179,6 +180,70 @@ def test_generation_uses_catalog_runner_binary(monkeypatch, tmp_path):
     assert captured["request"]["options"]["runner"] == "image_runner"
     assert captured["request"]["options"]["model_path"].endswith("unit-image")
     assert captured["request"]["options"]["size"] == "1024x1024"
+
+
+def test_generation_passes_installed_runtime_env(monkeypatch, tmp_path):
+    runner_path = tmp_path / "image_runner"
+    runner_path.write_text("runner", encoding="utf-8")
+    entry = models.ModelEntry(
+        id="unit-image",
+        name="Unit Image",
+        family="unit",
+        filename="unit-image",
+        url="https://example.invalid/unit-image",
+        size="1 GiB",
+        recommended=False,
+        description="unit",
+        modality="image",
+        engine="native-image",
+        runtime="planned_native",
+        endpoints=("/v1/images/generations",),
+        outputs=("image/png",),
+        supported_backends=("metal", "cuda"),
+        runner="image_runner",
+        native_status="planned",
+    )
+    captured = {}
+    monkeypatch.setattr(native_runner._native, "binary_path", lambda _name: runner_path)
+    monkeypatch.setattr(
+        installer,
+        "runner_environment",
+        lambda: {
+            "UTOPIC_RUNTIME_BACKEND": "metal",
+            "UTOPIC_RUNTIME_DEVICE": "Apple M4 Pro",
+        },
+    )
+    monkeypatch.setenv("UTOPIC_RUNTIME_BACKEND", "cuda")
+
+    def fake_run(command, **kwargs):
+        captured["env"] = kwargs["env"]
+        return subprocess.CompletedProcess(
+            command,
+            1,
+            stdout=json.dumps(
+                {
+                    "ok": False,
+                    "error": {
+                        "code": "unsupported_model",
+                        "message": "native runner task is not implemented yet",
+                        "detail": {"task": "image", "model": entry.id},
+                    },
+                }
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr(native_runner.subprocess, "run", fake_run)
+
+    payload = native_runner.generation(
+        entry,
+        "/v1/images/generations",
+        {"model": entry.id, "prompt": "a native image"},
+    )
+
+    assert payload["ok"] is False
+    assert captured["env"]["UTOPIC_RUNTIME_BACKEND"] == "cuda"
+    assert captured["env"]["UTOPIC_RUNTIME_DEVICE"] == "Apple M4 Pro"
 
 
 def test_generation_reports_missing_catalog_runner_binary_as_setup_error(monkeypatch):

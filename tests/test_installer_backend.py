@@ -903,9 +903,14 @@ def test_setup_writes_install_metadata_after_success(monkeypatch, tmp_path):
     metadata = installer._read_install_metadata()
     assert metadata is not None
     assert metadata["backend"] == "cpu"
+    assert metadata["device"] == "CPU"
     assert metadata["requested_backend"] == "cpu"
     assert metadata["llama_dir"] == str(installer._normalize_path(llama_dir))
     assert metadata["native_dir"] == str(installer._normalize_path(native_dir))
+    assert installer.runner_environment() == {
+        "UTOPIC_RUNTIME_BACKEND": "cpu",
+        "UTOPIC_RUNTIME_DEVICE": "CPU",
+    }
 
 
 def test_setup_jobs_argument_overrides_invalid_environment(monkeypatch, tmp_path):

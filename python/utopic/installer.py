@@ -490,6 +490,7 @@ def _install_metadata(
         "package_version": __version__,
         "requested_backend": requested_backend,
         "backend": decision.backend,
+        "device": decision.device,
         "cuda_architectures": decision.cuda_architectures,
         "cuda_graphs": cuda_graphs,
         "llama_repo": os.environ.get("UTOPIC_LLAMA_REPO", LLAMA_REPO),
@@ -554,6 +555,20 @@ def _read_install_metadata() -> Optional[dict[str, object]]:
     except (OSError, json.JSONDecodeError):
         return None
     return loaded if isinstance(loaded, dict) else None
+
+
+def runner_environment() -> dict[str, str]:
+    metadata = _read_install_metadata()
+    if metadata is None:
+        return {}
+    env: dict[str, str] = {}
+    backend = metadata.get("backend")
+    if isinstance(backend, str) and backend:
+        env["UTOPIC_RUNTIME_BACKEND"] = backend
+    device = metadata.get("device")
+    if isinstance(device, str) and device:
+        env["UTOPIC_RUNTIME_DEVICE"] = device
+    return env
 
 
 def _write_install_metadata(
