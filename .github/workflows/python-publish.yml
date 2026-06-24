@@ -371,6 +371,46 @@ jobs:
                   print(completed.stderr, file=sys.stderr)
                   sys.exit(1)
 
+          def smoke_installed_wheel_native_cpu(utopic: Path, python: Path, home: Path, smoke_env: dict[str, str]) -> None:
+              native_home = home / "installed-wheel-native-cpu"
+              native_env = dict(smoke_env, UTOPIC_HOME=str(native_home))
+              completed = subprocess.run(
+                  [str(utopic), "setup", "--backend", "cpu", "--jobs", "2"],
+                  env=native_env,
+                  text=True,
+                  stdout=subprocess.PIPE,
+                  stderr=subprocess.PIPE,
+                  timeout=1800,
+              )
+              if completed.returncode != 0:
+                  print("Installed wheel native CPU setup smoke failed", file=sys.stderr)
+                  print(completed.stdout, file=sys.stderr)
+                  print(completed.stderr, file=sys.stderr)
+                  sys.exit(completed.returncode)
+
+              runner_binary = native_home / "bin" / ("utopic_runner.exe" if os.name == "nt" else "utopic_runner")
+              native_runner_smoke = Path.cwd() / "tests/test_native_runner_binary_smoke.py"
+              subprocess.run([str(python), "-m", "pip", "install", "pytest"], check=True)
+              completed = subprocess.run(
+                  [
+                      str(python),
+                      "-m",
+                      "pytest",
+                      str(native_runner_smoke),
+                      "-q",
+                  ],
+                  env=dict(native_env, UTOPIC_RUNNER_BINARY=str(runner_binary)),
+                  text=True,
+                  stdout=subprocess.PIPE,
+                  stderr=subprocess.PIPE,
+                  timeout=120,
+              )
+              if completed.returncode != 0:
+                  print("Installed wheel native runner smoke failed", file=sys.stderr)
+                  print(completed.stdout, file=sys.stderr)
+                  print(completed.stderr, file=sys.stderr)
+                  sys.exit(completed.returncode)
+
           def smoke(artifact: Path) -> None:
               with tempfile.TemporaryDirectory() as tmp:
                   root = Path(tmp)
@@ -455,6 +495,9 @@ jobs:
                       print(completed.stdout, file=sys.stderr)
                       print(completed.stderr, file=sys.stderr)
                       sys.exit(completed.returncode)
+
+                  if artifact.name.endswith(".whl"):
+                      smoke_installed_wheel_native_cpu(utopic, python, home, smoke_env)
 
                   prompt_probe = textwrap.dedent(r'''
           from pathlib import Path

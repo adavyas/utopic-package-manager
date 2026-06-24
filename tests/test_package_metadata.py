@@ -409,6 +409,27 @@ def test_ci_workflow_runs_real_native_cpu_setup_smoke():
     ]
 
 
+def test_workflows_smoke_installed_wheel_with_real_native_cpu_runner():
+    workflows = [
+        REPO_ROOT / ".github" / "workflows" / "ci.yml",
+        REPO_ROOT / ".github" / "workflows" / "python-publish.yml",
+    ]
+
+    for workflow_path in workflows:
+        workflow = workflow_path.read_text(encoding="utf-8")
+        assert "def smoke_installed_wheel_native_cpu" in workflow
+        assert "Installed wheel native CPU setup smoke failed" in workflow
+        assert "Installed wheel native runner smoke failed" in workflow
+        assert '[str(utopic), "setup", "--backend", "cpu", "--jobs", "2"]' in workflow
+        assert "UTOPIC_RUNNER_BINARY" in workflow
+        assert "tests/test_native_runner_binary_smoke.py" in workflow
+        assert 'if artifact.name.endswith(".whl"):' in workflow
+        assert (
+            "smoke_installed_wheel_native_cpu(utopic, python, home, smoke_env)"
+            in workflow
+        )
+
+
 def test_release_workflow_smokes_installed_node_free_chat_fallback():
     workflow = (REPO_ROOT / ".github" / "workflows" / "python-publish.yml").read_text(
         encoding="utf-8"
