@@ -8,17 +8,17 @@ import pytest
 from utopic import _native
 
 
-def _runner_binary() -> Path:
+def _runner_binary(name: str = "utopic_runner") -> Path:
     value = os.environ.get("UTOPIC_RUNNER_BINARY")
-    if value:
+    if value and name == "utopic_runner":
         path = Path(value).expanduser()
     else:
         try:
-            path = _native.binary_path("utopic_runner")
+            path = _native.binary_path(name)
         except RuntimeError:
-            pytest.skip("run utopic setup or set UTOPIC_RUNNER_BINARY=/path/to/utopic_runner")
+            pytest.skip(f"run utopic setup or set UTOPIC_RUNNER_BINARY=/path/to/utopic_runner")
     if not path.is_file():
-        pytest.fail(f"utopic_runner does not exist: {path}")
+        pytest.fail(f"{name} does not exist: {path}")
     return path
 
 
@@ -248,7 +248,7 @@ def test_native_runner_reports_planned_non_text_task_readiness(tmp_path):
     assert completed.returncode != 0
     assert payload["ok"] is False
     assert payload["error"]["code"] == "unsupported_model"
-    assert payload["error"]["message"] == "native runner task is not implemented yet"
+    assert payload["error"]["message"] == "native C++ runner task is not implemented yet"
     assert payload["error"]["detail"]["task"] == "image"
     assert payload["error"]["detail"]["model"] == "unit-image"
     assert payload["error"]["detail"]["modality"] == "image"
@@ -259,6 +259,38 @@ def test_native_runner_reports_planned_non_text_task_readiness(tmp_path):
     assert payload["error"]["detail"]["supported_backends"] == ["metal", "cuda"]
     assert payload["error"]["detail"]["expected_vram_gib"] == 8.0
     assert payload["error"]["detail"]["expected_ram_gib"] == 16.0
+
+
+def test_modality_runner_entrypoint_reports_planned_readiness(tmp_path):
+    request_path = tmp_path / "planned-image.json"
+    request_path.write_text(
+        json.dumps(
+            {
+                "task": "image",
+                "model": "unit-image",
+                "input": {"prompt": "a red cube"},
+                "options": {
+                    "modality": "image",
+                    "engine": "diffusers",
+                    "runtime": "planned_native",
+                    "runner": "image_runner",
+                    "native_status": "planned",
+                    "supported_backends": ["metal", "cuda"],
+                },
+                "output_dir": str(tmp_path),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    completed = _run_runner(_runner_binary("image_runner"), request_path)
+    payload = _last_json(completed.stdout)
+
+    assert completed.returncode != 0
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "unsupported_model"
+    assert payload["error"]["detail"]["runner"] == "image_runner"
+    assert payload["error"]["detail"]["task"] == "image"
 
 
 def test_native_runner_reports_unloadable_model_cleanly(tmp_path):

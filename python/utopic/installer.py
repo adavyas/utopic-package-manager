@@ -23,7 +23,18 @@ UTOPIC_NATIVE_REF = "7e554b1d4f1b1dc9955eac1813781eec9b69fd68"
 LLAMA_REPO = "https://github.com/ggml-org/llama.cpp.git"
 LLAMA_REF = "ef5e2dcce"
 LLAMA_FETCH_REF = "refs/pull/24423/head"
-BIN_NAMES = ("utopic", "utopic_runner", "utopic_server", "utopic_mcp", "utopic_acp")
+BIN_NAMES = (
+    "utopic",
+    "utopic_runner",
+    "image_runner",
+    "tts_runner",
+    "music_runner",
+    "video_runner",
+    "misc_runner",
+    "utopic_server",
+    "utopic_mcp",
+    "utopic_acp",
+)
 INSTALL_METADATA_NAME = "install.json"
 INSTALL_METADATA_SCHEMA_VERSION = 3
 INSTALL_METADATA_MATCH_KEYS = (

@@ -26,11 +26,12 @@ def chat_completion(entry: models.ModelEntry, request: dict[str, Any]) -> dict[s
 
 def generation(entry: models.ModelEntry, endpoint: str, request: dict[str, Any]) -> dict[str, Any]:
     runner_input = _generation_input(entry, request)
-    return _invoke_runner(
+    payload = _invoke_runner(
         _runner_request(entry, entry.modality, runner_input, request, endpoint=endpoint),
         binary_name=entry.runner or "utopic_runner",
         binary_unavailable_payload=native_readiness_error(entry),
     )
+    return _enrich_native_readiness_error(entry, payload)
 
 
 def _invoke_runner(
@@ -204,6 +205,35 @@ def native_readiness_error(entry: models.ModelEntry) -> dict[str, Any]:
     payload["error"]["runner"] = entry.runner
     payload["error"]["native_status"] = entry.native_status
     payload["error"]["supported_backends"] = list(entry.supported_backends)
+    return payload
+
+
+def _enrich_native_readiness_error(entry: models.ModelEntry, payload: dict[str, Any]) -> dict[str, Any]:
+    error = payload.get("error")
+    if payload.get("ok") is not False or not isinstance(error, dict):
+        return payload
+    if error.get("code") != "unsupported_model":
+        return payload
+
+    detail = error.get("detail")
+    if not isinstance(detail, dict):
+        detail = {}
+        error["detail"] = detail
+    detail.setdefault("model", entry.id)
+    detail.setdefault("modality", entry.modality)
+    detail.setdefault("engine", entry.engine)
+    detail.setdefault("runner", entry.runner)
+    detail.setdefault("native_status", entry.native_status)
+    detail.setdefault("supported_backends", list(entry.supported_backends))
+    detail.setdefault("expected_vram_gib", entry.expected_vram_gib)
+    detail.setdefault("expected_ram_gib", entry.expected_ram_gib)
+
+    error["model"] = entry.id
+    error["modality"] = entry.modality
+    error["engine"] = entry.engine
+    error["runner"] = entry.runner
+    error["native_status"] = entry.native_status
+    error["supported_backends"] = list(entry.supported_backends)
     return payload
 
 

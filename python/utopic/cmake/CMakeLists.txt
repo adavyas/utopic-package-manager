@@ -69,19 +69,30 @@ endif()
 set_target_properties(utopic PROPERTIES
   BUILD_RPATH "${LLAMA_BIN}" INSTALL_RPATH "${LLAMA_BIN}")
 
-# JSON runner: one-shot native execution contract used by the Python MCP/CLI
-add_executable(utopic_runner
-  "${UTOPIC_NATIVE_SOURCE_DIR}/runner.cpp"
-  "${UTOPIC_NATIVE_SOURCE_DIR}/diffusion_driver.cpp")
-target_include_directories(utopic_runner PRIVATE ${UTOPIC_INCLUDES})
-target_compile_definitions(utopic_runner PRIVATE ${UTOPIC_LLAMA_DEFINES})
-target_link_directories(utopic_runner PRIVATE "${LLAMA_BIN}")
-target_link_libraries(utopic_runner PRIVATE llama ggml ggml-base)
-if(NOT UTOPIC_HAS_BLOCK_DECODE)
-  target_compile_definitions(utopic_runner PRIVATE DG_NO_BLOCK_DECODE)
-endif()
-set_target_properties(utopic_runner PROPERTIES
-  BUILD_RPATH "${LLAMA_BIN}" INSTALL_RPATH "${LLAMA_BIN}")
+function(add_utopic_json_runner target_name)
+  add_executable(${target_name}
+    "${UTOPIC_NATIVE_SOURCE_DIR}/runner.cpp"
+    "${UTOPIC_NATIVE_SOURCE_DIR}/diffusion_driver.cpp")
+  target_include_directories(${target_name} PRIVATE ${UTOPIC_INCLUDES})
+  target_compile_definitions(${target_name} PRIVATE ${UTOPIC_LLAMA_DEFINES})
+  target_link_directories(${target_name} PRIVATE "${LLAMA_BIN}")
+  target_link_libraries(${target_name} PRIVATE llama ggml ggml-base)
+  if(NOT UTOPIC_HAS_BLOCK_DECODE)
+    target_compile_definitions(${target_name} PRIVATE DG_NO_BLOCK_DECODE)
+  endif()
+  set_target_properties(${target_name} PROPERTIES
+    BUILD_RPATH "${LLAMA_BIN}" INSTALL_RPATH "${LLAMA_BIN}")
+endfunction()
+
+# JSON runners: one-shot native execution contract used by the Python MCP/CLI.
+# Modality-specific entrypoints share the same contract until their native
+# engines replace the planned-readiness path.
+add_utopic_json_runner(utopic_runner)
+add_utopic_json_runner(image_runner)
+add_utopic_json_runner(tts_runner)
+add_utopic_json_runner(music_runner)
+add_utopic_json_runner(video_runner)
+add_utopic_json_runner(misc_runner)
 
 # Server: resident model, OpenAI-compatible /v1/chat/completions
 # cpp-httplib is split-mode (.h + .cpp); compile its impl TU in (same as llama.cpp's server lib).

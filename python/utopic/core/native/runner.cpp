@@ -321,7 +321,7 @@ int main(int argc, char ** argv) {
             response = run_chat(root);
         } else {
             const json opts = root.value("options", json::object());
-            response = error_response("unsupported_model", "native runner task is not implemented yet", {
+            response = error_response("unsupported_model", "native C++ runner task is not implemented yet", {
                 {"task", task},
                 {"model", root.value("model", "")},
                 {"modality", opts.value("modality", task)},
