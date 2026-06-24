@@ -177,3 +177,46 @@ def test_generation_uses_catalog_runner_binary(monkeypatch, tmp_path):
     assert captured["request"]["options"]["runner"] == "image_runner"
     assert captured["request"]["options"]["model_path"].endswith("unit-image")
     assert captured["request"]["options"]["size"] == "1024x1024"
+
+
+def test_generation_reports_missing_catalog_runner_binary_as_setup_error(monkeypatch):
+    entry = models.ModelEntry(
+        id="unit-image",
+        name="Unit Image",
+        family="unit",
+        filename="unit-image",
+        url="https://example.invalid/unit-image",
+        size="1 GiB",
+        recommended=False,
+        description="unit",
+        modality="image",
+        engine="native-image",
+        runtime="planned_native",
+        endpoints=("/v1/images/generations",),
+        outputs=("image/png",),
+        supported_backends=("metal", "cuda"),
+        runner="image_runner",
+        native_status="planned",
+        expected_vram_gib=8.0,
+    )
+
+    def missing_binary(name):
+        raise RuntimeError(f"Utopic native binary is not installed: /cache/bin/{name}. Run `utopic setup`.")
+
+    monkeypatch.setattr(native_runner._native, "binary_path", missing_binary)
+    monkeypatch.setattr(native_runner.subprocess, "run", lambda *_args, **_kwargs: None)
+
+    payload = native_runner.generation(
+        entry,
+        "/v1/images/generations",
+        {"model": entry.id, "prompt": "a native image"},
+    )
+
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "backend_unavailable"
+    assert payload["error"]["model"] == entry.id
+    assert payload["error"]["modality"] == "image"
+    assert payload["error"]["runner"] == "image_runner"
+    assert payload["error"]["native_status"] == "planned"
+    assert payload["error"]["detail"]["binary"] == "image_runner"
+    assert payload["error"]["detail"]["setup_command"] == "utopic setup"

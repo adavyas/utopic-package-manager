@@ -29,7 +29,7 @@ def generation(entry: models.ModelEntry, endpoint: str, request: dict[str, Any])
     payload = _invoke_runner(
         _runner_request(entry, entry.modality, runner_input, request, endpoint=endpoint),
         binary_name=entry.runner or "utopic_runner",
-        binary_unavailable_payload=native_readiness_error(entry),
+        binary_unavailable_payload=native_binary_unavailable_error(entry),
     )
     return _enrich_native_readiness_error(entry, payload)
 
@@ -203,6 +203,37 @@ def native_readiness_error(entry: models.ModelEntry) -> dict[str, Any]:
     payload["error"]["modality"] = entry.modality
     payload["error"]["engine"] = entry.engine
     payload["error"]["runner"] = entry.runner
+    payload["error"]["native_status"] = entry.native_status
+    payload["error"]["supported_backends"] = list(entry.supported_backends)
+    return payload
+
+
+def native_binary_unavailable_error(entry: models.ModelEntry) -> dict[str, Any]:
+    runner = entry.runner or "utopic_runner"
+    payload = _error(
+        "backend_unavailable",
+        (
+            f"native runner binary is not installed for {entry.id}: {runner}. "
+            "Run `utopic setup` to build and cache package-managed native runners."
+        ),
+        {
+            "model": entry.id,
+            "modality": entry.modality,
+            "engine": entry.engine,
+            "runtime": entry.runtime,
+            "runner": runner,
+            "binary": runner,
+            "native_status": entry.native_status,
+            "supported_backends": list(entry.supported_backends),
+            "expected_vram_gib": entry.expected_vram_gib,
+            "expected_ram_gib": entry.expected_ram_gib,
+            "setup_command": "utopic setup",
+        },
+    )
+    payload["error"]["model"] = entry.id
+    payload["error"]["modality"] = entry.modality
+    payload["error"]["engine"] = entry.engine
+    payload["error"]["runner"] = runner
     payload["error"]["native_status"] = entry.native_status
     payload["error"]["supported_backends"] = list(entry.supported_backends)
     return payload
