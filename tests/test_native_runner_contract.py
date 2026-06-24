@@ -9,6 +9,83 @@ native_runner = load_core_module("native_runner")
 models = load_core_module("models")
 
 
+def test_runner_request_emits_stable_contract_for_chat(tmp_path):
+    entry = models.ModelEntry(
+        id="unit-text",
+        name="Unit Text",
+        family="unit",
+        filename="unit-text.gguf",
+        url="https://example.invalid/unit-text.gguf",
+        size="1 GiB",
+        recommended=True,
+        description="unit",
+        modality="text",
+        engine="native-text",
+        runtime="native",
+        runner="utopic_runner",
+        native_status="ready",
+    )
+
+    payload = native_runner._runner_request(
+        entry,
+        "chat",
+        {"messages": [{"role": "user", "content": "hello"}]},
+        {"max_tokens": 16},
+    )
+
+    assert set(payload) == {"schema_version", "task", "model", "input", "options", "output_dir"}
+    assert payload["schema_version"] == "utopic-runner/v1"
+    assert payload["task"] == "chat"
+    assert payload["model"] == "unit-text"
+    assert payload["input"] == {"messages": [{"role": "user", "content": "hello"}]}
+    assert isinstance(payload["options"], dict)
+    assert payload["options"]["max_tokens"] == 16
+    assert isinstance(payload["output_dir"], str)
+    assert payload["output_dir"]
+
+
+def test_runner_request_emits_stable_contract_for_artifact_generation():
+    entry = models.ModelEntry(
+        id="unit-image",
+        name="Unit Image",
+        family="unit",
+        filename="unit-image",
+        url="https://example.invalid/unit-image",
+        size="1 GiB",
+        recommended=False,
+        description="unit",
+        modality="image",
+        engine="native-image",
+        runtime="native",
+        endpoints=("/v1/images/generations",),
+        outputs=("image/png",),
+        supported_backends=("metal", "cuda"),
+        runner="image_runner",
+        native_status="ready",
+        expected_vram_gib=8.0,
+    )
+
+    payload = native_runner._runner_request(
+        entry,
+        "image",
+        {"prompt": "a native image"},
+        {"size": "1024x1024"},
+        endpoint="/v1/images/generations",
+    )
+
+    assert set(payload) == {"schema_version", "task", "model", "input", "options", "output_dir"}
+    assert payload["schema_version"] == "utopic-runner/v1"
+    assert payload["task"] == "image"
+    assert payload["model"] == "unit-image"
+    assert payload["input"] == {"prompt": "a native image"}
+    assert isinstance(payload["options"], dict)
+    assert payload["options"]["endpoint"] == "/v1/images/generations"
+    assert payload["options"]["runner"] == "image_runner"
+    assert payload["options"]["size"] == "1024x1024"
+    assert isinstance(payload["output_dir"], str)
+    assert payload["output_dir"]
+
+
 def test_generation_uses_catalog_runner_binary(monkeypatch, tmp_path):
     runner_path = tmp_path / "image_runner"
     runner_path.write_text("runner", encoding="utf-8")

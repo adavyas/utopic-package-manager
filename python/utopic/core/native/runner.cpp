@@ -5,7 +5,9 @@
 //   ./utopic_runner --json-request request.json
 //
 // Request:
-//   {"task":"chat","model":"catalog-id","input":{"prompt":"..."},"options":{"model_path":"model.gguf"}}
+//   {"schema_version":"utopic-runner/v1","task":"chat","model":"catalog-id",
+//    "input":{"prompt":"..."},"options":{"model_path":"model.gguf"},
+//    "output_dir":"/tmp/utopic-run"}
 //
 // Response:
 //   {"ok":true,"type":"text","text":"...","artifacts":[],"metrics":{...},"backend":"metal"}
@@ -93,6 +95,13 @@ static json error_response(const string & code, const string & message, const js
     };
 }
 
+static json invalid_request(const string & message, const string & field) {
+    return error_response("invalid_request", message, {
+        {"field", field},
+        {"schema_version", "utopic-runner/v1"},
+    });
+}
+
 static bool read_json_file(const char * path, json & out, string & error) {
     std::ifstream in(path);
     if (!in) {
@@ -103,6 +112,38 @@ static bool read_json_file(const char * path, json & out, string & error) {
         in >> out;
     } catch (const std::exception & exc) {
         error = string("invalid JSON request: ") + exc.what();
+        return false;
+    }
+    return true;
+}
+
+static bool validate_request_contract(const json & root, json & response) {
+    if (!root.contains("schema_version") || !root["schema_version"].is_string()) {
+        response = invalid_request("schema_version must be utopic-runner/v1", "schema_version");
+        return false;
+    }
+    if (root["schema_version"].get<string>() != "utopic-runner/v1") {
+        response = invalid_request("unsupported schema_version", "schema_version");
+        return false;
+    }
+    if (!root.contains("task") || !root["task"].is_string() || root["task"].get<string>().empty()) {
+        response = invalid_request("task is required", "task");
+        return false;
+    }
+    if (!root.contains("model") || !root["model"].is_string() || root["model"].get<string>().empty()) {
+        response = invalid_request("model is required", "model");
+        return false;
+    }
+    if (!root.contains("input") || !root["input"].is_object()) {
+        response = invalid_request("input must be an object", "input");
+        return false;
+    }
+    if (!root.contains("options") || !root["options"].is_object()) {
+        response = invalid_request("options must be an object", "options");
+        return false;
+    }
+    if (!root.contains("output_dir") || !root["output_dir"].is_string() || root["output_dir"].get<string>().empty()) {
+        response = invalid_request("output_dir is required", "output_dir");
         return false;
     }
     return true;
@@ -263,6 +304,10 @@ int main(int argc, char ** argv) {
     }
 
     json response;
+    if (!validate_request_contract(root, response)) {
+        printf("%s\n", response.dump().c_str());
+        return 2;
+    }
     try {
         const string task = root.value("task", "");
         if (task == "chat") {

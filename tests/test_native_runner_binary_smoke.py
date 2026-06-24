@@ -55,6 +55,106 @@ def test_native_runner_rejects_malformed_json(tmp_path):
     assert "invalid JSON request" in payload["error"]["message"]
 
 
+@pytest.mark.parametrize(
+    ("runner_request", "field", "message"),
+    [
+        (
+            {
+                "task": "chat",
+                "model": "unit-text",
+                "input": {"prompt": "hello"},
+                "options": {},
+                "output_dir": ".",
+            },
+            "schema_version",
+            "schema_version must be utopic-runner/v1",
+        ),
+        (
+            {
+                "schema_version": "utopic-runner/v0",
+                "task": "chat",
+                "model": "unit-text",
+                "input": {"prompt": "hello"},
+                "options": {},
+                "output_dir": ".",
+            },
+            "schema_version",
+            "unsupported schema_version",
+        ),
+        (
+            {
+                "schema_version": "utopic-runner/v1",
+                "model": "unit-text",
+                "input": {"prompt": "hello"},
+                "options": {},
+                "output_dir": ".",
+            },
+            "task",
+            "task is required",
+        ),
+        (
+            {
+                "schema_version": "utopic-runner/v1",
+                "task": "chat",
+                "input": {"prompt": "hello"},
+                "options": {},
+                "output_dir": ".",
+            },
+            "model",
+            "model is required",
+        ),
+        (
+            {
+                "schema_version": "utopic-runner/v1",
+                "task": "chat",
+                "model": "unit-text",
+                "input": "hello",
+                "options": {},
+                "output_dir": ".",
+            },
+            "input",
+            "input must be an object",
+        ),
+        (
+            {
+                "schema_version": "utopic-runner/v1",
+                "task": "chat",
+                "model": "unit-text",
+                "input": {"prompt": "hello"},
+                "options": [],
+                "output_dir": ".",
+            },
+            "options",
+            "options must be an object",
+        ),
+        (
+            {
+                "schema_version": "utopic-runner/v1",
+                "task": "chat",
+                "model": "unit-text",
+                "input": {"prompt": "hello"},
+                "options": {},
+            },
+            "output_dir",
+            "output_dir is required",
+        ),
+    ],
+)
+def test_native_runner_rejects_incomplete_contract(tmp_path, runner_request, field, message):
+    request_path = tmp_path / "incomplete-request.json"
+    request_path.write_text(json.dumps(runner_request), encoding="utf-8")
+
+    completed = _run_runner(_runner_binary(), request_path)
+    payload = _last_json(completed.stdout)
+
+    assert completed.returncode != 0
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "invalid_request"
+    assert payload["error"]["message"] == message
+    assert payload["error"]["detail"]["field"] == field
+    assert payload["error"]["detail"]["schema_version"] == "utopic-runner/v1"
+
+
 def test_native_runner_reports_missing_model_path_for_chat(tmp_path):
     request_path = tmp_path / "missing-model-path.json"
     request_path.write_text(
