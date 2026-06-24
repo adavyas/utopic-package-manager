@@ -113,6 +113,56 @@ static string host_backend() {
 #endif
 }
 
+static ggml_backend_dev_t preferred_device() {
+    if (ggml_backend_reg_count() == 0) {
+        ggml_backend_load_all();
+    }
+    ggml_backend_dev_t dev = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_GPU);
+    if (!dev) {
+        dev = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_IGPU);
+    }
+    if (!dev) {
+        dev = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_CPU);
+    }
+    return dev;
+}
+
+static string detected_device_name() {
+    const char * configured = env_any("UTOPIC_RUNTIME_DEVICE");
+    if (configured && configured[0]) {
+        return configured;
+    }
+    ggml_backend_dev_t dev = preferred_device();
+    if (!dev) {
+        return "unknown device";
+    }
+    const char * description = ggml_backend_dev_description(dev);
+    if (description && description[0]) {
+        return description;
+    }
+    const char * name = ggml_backend_dev_name(dev);
+    return name && name[0] ? name : "unknown device";
+}
+
+static bool detected_gpu_memory_gib(double & out) {
+    ggml_backend_dev_t dev = preferred_device();
+    if (!dev) {
+        return false;
+    }
+    const enum ggml_backend_dev_type type = ggml_backend_dev_type(dev);
+    if (type != GGML_BACKEND_DEVICE_TYPE_GPU && type != GGML_BACKEND_DEVICE_TYPE_IGPU) {
+        return false;
+    }
+    size_t free_bytes = 0;
+    size_t total_bytes = 0;
+    ggml_backend_dev_memory(dev, &free_bytes, &total_bytes);
+    if (total_bytes == 0) {
+        return false;
+    }
+    out = (double) total_bytes / (1024.0 * 1024.0 * 1024.0);
+    return true;
+}
+
 static json error_response(const string & code, const string & message, const json & detail = json::object()) {
     return {
         {"ok", false},
@@ -160,8 +210,13 @@ static json detected_capacity() {
         }
         return detected;
     }
-    detected["backend"] = env_any("UTOPIC_RUNTIME_BACKEND") ? env_any("UTOPIC_RUNTIME_BACKEND") : "unknown";
-    detected["device"] = env_any("UTOPIC_RUNTIME_DEVICE") ? env_any("UTOPIC_RUNTIME_DEVICE") : "unknown device";
+    const char * configured_backend = env_any("UTOPIC_RUNTIME_BACKEND");
+    detected["backend"] = configured_backend && configured_backend[0] ? configured_backend : host_backend();
+    detected["device"] = detected_device_name();
+    double memory_gib = 0.0;
+    if (detected_gpu_memory_gib(memory_gib)) {
+        detected["gpu_memory_gib"] = memory_gib;
+    }
     return detected;
 }
 
@@ -181,7 +236,7 @@ static string detected_capacity_text(const json & detected) {
 }
 
 static string host_device() {
-    return detected_capacity().value("device", "");
+    return detected_device_name();
 }
 
 static json capacity_preflight_error(const json & root, const string & runner_name) {
