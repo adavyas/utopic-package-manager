@@ -1,4 +1,5 @@
 import argparse
+import hashlib
 import json
 import os
 import platform
@@ -18,12 +19,12 @@ PACKAGED_CORE_DIR = PACKAGE_DIR / "core"
 PACKAGED_NATIVE_DIR = PACKAGED_CORE_DIR / "native"
 PACKAGED_CMAKE_DIR = PACKAGE_DIR / "cmake"
 UTOPIC_NATIVE_REPO = "https://github.com/adavyas/utopic.git"
-UTOPIC_NATIVE_REF = "ecfd2cb70ecaa829072b48abac97da2dbc6fb36c"
+UTOPIC_NATIVE_REF = "9eacd94ef492b3f8e824c7c7aee6df4b20df615d"
 LLAMA_REPO = "https://github.com/ggml-org/llama.cpp.git"
 LLAMA_REF = "ef5e2dcce"
 BIN_NAMES = ("utopic", "utopic_runner", "utopic_server", "utopic_mcp", "utopic_acp")
 INSTALL_METADATA_NAME = "install.json"
-INSTALL_METADATA_SCHEMA_VERSION = 2
+INSTALL_METADATA_SCHEMA_VERSION = 3
 INSTALL_METADATA_MATCH_KEYS = (
     "schema_version",
     "package_version",
@@ -34,6 +35,9 @@ INSTALL_METADATA_MATCH_KEYS = (
     "native_ref",
     "llama_dir",
     "native_dir",
+    "native_source_fingerprint",
+    "cmake_fingerprint",
+    "llama_runtime_libs",
     "system",
     "machine",
 )
@@ -462,9 +466,50 @@ def _install_metadata(
         "native_ref": os.environ.get("UTOPIC_NATIVE_REF", UTOPIC_NATIVE_REF),
         "llama_dir": str(_normalize_path(llama_dir)),
         "native_dir": str(_normalize_path(native_dir)),
+        "native_source_fingerprint": _tree_fingerprint(native_dir),
+        "cmake_fingerprint": _tree_fingerprint(_package_cmake_source()),
+        "llama_runtime_libs": _llama_runtime_libs(llama_dir),
         "system": platform.system(),
         "machine": platform.machine(),
     }
+
+
+def _llama_runtime_libs(llama_dir: Path) -> list[str]:
+    lib_dir = llama_dir / "build" / "bin"
+    if not lib_dir.is_dir():
+        return []
+    libs: list[str] = []
+    for path in sorted(item for item in lib_dir.iterdir() if item.is_file()):
+        name = path.name
+        if _is_llama_runtime_lib(name):
+            libs.append(path.relative_to(llama_dir).as_posix())
+    return libs
+
+
+def _is_llama_runtime_lib(name: str) -> bool:
+    if os.name == "nt":
+        return name.startswith(("llama", "ggml")) and name.endswith(".dll")
+    return name.startswith(("libllama", "libggml")) and (
+        ".so" in name or name.endswith(".dylib")
+    )
+
+
+def _tree_fingerprint(root: Path) -> Optional[str]:
+    if not root.exists():
+        return None
+    digest = hashlib.sha256()
+    if root.is_file():
+        digest.update(root.name.encode("utf-8", errors="surrogateescape"))
+        digest.update(b"\0")
+        digest.update(root.read_bytes())
+        return digest.hexdigest()
+    for path in sorted(item for item in root.rglob("*") if item.is_file()):
+        relative = path.relative_to(root).as_posix()
+        digest.update(relative.encode("utf-8", errors="surrogateescape"))
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()
 
 
 def _read_install_metadata() -> Optional[dict[str, object]]:
@@ -509,6 +554,8 @@ def native_installation_is_current(binary_names: Sequence[str] = BIN_NAMES) -> b
 
     metadata = _read_install_metadata()
     if metadata is None:
+        return False
+    if not _metadata_runtime_libs_exist(metadata):
         return False
 
     requested_backend = os.environ.get("UTOPIC_BACKEND", "auto")
@@ -556,6 +603,25 @@ def native_installation_is_current(binary_names: Sequence[str] = BIN_NAMES) -> b
         native_dir=default_native_dir(),
     )
     return all(metadata.get(key) == expected.get(key) for key in INSTALL_METADATA_MATCH_KEYS)
+
+
+def _metadata_runtime_libs_exist(metadata: Mapping[str, object]) -> bool:
+    raw_libs = metadata.get("llama_runtime_libs")
+    if not isinstance(raw_libs, list):
+        return False
+    raw_llama_dir = metadata.get("llama_dir")
+    if not isinstance(raw_llama_dir, str) or not raw_llama_dir:
+        return False
+    llama_dir = Path(raw_llama_dir)
+    for raw_lib in raw_libs:
+        if not isinstance(raw_lib, str) or not raw_lib:
+            return False
+        rel = Path(raw_lib)
+        if rel.is_absolute() or ".." in rel.parts:
+            return False
+        if not (llama_dir / rel).is_file():
+            return False
+    return True
 
 
 def _build_command(build_dir: Path, *, jobs: Optional[int]) -> list[object]:
@@ -663,7 +729,14 @@ def _remove_path(path: Path, *, dry_run: bool) -> None:
         path.unlink()
 
 
-def _build_utopic(native_dir: Path, llama_dir: Path, *, jobs: Optional[int], dry_run: bool) -> Path:
+def _build_utopic(
+    native_dir: Path,
+    llama_dir: Path,
+    *,
+    backend: str,
+    jobs: Optional[int],
+    dry_run: bool,
+) -> Path:
     out_dir = build_root() / "utopic"
     source_dir = _package_cmake_source()
     _prepare_cmake_build_dir(out_dir, source_dir, dry_run=dry_run)
@@ -677,6 +750,7 @@ def _build_utopic(native_dir: Path, llama_dir: Path, *, jobs: Optional[int], dry
             source_dir,
             f"-DUTOPIC_NATIVE_SOURCE_DIR={native_dir}",
             f"-DUTOPIC_LLAMACPP_DIR={llama_dir}",
+            f"-DUTOPIC_BACKEND_NAME={backend}",
         ],
         dry_run=dry_run,
     )
@@ -795,7 +869,13 @@ def setup(argv: Optional[Sequence[str]] = None) -> int:
         )
         native_dir = native_checkout_dir / "native"
 
-    native_build_dir = _build_utopic(native_dir, llama_dir, jobs=args.jobs, dry_run=dry_run)
+    native_build_dir = _build_utopic(
+        native_dir,
+        llama_dir,
+        backend=backend_decision.backend,
+        jobs=args.jobs,
+        dry_run=dry_run,
+    )
     if dry_run:
         print(f"Would install Utopic native binaries to {bin_dir()}")
         return 0

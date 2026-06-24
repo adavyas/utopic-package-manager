@@ -71,7 +71,9 @@ static float json_fopt(const json & opts, const char * key, const char * env, co
 }
 
 static string host_backend() {
-#if defined(GGML_USE_CUDA)
+#if defined(UTOPIC_BACKEND_NAME)
+    return UTOPIC_BACKEND_NAME;
+#elif defined(GGML_USE_CUDA)
     return "cuda";
 #elif defined(__APPLE__)
     return "metal";
