@@ -547,6 +547,26 @@ def test_python_module_entrypoint_matches_console_script():
     assert completed.stderr == ""
 
 
+def test_cli_help_mentions_mcp_command(capsys):
+    assert cli.main(["--help"]) == 0
+
+    captured = capsys.readouterr()
+    assert "mcp       Start the MCP stdio server" in captured.out
+
+
+def test_cli_mcp_delegates_to_mcp_module(monkeypatch):
+    captured = {}
+
+    def fake_mcp_main(args):
+        captured["args"] = args
+        return 0
+
+    monkeypatch.setattr(cli.mcp, "main", fake_mcp_main)
+
+    assert cli.main(["mcp", "--runtime"]) == 0
+    assert captured["args"] == ["--runtime"]
+
+
 def test_cli_rejects_unknown_command_before_setup(monkeypatch, capsys):
     monkeypatch.setattr(cli, "_ensure_setup", lambda enabled=True, binary_name="utopic": pytest.fail("should not run setup"))
     monkeypatch.setattr(cli._native, "main", lambda name, argv: pytest.fail("should not launch native binary"))

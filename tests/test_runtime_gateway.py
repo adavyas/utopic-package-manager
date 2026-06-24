@@ -231,7 +231,7 @@ def test_gateway_exposes_openai_routes_for_each_bridge_modality():
 def test_every_bridge_catalog_model_has_openai_and_mcp_runtime_surface():
     generation_tool_by_modality = {
         "image": "utopic_generate_image",
-        "tts": "utopic_speak",
+        "tts": "utopic_generate_speech",
         "music": "utopic_generate_music",
         "video": "utopic_generate_video",
         "misc": "utopic_generate_misc",
@@ -1028,6 +1028,7 @@ def test_gateway_mcp_lists_and_dispatches_multimodal_tools():
     assert {
         "utopic_chat",
         "utopic_generate_image",
+        "utopic_generate_speech",
         "utopic_speak",
         "utopic_generate_music",
         "utopic_generate_video",
@@ -1127,6 +1128,7 @@ def test_runtime_stdio_mcp_lists_full_gateway_tool_catalog():
     assert {
         "utopic_chat",
         "utopic_generate_image",
+        "utopic_generate_speech",
         "utopic_speak",
         "utopic_generate_music",
         "utopic_generate_video",
@@ -1384,7 +1386,7 @@ print(json.dumps({{
     for request_id, name, arguments in [
         (
             10,
-            "utopic_speak",
+            "utopic_generate_speech",
             {"model": "kokoro-82m", "input": "hello from mcp", "voice": "af_heart"},
         ),
         (

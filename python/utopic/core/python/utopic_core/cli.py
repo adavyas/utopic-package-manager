@@ -12,7 +12,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Optional, Sequence
 
-from . import __version__, _native, bridge, chat, gateway, installer, models
+from . import __version__, _native, bridge, chat, gateway, installer, mcp, models
 
 
 _RUN_VALUE_FLAGS = {"--host", "--port", "--native-port", "-ngl", "--ctx-size"}
@@ -520,6 +520,7 @@ Commands:
   run       Start the unified OpenAI-compatible and MCP runtime, or run one-shot prompts with -p.
   generate  Generate image, speech, music, video, or misc artifacts.
   gateway   Start the unified multimodal OpenAI-compatible and MCP gateway.
+  mcp       Start the MCP stdio server. Use --runtime for the Python gateway tools.
   setup     Build and cache native binaries for this host.
   models    List, pull, and locate curated GGUF models.
   doctor    Print local setup diagnostics without building anything.
@@ -532,6 +533,7 @@ Examples:
   utopic generate video --quality high -p "cinematic glass city sunrise" -o video.mp4
   utopic generate misc zuna --artifact /path/to/input.bin -o output.bin
   utopic gateway --port 8911
+  utopic mcp --runtime
   utopic doctor
   utopic run -m /path/to/model.gguf -p "Answer with one word: 2+2?" -n 16
 
@@ -1068,6 +1070,8 @@ def main(argv: Optional[Sequence[str]] = None) -> Optional[int]:
         return _generate(rest)
     if command == "gateway":
         return gateway.main(rest)
+    if command == "mcp":
+        return mcp.main(rest)
     if command == "doctor":
         return _doctor(rest)
 

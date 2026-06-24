@@ -48,7 +48,7 @@ OPENAI_TOOL_BY_ENDPOINT = {
     "/v1/chat/completions": "utopic_chat",
     "/v1/responses": "utopic_chat",
     "/v1/images/generations": "utopic_generate_image",
-    "/v1/audio/speech": "utopic_speak",
+    "/v1/audio/speech": "utopic_generate_speech",
     "/v1/audio/generations": "utopic_generate_music",
     "/v1/videos/generations": "utopic_generate_video",
     "/v1/utopic/misc/generations": "utopic_generate_misc",
@@ -67,6 +67,31 @@ def _schema(required: list[str], properties: dict[str, str | dict[str, Any]]) ->
         "required": required,
         "properties": normalized_properties,
     }
+
+
+SPEECH_INPUT_SCHEMA = _schema(
+    ["input"],
+    {
+        "model": {
+            "type": "string",
+            "description": "Optional TTS model id, for example kokoro-82m, chatterbox, or dia-1.6b.",
+        },
+        "input": {
+            "type": "string",
+            "description": "Text to synthesize into speech.",
+        },
+        "voice": {
+            "type": "string",
+            "description": "Optional model-specific voice name.",
+        },
+    },
+)
+
+SPEECH_DESCRIPTION = (
+    "Generate local speech audio from text with Utopic TTS models. Use for narration, "
+    "voice prototypes, accessibility previews, and agent-read summaries without sending "
+    "text to a remote TTS API. Returns artifact JSON pointing at generated audio."
+)
 
 
 MCP_TOOLS = [
@@ -124,29 +149,14 @@ MCP_TOOLS = [
         ),
     },
     {
+        "name": "utopic_generate_speech",
+        "description": SPEECH_DESCRIPTION,
+        "inputSchema": SPEECH_INPUT_SCHEMA,
+    },
+    {
         "name": "utopic_speak",
-        "description": (
-            "Generate local speech audio from text with Utopic TTS models. Use for narration, "
-            "voice prototypes, accessibility previews, and agent-read summaries without sending "
-            "text to a remote TTS API. Returns artifact JSON pointing at generated audio."
-        ),
-        "inputSchema": _schema(
-            ["input"],
-            {
-                "model": {
-                    "type": "string",
-                    "description": "Optional TTS model id, for example kokoro-82m, chatterbox, or dia-1.6b.",
-                },
-                "input": {
-                    "type": "string",
-                    "description": "Text to synthesize into speech.",
-                },
-                "voice": {
-                    "type": "string",
-                    "description": "Optional model-specific voice name.",
-                },
-            },
-        ),
+        "description": SPEECH_DESCRIPTION + " Compatibility alias for utopic_generate_speech.",
+        "inputSchema": SPEECH_INPUT_SCHEMA,
     },
     {
         "name": "utopic_generate_music",
@@ -452,6 +462,7 @@ def _mcp_tool_call(
     endpoint_by_tool = {
         "utopic_chat": "/v1/chat/completions",
         "utopic_generate_image": "/v1/images/generations",
+        "utopic_generate_speech": "/v1/audio/speech",
         "utopic_speak": "/v1/audio/speech",
         "utopic_generate_music": "/v1/audio/generations",
         "utopic_generate_video": "/v1/videos/generations",
