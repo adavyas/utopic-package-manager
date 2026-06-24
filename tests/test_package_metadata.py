@@ -160,6 +160,11 @@ def test_package_cmake_builds_native_runner_and_multimodal_sources():
         assert f'${{UTOPIC_NATIVE_SOURCE_DIR}}/{filename}' in cmake
     assert "UTOPIC_ENABLE_STABLE_DIFFUSION" in cmake
     assert "${UTOPIC_NATIVE_SOURCE_DIR}/image_engine.cpp" in cmake
+    assert "${UTOPIC_STABLE_DIFFUSION_DIR}/include/stable-diffusion.h" in cmake
+    assert 'add_subdirectory("${UTOPIC_STABLE_DIFFUSION_DIR}"' in cmake
+    assert 'INTERFACE_INCLUDE_DIRECTORIES "${LLAMA_DIR};${LLAMA_DIR}/ggml/include"' in cmake
+    assert "target_link_libraries(utopic_runner PRIVATE ${UTOPIC_RUNNER_LIBS})" in cmake
+    assert "stable-diffusion" in cmake
     assert "target_compile_definitions(utopic_runner PRIVATE" in cmake
 
 

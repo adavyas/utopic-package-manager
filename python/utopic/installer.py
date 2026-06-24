@@ -21,6 +21,8 @@ UTOPIC_NATIVE_REPO = "https://github.com/adavyas/utopic.git"
 UTOPIC_NATIVE_REF = "7e2f8410481bdd94edd9dd5f603877d8397e591f"
 LLAMA_REPO = "https://github.com/ggml-org/llama.cpp.git"
 LLAMA_REF = "ef5e2dcce"
+STABLE_DIFFUSION_REPO = "https://github.com/leejet/stable-diffusion.cpp.git"
+STABLE_DIFFUSION_REF = "8caa3f908ae6d4a4bef531e73b9a969f266a3d1f"
 BIN_NAMES = ("utopic", "utopic_server", "utopic_mcp", "utopic_acp", "utopic_runner")
 INSTALL_METADATA_NAME = "install.json"
 INSTALL_METADATA_SCHEMA_VERSION = 2
@@ -32,8 +34,11 @@ INSTALL_METADATA_MATCH_KEYS = (
     "llama_ref",
     "native_repo",
     "native_ref",
+    "stable_diffusion_repo",
+    "stable_diffusion_ref",
     "llama_dir",
     "native_dir",
+    "stable_diffusion_dir",
     "system",
     "machine",
 )
@@ -119,6 +124,13 @@ def default_llama_dir() -> Path:
     if configured:
         return Path(configured).expanduser()
     return source_root() / "llama.cpp"
+
+
+def default_stable_diffusion_dir() -> Path:
+    configured = os.environ.get("UTOPIC_STABLE_DIFFUSION_DIR")
+    if configured:
+        return Path(configured).expanduser()
+    return source_root() / "stable-diffusion.cpp"
 
 
 def _run(
@@ -445,6 +457,7 @@ def _install_metadata(
     requested_backend: str,
     llama_dir: Path,
     native_dir: Path,
+    stable_diffusion_dir: Optional[Path],
 ) -> dict[str, object]:
     cuda_graphs = decision.cuda_graphs
     if decision.backend == "cuda" and cuda_graphs is None:
@@ -460,8 +473,13 @@ def _install_metadata(
         "llama_ref": os.environ.get("UTOPIC_LLAMA_REF", LLAMA_REF),
         "native_repo": os.environ.get("UTOPIC_NATIVE_REPO", UTOPIC_NATIVE_REPO),
         "native_ref": os.environ.get("UTOPIC_NATIVE_REF", UTOPIC_NATIVE_REF),
+        "stable_diffusion_repo": os.environ.get("UTOPIC_STABLE_DIFFUSION_REPO", STABLE_DIFFUSION_REPO),
+        "stable_diffusion_ref": os.environ.get("UTOPIC_STABLE_DIFFUSION_REF", STABLE_DIFFUSION_REF),
         "llama_dir": str(_normalize_path(llama_dir)),
         "native_dir": str(_normalize_path(native_dir)),
+        "stable_diffusion_dir": (
+            str(_normalize_path(stable_diffusion_dir)) if stable_diffusion_dir is not None else None
+        ),
         "system": platform.system(),
         "machine": platform.machine(),
     }
@@ -484,14 +502,18 @@ def _write_install_metadata(
     requested_backend: str,
     llama_dir: Path,
     native_dir: Path,
+    stable_diffusion_dir: Optional[Path] = None,
 ) -> None:
     path = install_metadata_path()
     path.parent.mkdir(parents=True, exist_ok=True)
+    if stable_diffusion_dir is None:
+        stable_diffusion_dir = default_stable_diffusion_dir()
     payload = _install_metadata(
         decision,
         requested_backend=requested_backend,
         llama_dir=llama_dir,
         native_dir=native_dir,
+        stable_diffusion_dir=stable_diffusion_dir,
     )
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
@@ -554,6 +576,7 @@ def native_installation_is_current(binary_names: Sequence[str] = BIN_NAMES) -> b
         requested_backend=str(metadata.get("requested_backend", "auto")),
         llama_dir=default_llama_dir(),
         native_dir=default_native_dir(),
+        stable_diffusion_dir=default_stable_diffusion_dir(),
     )
     return all(metadata.get(key) == expected.get(key) for key in INSTALL_METADATA_MATCH_KEYS)
 
@@ -663,23 +686,37 @@ def _remove_path(path: Path, *, dry_run: bool) -> None:
         path.unlink()
 
 
-def _build_utopic(native_dir: Path, llama_dir: Path, *, jobs: Optional[int], dry_run: bool) -> Path:
+def _build_utopic(
+    native_dir: Path,
+    llama_dir: Path,
+    *,
+    stable_diffusion_dir: Optional[Path] = None,
+    jobs: Optional[int],
+    dry_run: bool,
+) -> Path:
     out_dir = build_root() / "utopic"
     source_dir = _package_cmake_source()
     _prepare_cmake_build_dir(out_dir, source_dir, dry_run=dry_run)
 
-    _run(
-        [
-            "cmake",
-            "-B",
-            out_dir,
-            "-S",
-            source_dir,
-            f"-DUTOPIC_NATIVE_SOURCE_DIR={native_dir}",
-            f"-DUTOPIC_LLAMACPP_DIR={llama_dir}",
-        ],
-        dry_run=dry_run,
-    )
+    command: list[object] = [
+        "cmake",
+        "-B",
+        out_dir,
+        "-S",
+        source_dir,
+        f"-DUTOPIC_NATIVE_SOURCE_DIR={native_dir}",
+        f"-DUTOPIC_LLAMACPP_DIR={llama_dir}",
+    ]
+    if stable_diffusion_dir is None:
+        command.append("-DUTOPIC_ENABLE_STABLE_DIFFUSION=OFF")
+    else:
+        command.extend(
+            [
+                "-DUTOPIC_ENABLE_STABLE_DIFFUSION=ON",
+                f"-DUTOPIC_STABLE_DIFFUSION_DIR={stable_diffusion_dir}",
+            ]
+        )
+    _run(command, dry_run=dry_run)
     _run(_build_command(out_dir, jobs=jobs), dry_run=dry_run)
     return out_dir
 
@@ -731,6 +768,7 @@ def setup(argv: Optional[Sequence[str]] = None) -> int:
     )
     parser.add_argument("--llama-dir", help=argparse.SUPPRESS)
     parser.add_argument("--native-dir", help=argparse.SUPPRESS)
+    parser.add_argument("--stable-diffusion-dir", help=argparse.SUPPRESS)
     parser.add_argument(
         "--skip-llama-build",
         action="store_true",
@@ -749,6 +787,11 @@ def setup(argv: Optional[Sequence[str]] = None) -> int:
     _print_backend_decision(backend_decision, requested_backend)
     llama_dir = Path(args.llama_dir).expanduser() if args.llama_dir else default_llama_dir()
     native_dir = Path(args.native_dir).expanduser() if args.native_dir else default_native_dir()
+    stable_diffusion_dir = (
+        Path(args.stable_diffusion_dir).expanduser()
+        if args.stable_diffusion_dir
+        else default_stable_diffusion_dir()
+    )
 
     if args.force:
         for cache_path in (bin_dir(), build_root(), llama_dir / "build"):
@@ -795,7 +838,25 @@ def setup(argv: Optional[Sequence[str]] = None) -> int:
         )
         native_dir = native_checkout_dir / "native"
 
-    native_build_dir = _build_utopic(native_dir, llama_dir, jobs=args.jobs, dry_run=dry_run)
+    if args.stable_diffusion_dir or os.environ.get("UTOPIC_STABLE_DIFFUSION_DIR"):
+        print(f"Using external stable-diffusion.cpp source at {stable_diffusion_dir}")
+    else:
+        print(f"Managing stable-diffusion.cpp source at {stable_diffusion_dir}")
+        _clone_or_checkout(
+            os.environ.get("UTOPIC_STABLE_DIFFUSION_REPO", STABLE_DIFFUSION_REPO),
+            os.environ.get("UTOPIC_STABLE_DIFFUSION_REF", STABLE_DIFFUSION_REF),
+            stable_diffusion_dir,
+            dry_run=dry_run,
+            reset=True,
+        )
+
+    native_build_dir = _build_utopic(
+        native_dir,
+        llama_dir,
+        stable_diffusion_dir=stable_diffusion_dir,
+        jobs=args.jobs,
+        dry_run=dry_run,
+    )
     if dry_run:
         print(f"Would install Utopic native binaries to {bin_dir()}")
         return 0
@@ -806,6 +867,7 @@ def setup(argv: Optional[Sequence[str]] = None) -> int:
         requested_backend=requested_backend,
         llama_dir=llama_dir,
         native_dir=native_dir,
+        stable_diffusion_dir=stable_diffusion_dir,
     )
     print(f"Installed Utopic native binaries to {bin_dir()}")
     return 0

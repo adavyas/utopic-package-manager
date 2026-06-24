@@ -55,16 +55,45 @@ if(EXISTS "${LLAMA_BIN}/libggml-cuda.so" OR EXISTS "${LLAMA_BIN}/libggml-cuda.dy
 endif()
 
 set(UTOPIC_IMAGE_ENGINE_SOURCE "${CMAKE_CURRENT_LIST_DIR}/image_engine_disabled.cpp")
+set(UTOPIC_RUNNER_LIBS llama ggml ggml-base Threads::Threads)
 if(UTOPIC_ENABLE_STABLE_DIFFUSION)
   if(NOT DEFINED UTOPIC_STABLE_DIFFUSION_DIR)
     message(FATAL_ERROR "UTOPIC_STABLE_DIFFUSION_DIR is required when UTOPIC_ENABLE_STABLE_DIFFUSION=ON")
   endif()
   get_filename_component(UTOPIC_STABLE_DIFFUSION_DIR "${UTOPIC_STABLE_DIFFUSION_DIR}" ABSOLUTE)
-  if(NOT EXISTS "${UTOPIC_STABLE_DIFFUSION_DIR}/stable-diffusion.h")
-    message(FATAL_ERROR "UTOPIC_STABLE_DIFFUSION_DIR must contain stable-diffusion.h: ${UTOPIC_STABLE_DIFFUSION_DIR}")
+  if(NOT EXISTS "${UTOPIC_STABLE_DIFFUSION_DIR}/include/stable-diffusion.h")
+    message(FATAL_ERROR "UTOPIC_STABLE_DIFFUSION_DIR must contain include/stable-diffusion.h: ${UTOPIC_STABLE_DIFFUSION_DIR}")
   endif()
-  list(APPEND UTOPIC_INCLUDES "${UTOPIC_STABLE_DIFFUSION_DIR}")
+
+  find_library(UTOPIC_GGML_LIBRARY
+    NAMES ggml
+    PATHS "${LLAMA_BIN}"
+    NO_DEFAULT_PATH
+    REQUIRED)
+  if(NOT TARGET ggml)
+    add_library(ggml UNKNOWN IMPORTED GLOBAL)
+    set_target_properties(ggml PROPERTIES
+      IMPORTED_LOCATION "${UTOPIC_GGML_LIBRARY}"
+      INTERFACE_INCLUDE_DIRECTORIES "${LLAMA_DIR};${LLAMA_DIR}/ggml/include")
+  endif()
+
+  set(SD_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+  set(SD_WEBP OFF CACHE BOOL "" FORCE)
+  set(SD_WEBM OFF CACHE BOOL "" FORCE)
+  set(SD_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+  set(SD_BUILD_SHARED_GGML_LIB OFF CACHE BOOL "" FORCE)
+  set(SD_USE_SYSTEM_GGML OFF CACHE BOOL "" FORCE)
+  if(EXISTS "${LLAMA_BIN}/libggml-cuda.so" OR EXISTS "${LLAMA_BIN}/libggml-cuda.dylib")
+    set(SD_CUDA ON CACHE BOOL "" FORCE)
+  endif()
+  if(EXISTS "${LLAMA_BIN}/libggml-metal.so" OR EXISTS "${LLAMA_BIN}/libggml-metal.dylib")
+    set(SD_METAL ON CACHE BOOL "" FORCE)
+  endif()
+
+  add_subdirectory("${UTOPIC_STABLE_DIFFUSION_DIR}" "${CMAKE_BINARY_DIR}/stable-diffusion.cpp")
+  list(APPEND UTOPIC_INCLUDES "${UTOPIC_STABLE_DIFFUSION_DIR}/include")
   set(UTOPIC_IMAGE_ENGINE_SOURCE "${UTOPIC_NATIVE_SOURCE_DIR}/image_engine.cpp")
+  list(APPEND UTOPIC_RUNNER_LIBS stable-diffusion)
 endif()
 
 # CLI: one-shot generation
@@ -138,7 +167,7 @@ add_executable(utopic_runner
 target_include_directories(utopic_runner PRIVATE ${UTOPIC_INCLUDES})
 target_compile_definitions(utopic_runner PRIVATE ${UTOPIC_LLAMA_DEFINES})
 target_link_directories(utopic_runner PRIVATE "${LLAMA_BIN}")
-target_link_libraries(utopic_runner PRIVATE llama ggml ggml-base Threads::Threads)
+target_link_libraries(utopic_runner PRIVATE ${UTOPIC_RUNNER_LIBS})
 if(NOT UTOPIC_HAS_BLOCK_DECODE)
   target_compile_definitions(utopic_runner PRIVATE DG_NO_BLOCK_DECODE)
 endif()

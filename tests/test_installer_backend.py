@@ -420,6 +420,24 @@ def test_default_llama_ref_is_pinned_for_reproducible_native_builds():
     assert not installer.LLAMA_REF.startswith("refs/")
 
 
+def test_default_stable_diffusion_ref_is_pinned_for_reproducible_native_image_builds():
+    assert installer.STABLE_DIFFUSION_REPO == "https://github.com/leejet/stable-diffusion.cpp.git"
+    assert installer.STABLE_DIFFUSION_REF == "8caa3f908ae6d4a4bef531e73b9a969f266a3d1f"
+
+
+def test_default_stable_diffusion_dir_uses_package_source_cache(monkeypatch, tmp_path):
+    monkeypatch.setenv("UTOPIC_HOME", str(tmp_path / "cache"))
+
+    assert installer.default_stable_diffusion_dir() == tmp_path / "cache" / "src" / "stable-diffusion.cpp"
+
+
+def test_default_stable_diffusion_dir_can_be_overridden(monkeypatch, tmp_path):
+    source_dir = tmp_path / "external" / "stable-diffusion.cpp"
+    monkeypatch.setenv("UTOPIC_STABLE_DIFFUSION_DIR", str(source_dir))
+
+    assert installer.default_stable_diffusion_dir() == source_dir
+
+
 def test_build_utopic_uses_package_owned_cmake_with_native_source_variable(monkeypatch, tmp_path):
     cache_root = tmp_path / "cache"
     cmake_dir = tmp_path / "site-packages" / "utopic" / "cmake"
@@ -440,6 +458,38 @@ def test_build_utopic_uses_package_owned_cmake_with_native_source_variable(monke
 
     assert commands[0][:5] == ["cmake", "-B", build_dir, "-S", cmake_dir]
     assert f"-DUTOPIC_NATIVE_SOURCE_DIR={native_dir}" in commands[0]
+    assert "-DUTOPIC_ENABLE_STABLE_DIFFUSION=OFF" in commands[0]
+
+
+def test_build_utopic_enables_stable_diffusion_when_source_is_available(monkeypatch, tmp_path):
+    cache_root = tmp_path / "cache"
+    cmake_dir = tmp_path / "site-packages" / "utopic" / "cmake"
+    native_dir = tmp_path / "site-packages" / "utopic" / "core" / "native"
+    llama_dir = cache_root / "src" / "llama.cpp"
+    stable_diffusion_dir = cache_root / "src" / "stable-diffusion.cpp"
+    build_dir = cache_root / "build" / "utopic"
+
+    cmake_dir.mkdir(parents=True)
+    native_dir.mkdir(parents=True)
+    llama_dir.mkdir(parents=True)
+    stable_diffusion_dir.mkdir(parents=True)
+
+    commands = []
+    monkeypatch.setattr(installer, "build_root", lambda: cache_root / "build")
+    monkeypatch.setattr(installer, "PACKAGED_CMAKE_DIR", cmake_dir)
+    monkeypatch.setattr(installer, "_run", lambda command, **kwargs: commands.append(command))
+
+    installer._build_utopic(
+        native_dir,
+        llama_dir,
+        stable_diffusion_dir=stable_diffusion_dir,
+        jobs=None,
+        dry_run=False,
+    )
+
+    assert commands[0][:5] == ["cmake", "-B", build_dir, "-S", cmake_dir]
+    assert f"-DUTOPIC_STABLE_DIFFUSION_DIR={stable_diffusion_dir}" in commands[0]
+    assert "-DUTOPIC_ENABLE_STABLE_DIFFUSION=ON" in commands[0]
 
 
 def test_build_utopic_clears_stale_cmake_cache_when_package_cmake_source_changes(monkeypatch, tmp_path):
@@ -736,6 +786,7 @@ def test_setup_writes_install_metadata_after_success(monkeypatch, tmp_path):
     bin_dir = tmp_path / "bin"
     build_dir = tmp_path / "build" / "utopic"
     llama_dir = tmp_path / "src" / "llama.cpp"
+    stable_diffusion_dir = tmp_path / "src" / "stable-diffusion.cpp"
     native_dir = tmp_path / "site" / "utopic" / "native"
     decision = installer.BackendDecision(
         backend="cpu",
@@ -766,6 +817,8 @@ def test_setup_writes_install_metadata_after_success(monkeypatch, tmp_path):
             str(llama_dir),
             "--native-dir",
             str(native_dir),
+            "--stable-diffusion-dir",
+            str(stable_diffusion_dir),
         ]
     ) == 0
 
@@ -775,6 +828,56 @@ def test_setup_writes_install_metadata_after_success(monkeypatch, tmp_path):
     assert metadata["requested_backend"] == "cpu"
     assert metadata["llama_dir"] == str(installer._normalize_path(llama_dir))
     assert metadata["native_dir"] == str(installer._normalize_path(native_dir))
+    assert metadata["stable_diffusion_dir"] == str(installer._normalize_path(stable_diffusion_dir))
+
+
+def test_setup_manages_stable_diffusion_source_for_native_image_engine(monkeypatch, tmp_path):
+    llama_dir = tmp_path / "src" / "llama.cpp"
+    stable_diffusion_dir = tmp_path / "src" / "stable-diffusion.cpp"
+    native_dir = tmp_path / "site" / "utopic" / "native"
+    build_dir = tmp_path / "build" / "utopic"
+    decision = installer.BackendDecision(
+        backend="cpu",
+        reason="Requested by --backend cpu",
+        device="CPU",
+    )
+    cloned = []
+    observed_stable_diffusion_dirs = []
+
+    monkeypatch.setattr(installer, "default_llama_dir", lambda: llama_dir)
+    monkeypatch.setattr(installer, "default_stable_diffusion_dir", lambda: stable_diffusion_dir)
+    monkeypatch.setattr(installer, "_resolve_backend", lambda requested, arch: decision)
+    monkeypatch.setattr(installer, "_print_backend_decision", lambda decision, requested: None)
+    monkeypatch.setattr(installer, "_verify_llama_apis", lambda llama_dir: None)
+    monkeypatch.setattr(installer, "_build_llama", lambda *args, **kwargs: None)
+    monkeypatch.setattr(installer, "_install_binaries", lambda build_dir: None)
+    monkeypatch.setattr(installer, "_write_install_metadata", lambda *args, **kwargs: None)
+
+    def clone_or_checkout(repo, ref, dest, **kwargs):
+        cloned.append((repo, ref, dest))
+
+    def build_utopic(native_dir_arg, llama_dir_arg, **kwargs):
+        observed_stable_diffusion_dirs.append(kwargs["stable_diffusion_dir"])
+        return build_dir
+
+    monkeypatch.setattr(installer, "_clone_or_checkout", clone_or_checkout)
+    monkeypatch.setattr(installer, "_build_utopic", build_utopic)
+
+    assert installer.setup(
+        [
+            "--backend",
+            "cpu",
+            "--native-dir",
+            str(native_dir),
+        ]
+    ) == 0
+
+    assert (
+        installer.STABLE_DIFFUSION_REPO,
+        installer.STABLE_DIFFUSION_REF,
+        stable_diffusion_dir,
+    ) in cloned
+    assert observed_stable_diffusion_dirs == [stable_diffusion_dir]
 
 
 def test_setup_jobs_argument_overrides_invalid_environment(monkeypatch, tmp_path):
@@ -845,6 +948,7 @@ def test_setup_force_clears_stale_build_cache_before_rebuild(monkeypatch, tmp_pa
     llama_dir = tmp_path / "src" / "llama.cpp"
     stale_build_file = build_root / "utopic" / "stale-object.o"
     stale_llama_file = llama_dir / "build" / "stale-object.o"
+    stable_diffusion_dir = tmp_path / "src" / "stable-diffusion.cpp"
     native_dir = tmp_path / "site" / "utopic" / "native"
     decision = installer.BackendDecision(
         backend="cpu",
@@ -892,6 +996,8 @@ def test_setup_force_clears_stale_build_cache_before_rebuild(monkeypatch, tmp_pa
             str(llama_dir),
             "--native-dir",
             str(native_dir),
+            "--stable-diffusion-dir",
+            str(stable_diffusion_dir),
         ]
     ) == 0
 
