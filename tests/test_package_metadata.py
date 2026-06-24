@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 
 from utopic import __version__
+from utopic import installer
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -59,6 +60,17 @@ def test_release_version_literals_match_package_version():
     assert f'project_version = "{__version__}"' in identity
 
 
+def test_native_ref_metadata_matches_installer_pin():
+    if sys.version_info >= (3, 11):
+        import tomllib
+    else:
+        import tomli as tomllib
+
+    pyproject = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+
+    assert pyproject["tool"]["utopic"]["native-ref"] == installer.UTOPIC_NATIVE_REF
+
+
 def test_package_manager_no_longer_owns_legacy_native_source():
     assert not (REPO_ROOT / "python" / "utopic" / "native").exists()
 
@@ -68,7 +80,9 @@ def test_package_manager_no_longer_owns_typescript_chat_source():
 
 
 def test_vendored_core_layout_exists():
-    assert (REPO_ROOT / "python" / "utopic" / "core" / "native" / "CMakeLists.txt").exists()
+    assert (REPO_ROOT / "python" / "utopic" / "cmake" / "CMakeLists.txt").exists()
+    assert not (REPO_ROOT / "python" / "utopic" / "core" / "native" / "CMakeLists.txt").exists()
+    assert (REPO_ROOT / "python" / "utopic" / "core" / "native" / "main.cpp").exists()
     assert (
         REPO_ROOT
         / "python"
@@ -268,10 +282,12 @@ def test_ci_workflow_runs_on_commits_without_publishing():
     assert "python -m build" in workflow
     assert "python -m twine check dist/*" in workflow
     assert "python/utopic/core/python/utopic_core/models.json" in workflow
-    assert "python/utopic/core/native/CMakeLists.txt" in workflow
+    assert "python/utopic/cmake/CMakeLists.txt" in workflow
+    assert "python/utopic/core/native/main.cpp" in workflow
     assert "python/utopic/core/python/utopic_core/node/utopic-chat.js" in workflow
     assert "utopic/core/python/utopic_core/models.json" in workflow
-    assert "utopic/core/native/CMakeLists.txt" in workflow
+    assert "utopic/cmake/CMakeLists.txt" in workflow
+    assert "utopic/core/native/main.cpp" in workflow
     assert "utopic/core/python/utopic_core/node/utopic-chat.js" in workflow
     assert "Smoke test built distributions" in workflow
     assert "Smoke test uv tool install" in workflow
@@ -309,10 +325,12 @@ def test_release_workflow_smokes_installed_node_free_chat_fallback():
     )
 
     assert "python/utopic/core/python/utopic_core/models.json" in workflow
-    assert "python/utopic/core/native/CMakeLists.txt" in workflow
+    assert "python/utopic/cmake/CMakeLists.txt" in workflow
+    assert "python/utopic/core/native/main.cpp" in workflow
     assert "python/utopic/core/python/utopic_core/node/utopic-chat.js" in workflow
     assert "utopic/core/python/utopic_core/models.json" in workflow
-    assert "utopic/core/native/CMakeLists.txt" in workflow
+    assert "utopic/cmake/CMakeLists.txt" in workflow
+    assert "utopic/core/native/main.cpp" in workflow
     assert "utopic/core/python/utopic_core/node/utopic-chat.js" in workflow
     assert "Installed Node-free chat fallback smoke failed" in workflow
     assert 'PATH=""' in workflow

@@ -498,13 +498,15 @@ jobs:
           required_sdist = [
               "python/utopic/installer.py",
               "python/utopic/core/python/utopic_core/models.json",
-              "python/utopic/core/native/CMakeLists.txt",
+              "python/utopic/cmake/CMakeLists.txt",
+              "python/utopic/core/native/main.cpp",
               "python/utopic/core/python/utopic_core/node/utopic-chat.js",
           ]
           required_wheel = [
               "utopic/installer.py",
               "utopic/core/python/utopic_core/models.json",
-              "utopic/core/native/CMakeLists.txt",
+              "utopic/cmake/CMakeLists.txt",
+              "utopic/core/native/main.cpp",
               "utopic/core/python/utopic_core/node/utopic-chat.js",
           ]
 

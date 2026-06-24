@@ -607,6 +607,7 @@ curl http://127.0.0.1:8910/v1/models
 
 The package manager owns the user-facing setup path:
 
+- own the package-managed CMake project used for local native builds
 - use the vendored Utopic core source snapshot
 - fetch the pinned compatible public llama.cpp dependency source
 - configure the native build for Metal, CUDA, or CPU, including CUDA compiler and architecture detection

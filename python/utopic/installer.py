@@ -16,8 +16,9 @@ from . import __version__
 PACKAGE_DIR = Path(__file__).resolve().parent
 PACKAGED_CORE_DIR = PACKAGE_DIR / "core"
 PACKAGED_NATIVE_DIR = PACKAGED_CORE_DIR / "native"
+PACKAGED_CMAKE_DIR = PACKAGE_DIR / "cmake"
 UTOPIC_NATIVE_REPO = "https://github.com/adavyas/utopic.git"
-UTOPIC_NATIVE_REF = "c0dbe7f2234d30b3b22c5e7180c2a39fe49ef281"
+UTOPIC_NATIVE_REF = "a6385d7ccb0a4230eea3920a4d635063a75ab2f8"
 LLAMA_REPO = "https://github.com/ggml-org/llama.cpp.git"
 LLAMA_REF = "refs/pull/24423/head"
 BIN_NAMES = ("utopic", "utopic_server", "utopic_mcp", "utopic_acp")
@@ -622,10 +623,8 @@ def _verify_llama_apis(llama_dir: Path) -> None:
         )
 
 
-def _native_cmake_source(native_dir: Path) -> Path:
-    if (native_dir / "CMakeLists.txt").exists():
-        return native_dir
-    return native_dir / "native"
+def _package_cmake_source() -> Path:
+    return PACKAGED_CMAKE_DIR
 
 
 def _normalize_path(path: Path) -> Path:
@@ -666,11 +665,19 @@ def _remove_path(path: Path, *, dry_run: bool) -> None:
 
 def _build_utopic(native_dir: Path, llama_dir: Path, *, jobs: Optional[int], dry_run: bool) -> Path:
     out_dir = build_root() / "utopic"
-    source_dir = _native_cmake_source(native_dir)
+    source_dir = _package_cmake_source()
     _prepare_cmake_build_dir(out_dir, source_dir, dry_run=dry_run)
 
     _run(
-        ["cmake", "-B", out_dir, "-S", source_dir, f"-DUTOPIC_LLAMACPP_DIR={llama_dir}"],
+        [
+            "cmake",
+            "-B",
+            out_dir,
+            "-S",
+            source_dir,
+            f"-DUTOPIC_NATIVE_SOURCE_DIR={native_dir}",
+            f"-DUTOPIC_LLAMACPP_DIR={llama_dir}",
+        ],
         dry_run=dry_run,
     )
     _run(_build_command(out_dir, jobs=jobs), dry_run=dry_run)

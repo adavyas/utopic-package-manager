@@ -29,7 +29,7 @@ def main() -> int:
     if CORE_DIR.exists():
         shutil.rmtree(CORE_DIR)
     CORE_DIR.mkdir(parents=True, exist_ok=True)
-    ignore = shutil.ignore_patterns(".gitignore", "__pycache__", "*.pyc", "*.pyo")
+    ignore = shutil.ignore_patterns("CMakeLists.txt", ".gitignore", "__pycache__", "*.pyc", "*.pyo")
     shutil.copytree(tmp / "native", CORE_DIR / "native", ignore=ignore)
     shutil.copytree(tmp / "python", CORE_DIR / "python", ignore=ignore)
 

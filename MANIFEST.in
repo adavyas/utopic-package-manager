@@ -6,6 +6,7 @@ prune dist
 prune node
 
 recursive-include python/utopic/core *
+recursive-include python/utopic/cmake *
 
 global-exclude __pycache__
 global-exclude *.py[cod]

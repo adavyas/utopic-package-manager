@@ -411,20 +411,43 @@ def test_managed_source_checkout_repairs_wrong_origin_url(monkeypatch, tmp_path)
     assert commands[4] == ["git", "reset", "--hard", "FETCH_HEAD"]
 
 
-def test_build_utopic_clears_stale_cmake_cache_when_source_changes(monkeypatch, tmp_path):
+def test_build_utopic_uses_package_owned_cmake_with_native_source_variable(monkeypatch, tmp_path):
     cache_root = tmp_path / "cache"
-    old_source = cache_root / "src" / "Utopic" / "native"
-    new_source = tmp_path / "site-packages" / "utopic" / "native"
+    cmake_dir = tmp_path / "site-packages" / "utopic" / "cmake"
+    native_dir = tmp_path / "site-packages" / "utopic" / "core" / "native"
     llama_dir = cache_root / "src" / "llama.cpp"
     build_dir = cache_root / "build" / "utopic"
 
-    old_source.mkdir(parents=True)
-    new_source.mkdir(parents=True)
+    cmake_dir.mkdir(parents=True)
+    native_dir.mkdir(parents=True)
+    llama_dir.mkdir(parents=True)
+
+    commands = []
+    monkeypatch.setattr(installer, "build_root", lambda: cache_root / "build")
+    monkeypatch.setattr(installer, "PACKAGED_CMAKE_DIR", cmake_dir)
+    monkeypatch.setattr(installer, "_run", lambda command, **kwargs: commands.append(command))
+
+    installer._build_utopic(native_dir, llama_dir, jobs=None, dry_run=False)
+
+    assert commands[0][:5] == ["cmake", "-B", build_dir, "-S", cmake_dir]
+    assert f"-DUTOPIC_NATIVE_SOURCE_DIR={native_dir}" in commands[0]
+
+
+def test_build_utopic_clears_stale_cmake_cache_when_package_cmake_source_changes(monkeypatch, tmp_path):
+    cache_root = tmp_path / "cache"
+    old_cmake = cache_root / "old-package" / "cmake"
+    new_cmake = tmp_path / "site-packages" / "utopic" / "cmake"
+    native_dir = tmp_path / "site-packages" / "utopic" / "core" / "native"
+    llama_dir = cache_root / "src" / "llama.cpp"
+    build_dir = cache_root / "build" / "utopic"
+
+    old_cmake.mkdir(parents=True)
+    new_cmake.mkdir(parents=True)
+    native_dir.mkdir(parents=True)
     llama_dir.mkdir(parents=True)
     build_dir.mkdir(parents=True)
-    (new_source / "CMakeLists.txt").write_text("cmake_minimum_required(VERSION 3.20)\n", encoding="utf-8")
     (build_dir / "CMakeCache.txt").write_text(
-        f"CMAKE_HOME_DIRECTORY:INTERNAL={old_source}\n",
+        f"CMAKE_HOME_DIRECTORY:INTERNAL={old_cmake}\n",
         encoding="utf-8",
     )
     stale_marker = build_dir / "stale-object.o"
@@ -432,12 +455,13 @@ def test_build_utopic_clears_stale_cmake_cache_when_source_changes(monkeypatch, 
 
     commands = []
     monkeypatch.setattr(installer, "build_root", lambda: cache_root / "build")
+    monkeypatch.setattr(installer, "PACKAGED_CMAKE_DIR", new_cmake)
     monkeypatch.setattr(installer, "_run", lambda command, **kwargs: commands.append(command))
 
-    installer._build_utopic(new_source, llama_dir, jobs=None, dry_run=False)
+    installer._build_utopic(native_dir, llama_dir, jobs=None, dry_run=False)
 
     assert not stale_marker.exists()
-    assert commands[0][:5] == ["cmake", "-B", build_dir, "-S", new_source]
+    assert commands[0][:5] == ["cmake", "-B", build_dir, "-S", new_cmake]
 
 
 def test_prepare_cmake_build_dir_unlinks_stale_symlinked_cache_without_touching_target(tmp_path):

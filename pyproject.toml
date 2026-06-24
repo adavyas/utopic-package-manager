@@ -114,10 +114,11 @@ where = ["python"]
 
 [tool.setuptools.package-data]
 utopic = [
+  "cmake/*",
   "core/native/*",
   "core/python/utopic_core/*",
   "core/python/utopic_core/node/*",
 ]
 
 [tool.utopic]
-native-ref = "c0dbe7f2234d30b3b22c5e7180c2a39fe49ef281"
+native-ref = "a6385d7ccb0a4230eea3920a4d635063a75ab2f8"

@@ -9,6 +9,7 @@ setup(
     packages=find_packages(where="python"),
     package_data={
         "utopic": [
+            "cmake/*",
             "core/native/*",
             "core/python/utopic_core/*",
             "core/python/utopic_core/node/*",
