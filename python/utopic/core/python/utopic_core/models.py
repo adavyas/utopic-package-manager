@@ -4,6 +4,7 @@ import io
 import json
 import os
 import shutil
+import subprocess
 import sys
 import urllib.parse
 import urllib.request
@@ -593,9 +594,21 @@ def _detect_runtime_capacity() -> dict[str, object]:
             "device": os.environ.get("UTOPIC_RUNTIME_DEVICE", "configured runtime"),
             "gpu_memory_gib": configured_memory,
         }
+    cuda = _detect_cuda_capacity()
+    if cuda is not None:
+        return cuda
+    if sys.platform == "darwin":
+        memory = _darwin_unified_memory_gib()
+        return {
+            "backend": "metal",
+            "device": _darwin_device_name(),
+            "gpu_memory_gib": memory * 0.84 if memory is not None else None,
+            "unified_memory_gib": memory,
+        }
     return {
-        "backend": os.environ.get("UTOPIC_RUNTIME_BACKEND", "unknown"),
-        "device": os.environ.get("UTOPIC_RUNTIME_DEVICE", "unknown device"),
+        "backend": os.environ.get("UTOPIC_RUNTIME_BACKEND", "cpu"),
+        "device": os.environ.get("UTOPIC_RUNTIME_DEVICE", "CPU"),
+        "gpu_memory_gib": None,
     }
 
 
@@ -608,6 +621,78 @@ def _float_env(name: str) -> Optional[float]:
     except ValueError:
         return None
     return value if value >= 0 else None
+
+
+def _detect_cuda_capacity() -> Optional[dict[str, object]]:
+    try:
+        result = subprocess.run(
+            [
+                "nvidia-smi",
+                "--query-gpu=name,memory.total",
+                "--format=csv,noheader,nounits",
+            ],
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=2,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0 or not result.stdout.strip():
+        return None
+    names: list[str] = []
+    total_mib = 0.0
+    for line in result.stdout.splitlines():
+        parts = [part.strip() for part in line.split(",")]
+        if len(parts) < 2:
+            continue
+        names.append(parts[0])
+        try:
+            total_mib += float(parts[1])
+        except ValueError:
+            continue
+    if total_mib <= 0:
+        return None
+    return {
+        "backend": "cuda",
+        "device": ", ".join(names) if names else "CUDA",
+        "gpu_memory_gib": total_mib / 1024.0,
+        "gpu_count": len(names),
+    }
+
+
+def _darwin_unified_memory_gib() -> Optional[float]:
+    try:
+        result = subprocess.run(
+            ["sysctl", "-n", "hw.memsize"],
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=2,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    try:
+        return int(result.stdout.strip()) / (1024.0 ** 3)
+    except ValueError:
+        return None
+
+
+def _darwin_device_name() -> str:
+    try:
+        result = subprocess.run(
+            ["sysctl", "-n", "machdep.cpu.brand_string"],
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=2,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return "Apple Silicon"
+    name = result.stdout.strip()
+    return name or "Apple Silicon"
 
 
 def _detected_runtime_text(detected: dict[str, object]) -> str:

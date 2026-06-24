@@ -115,6 +115,56 @@ def test_large_planned_model_check_reports_oom_preflight(monkeypatch, tmp_path):
     assert payload["next_steps"]
 
 
+def test_model_capacity_detects_cuda_without_env(monkeypatch):
+    monkeypatch.delenv("UTOPIC_GPU_MEMORY_GIB", raising=False)
+    monkeypatch.delenv("UTOPIC_RUNTIME_BACKEND", raising=False)
+    monkeypatch.delenv("UTOPIC_RUNTIME_DEVICE", raising=False)
+    monkeypatch.setattr(models.sys, "platform", "linux")
+
+    def fake_run(command, **_kwargs):
+        assert command[0] == "nvidia-smi"
+        return models.subprocess.CompletedProcess(
+            command,
+            0,
+            stdout="NVIDIA A100-SXM4-80GB, 81920\nNVIDIA A100-SXM4-80GB, 81920\n",
+            stderr="",
+        )
+
+    monkeypatch.setattr(models.subprocess, "run", fake_run)
+
+    payload = models._detect_runtime_capacity()
+
+    assert payload["backend"] == "cuda"
+    assert payload["device"] == "NVIDIA A100-SXM4-80GB, NVIDIA A100-SXM4-80GB"
+    assert payload["gpu_memory_gib"] == 160
+    assert payload["gpu_count"] == 2
+
+
+def test_model_capacity_detects_apple_unified_memory_without_env(monkeypatch):
+    monkeypatch.delenv("UTOPIC_GPU_MEMORY_GIB", raising=False)
+    monkeypatch.delenv("UTOPIC_RUNTIME_BACKEND", raising=False)
+    monkeypatch.delenv("UTOPIC_RUNTIME_DEVICE", raising=False)
+    monkeypatch.setattr(models.sys, "platform", "darwin")
+
+    def fake_run(command, **_kwargs):
+        if command == ["nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader,nounits"]:
+            return models.subprocess.CompletedProcess(command, 1, stdout="", stderr="")
+        if command == ["sysctl", "-n", "hw.memsize"]:
+            return models.subprocess.CompletedProcess(command, 0, stdout=str(48 * 1024**3), stderr="")
+        if command == ["sysctl", "-n", "machdep.cpu.brand_string"]:
+            return models.subprocess.CompletedProcess(command, 0, stdout="Apple M4 Pro\n", stderr="")
+        raise AssertionError(command)
+
+    monkeypatch.setattr(models.subprocess, "run", fake_run)
+
+    payload = models._detect_runtime_capacity()
+
+    assert payload["backend"] == "metal"
+    assert payload["device"] == "Apple M4 Pro"
+    assert payload["unified_memory_gib"] == 48
+    assert payload["gpu_memory_gib"] == 48 * 0.84
+
+
 def test_core_runtime_does_not_own_package_manager_cmake():
     repo_root = Path(__file__).resolve().parents[1]
 
