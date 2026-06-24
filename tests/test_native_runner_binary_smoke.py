@@ -120,7 +120,7 @@ def test_native_runner_reports_unsupported_modality_with_readiness_detail(tmp_pa
                 "options": {
                     "modality": "image",
                     "engine": "diffusers",
-                    "runtime": "bridge",
+                    "runtime": "planned_native",
                     "runner": "image_runner",
                     "native_status": "planned",
                     "supported_backends": ["metal", "cuda"],
@@ -141,6 +141,7 @@ def test_native_runner_reports_unsupported_modality_with_readiness_detail(tmp_pa
     detail = payload["error"]["detail"]
     assert detail["task"] == "image"
     assert detail["model"] == "unit-image"
+    assert detail["runtime"] == "planned_native"
     assert detail["runner"] == "image_runner"
     assert detail["native_status"] == "planned"
     assert detail["supported_backends"] == ["metal", "cuda"]

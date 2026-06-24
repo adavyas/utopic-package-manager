@@ -27,6 +27,7 @@ def generation(entry: models.ModelEntry, endpoint: str, request: dict[str, Any])
     runner_input = _generation_input(entry, request)
     return _invoke_runner(
         _runner_request(entry, entry.modality, runner_input, request, endpoint=endpoint),
+        binary_name=entry.runner or "utopic_runner",
         binary_unavailable_payload=native_readiness_error(entry),
     )
 
@@ -34,14 +35,15 @@ def generation(entry: models.ModelEntry, endpoint: str, request: dict[str, Any])
 def _invoke_runner(
     runner_request: dict[str, Any],
     *,
+    binary_name: str = "utopic_runner",
     binary_unavailable_payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     try:
-        runner = _native.binary_path("utopic_runner")
+        runner = _native.binary_path(binary_name)
     except RuntimeError as exc:
         if binary_unavailable_payload is not None:
             return binary_unavailable_payload
-        return _error("backend_unavailable", str(exc), {"binary": "utopic_runner"})
+        return _error("backend_unavailable", str(exc), {"binary": binary_name})
 
     with tempfile.TemporaryDirectory(prefix="utopic-runner-") as tmp:
         request_path = Path(tmp) / "request.json"

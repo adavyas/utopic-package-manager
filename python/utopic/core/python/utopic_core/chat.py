@@ -77,6 +77,9 @@ Options:
 
 Chat commands:
   /help                 Show chat commands.
+  /models               Show catalog models with native readiness.
+  /pull MODEL           Download a native text model. Restart chat to switch.
+  /serve                Show local OpenAI-compatible endpoints.
   /clear                Clear this session's conversation.
   /system TEXT          Set or replace the system prompt.
   /exit                 Quit.
@@ -487,7 +490,7 @@ def _python_chat_loop(
 
     print(f"utopic chat: {fallback_reason}; using the built-in Python chat fallback.")
     print(f"OpenAI-compatible URL: {_chat_completions_url(base_url)}")
-    print("Type /help for commands, /clear to reset, /exit to quit.")
+    print("Type /help for commands, /models for catalog, /serve for endpoints, /exit to quit.")
 
     while True:
         try:
@@ -501,7 +504,23 @@ def _python_chat_loop(
         if text in {"/exit", "/quit"}:
             return 0
         if text == "/help":
-            print("/help, /clear, /system TEXT, /exit")
+            _print_python_chat_commands()
+            continue
+        if text == "/models":
+            _print_python_chat_models()
+            continue
+        if text == "/serve":
+            _print_python_chat_endpoints(base_url)
+            continue
+        if text.startswith("/pull "):
+            model_to_pull = text.removeprefix("/pull ").strip()
+            if not model_to_pull:
+                print("usage: /pull MODEL", file=sys.stderr)
+                continue
+            try:
+                _pull_python_chat_model(model_to_pull)
+            except RuntimeError as exc:
+                print(f"utopic chat: {exc}", file=sys.stderr)
             continue
         if text == "/clear":
             messages.clear()
@@ -531,6 +550,47 @@ def _python_chat_loop(
             return 1
         messages.append({"role": "assistant", "content": answer})
         print(f"{answer}\n")
+
+
+def _print_python_chat_commands() -> None:
+    print("/models       Show catalog models with native readiness.")
+    print("/pull MODEL   Download a native text model. Restart chat to switch.")
+    print("/serve        Show local OpenAI-compatible endpoints.")
+    print("/clear        Clear conversation history.")
+    print("/system TEXT  Set or replace the system prompt.")
+    print("/exit         Quit.")
+
+
+def _print_python_chat_models() -> None:
+    print("\nCatalog models:")
+    for index, entry in enumerate(models.list_models(), start=1):
+        marker = "*" if entry.recommended else " "
+        status = "downloaded" if models.is_model_downloaded(entry) else "not downloaded"
+        print(f"{index}. {marker} {entry.id} ({entry.size}, {status})")
+        print(f"   {entry.modality} / {entry.runtime} / {entry.native_status} / {entry.runner}")
+        print(f"   backends: {', '.join(entry.supported_backends)}")
+        print(f"   {entry.name}")
+
+
+def _print_python_chat_endpoints(base_url: str) -> None:
+    clean_base = base_url.rstrip("/")
+    print(f"Chat completions: {clean_base}/v1/chat/completions")
+    print(f"Models: {clean_base}/v1/models")
+    print(f"MCP: {clean_base}/mcp")
+
+
+def _pull_python_chat_model(model_id: str) -> None:
+    entry = models.get_model(model_id)
+    if entry is None:
+        raise RuntimeError(f"unknown model '{model_id}'. Run /models to see aliases.")
+    if entry.modality != "text" or entry.runtime != "native":
+        raise RuntimeError(
+            f"model '{model_id}' is {entry.modality} / {entry.runtime} / {entry.native_status}; "
+            "use `utopic serve` or the runtime gateway for non-chat modalities."
+        )
+    model_path = models.ensure_model(model_id)
+    print(f"Pulled {model_id} to {model_path}")
+    print("Restart chat with that model to switch the running server.")
 
 
 def _python_fallback_launch(

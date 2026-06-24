@@ -890,7 +890,7 @@ def _default_generate_model(kind: str, quality: str) -> str:
         return preferred
     expected_modality = _GENERATE_MODALITY[kind]
     for entry in models.list_models():
-        if entry.modality == expected_modality and entry.runtime != "native":
+        if entry.modality == expected_modality:
             return entry.id
     raise RuntimeError(f"no catalog model supports `utopic generate {kind}`")
 

@@ -164,6 +164,60 @@ def test_gateway_image_generation_reports_native_runner_not_ready_by_default():
     assert "native C++ runner" in payload["error"]["message"]
 
 
+def test_gateway_native_artifact_model_routes_to_native_runner(monkeypatch):
+    entry = gateway.models.ModelEntry(
+        id="unit-native-image",
+        name="Unit Native Image",
+        family="unit",
+        filename="unit-native-image",
+        url="https://example.invalid/unit-image",
+        size="1 GiB",
+        recommended=False,
+        description="unit",
+        modality="image",
+        engine="native-image",
+        runtime="native",
+        native_status="ready",
+        runner="image_runner",
+        endpoints=("/v1/images/generations",),
+        outputs=("image/png",),
+    )
+    captured = {}
+    monkeypatch.setattr(gateway.models, "get_model", lambda model_id: entry if model_id == entry.id else None)
+    monkeypatch.setattr(gateway, "_run_bridge", lambda *_args, **_kwargs: pytest.fail("bridge should not run"))
+
+    def fake_generation(runner_entry, endpoint, request):
+        captured["entry"] = runner_entry
+        captured["endpoint"] = endpoint
+        captured["request"] = request
+        return {
+            "ok": True,
+            "type": "image",
+            "backend": "metal",
+            "artifacts": [{"type": "image/png", "url": "file:///tmp/unit-native-image.png"}],
+            "metrics": {"total_ms": 12.5},
+        }
+
+    monkeypatch.setattr(gateway.native_runner, "generation", fake_generation)
+
+    status, payload = decode(
+        gateway.handle_openai_request(
+            "POST",
+            "/v1/images/generations",
+            {"model": entry.id, "prompt": "a native image"},
+        )
+    )
+
+    assert status == 200
+    assert payload["model"] == entry.id
+    assert payload["metadata"]["runtime"] == "native-runner"
+    assert payload["metadata"]["runner"] == "image_runner"
+    assert payload["data"] == [{"url": "file:///tmp/unit-native-image.png"}]
+    assert captured["entry"] is entry
+    assert captured["endpoint"] == "/v1/images/generations"
+    assert captured["request"]["prompt"] == "a native image"
+
+
 def test_gateway_does_not_use_packaged_bridge_command_by_default_for_bridge_models(monkeypatch):
     monkeypatch.delenv("UTOPIC_BRIDGE_DIFFUSERS_COMMAND", raising=False)
     monkeypatch.delenv("UTOPIC_BRIDGE_COMMAND", raising=False)

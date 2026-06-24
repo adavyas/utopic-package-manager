@@ -1411,13 +1411,13 @@ def _model_payload(entry: models.ModelEntry) -> dict[str, Any]:
         "url": entry.url,
         "description": entry.description,
     }
-    if _is_artifact_runtime(entry) and _experimental_bridge_enabled():
+    if _is_artifact_runtime(entry) and entry.runtime != "native" and _experimental_bridge_enabled():
         payload["experimental_bridge"] = _bridge_model_payload(entry)
     return payload
 
 
 def _is_artifact_runtime(entry: models.ModelEntry) -> bool:
-    return entry.modality != "text" and entry.runtime in {"planned_native", "bridge"}
+    return entry.modality != "text" and entry.runtime in {"native", "planned_native", "bridge"}
 
 
 def _bridge_model_payload(entry: models.ModelEntry) -> dict[str, Any]:

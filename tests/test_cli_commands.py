@@ -4,6 +4,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -326,6 +327,57 @@ def test_chat_python_fallback_starts_runner_gateway_and_cleans_up(monkeypatch, t
         ("http://127.0.0.1:8999/health", log_dir / "utopic-chat-server.log")
     ]
     assert process_state == {"terminated": True, "waited": True}
+
+
+def test_chat_python_fallback_existing_server_defaults_to_utopic_model(monkeypatch):
+    captured = {}
+
+    monkeypatch.setattr(chat, "_choose_model_arg", lambda args: captured.setdefault("choose_args", list(args)) or None)
+    monkeypatch.setattr(chat.models, "ensure_model", lambda *_args, **_kwargs: pytest.fail("existing server should not pull"))
+
+    def fake_loop(base_url, args, fallback_reason="Node.js was not found", model=None):
+        captured["loop"] = (base_url, list(args), model)
+        return 0
+
+    monkeypatch.setattr(chat, "_python_chat_loop", fake_loop)
+
+    assert chat._python_fallback_launch(["--server", "http://127.0.0.1:8910"]) == 0
+
+    assert captured["choose_args"] == ["--server", "http://127.0.0.1:8910"]
+    assert captured["loop"] == ("http://127.0.0.1:8910", ["--server", "http://127.0.0.1:8910"], "utopic")
+
+
+def test_python_chat_fallback_supports_catalog_and_endpoint_commands(monkeypatch, tmp_path, capsys):
+    entry = SimpleNamespace(
+        id="diffusiongemma-26b-a4b-q4",
+        name="DiffusionGemma 26B Q4",
+        size="15 GiB",
+        modality="text",
+        runtime="native",
+        native_status="ready",
+        runner="utopic_runner",
+        supported_backends=("metal", "cuda", "cpu"),
+        recommended=True,
+    )
+    inputs = iter(["/help", "/models", "/serve", "/pull diffusiongemma-26b-a4b-q4", "/exit"])
+
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(inputs))
+    monkeypatch.setattr(chat.models, "list_models", lambda: [entry])
+    monkeypatch.setattr(chat.models, "is_model_downloaded", lambda _entry: False)
+    monkeypatch.setattr(chat.models, "get_model", lambda model_id: entry if model_id == entry.id else None)
+    monkeypatch.setattr(chat.models, "ensure_model", lambda model_id: tmp_path / f"{model_id}.gguf")
+    monkeypatch.setattr(chat, "_request_chat_completion", lambda *_args, **_kwargs: pytest.fail("chat request should not run"))
+
+    assert chat._python_chat_loop("http://127.0.0.1:8910", [], fallback_reason="test", model=entry.id) == 0
+
+    captured = capsys.readouterr()
+    assert "/models       Show catalog models with native readiness." in captured.out
+    assert "diffusiongemma-26b-a4b-q4" in captured.out
+    assert "text / native / ready / utopic_runner" in captured.out
+    assert "Chat completions: http://127.0.0.1:8910/v1/chat/completions" in captured.out
+    assert "Models: http://127.0.0.1:8910/v1/models" in captured.out
+    assert "MCP: http://127.0.0.1:8910/mcp" in captured.out
+    assert f"Pulled diffusiongemma-26b-a4b-q4 to {tmp_path / 'diffusiongemma-26b-a4b-q4.gguf'}" in captured.out
 
 
 def test_chat_python_fallback_prompts_for_model_when_interactive(monkeypatch, tmp_path, capsys):
@@ -1470,6 +1522,16 @@ def test_cli_generate_planned_modality_reports_native_readiness_without_pull(mon
         )
     ]
     assert "does not have a native C++ runner yet" in capsys.readouterr().err
+
+
+def test_generate_default_model_can_select_native_artifact_runner(monkeypatch):
+    native_image = SimpleNamespace(id="native-image", modality="image", runtime="native")
+    planned_image = SimpleNamespace(id="planned-image", modality="image", runtime="planned_native")
+
+    monkeypatch.setattr(cli.models, "get_model", lambda _model_id: None)
+    monkeypatch.setattr(cli.models, "list_models", lambda: [native_image, planned_image])
+
+    assert cli._default_generate_model("image", "standard") == "native-image"
 
 
 @pytest.mark.parametrize(
