@@ -102,7 +102,7 @@ def test_gateway_models_endpoint_keeps_planned_models_native_only(monkeypatch):
     assert by_id["cosmos3-super"]["requirements"]["min_gpu_memory_gib"] == 96
 
 
-def test_gateway_cosmos_returns_native_runner_oom_preflight(monkeypatch):
+def test_gateway_cosmos_returns_oom_preflight(monkeypatch):
     monkeypatch.setattr(
         gateway,
         "_detect_runtime_capacity",
@@ -123,7 +123,7 @@ def test_gateway_cosmos_returns_native_runner_oom_preflight(monkeypatch):
     )
 
     assert status == 507
-    assert payload["error"]["code"] == "native_runner_oom_preflight"
+    assert payload["error"]["code"] == "oom"
     assert payload["error"]["model"] == "cosmos3-super"
     assert payload["error"]["required_gpu_memory_gib"] == 96
     assert payload["error"]["detected"]["device"] == "Apple M4 Pro"
@@ -307,7 +307,7 @@ def test_every_planned_catalog_model_has_openai_and_mcp_runtime_surface():
         assert payload["error"]["model"] == entry.id
         assert payload["error"]["modality"] == entry.modality
         assert payload["error"]["engine"] == entry.engine
-        assert payload["error"]["code"] in {"unsupported_model", "native_runner_oom_preflight"}
+        assert payload["error"]["code"] in {"unsupported_model", "oom"}
 
         responses_request = {
             "model": entry.id,

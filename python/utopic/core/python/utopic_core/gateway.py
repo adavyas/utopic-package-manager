@@ -646,7 +646,7 @@ def _native_runtime_preflight(entry: models.ModelEntry) -> Optional[tuple[int, d
                     f"model {entry.id} requires at least {minimum:g} GiB GPU memory; "
                     f"detected {detected_text}. This model is too large for this host."
                 ),
-                "code": "native_runner_oom_preflight",
+                "code": "oom",
                 "model": entry.id,
                 "modality": entry.modality,
                 "engine": entry.engine,
@@ -721,7 +721,7 @@ def _unsupported_direct_runner_options_response(
                     "the direct native runner path does not support these OpenAI "
                     f"parameters yet: {', '.join(unsupported)}"
                 ),
-                "code": "unsupported_parameter",
+                "code": "runner_failed",
                 "unsupported_parameters": unsupported,
                 "model": entry.id,
                 "modality": entry.modality,
@@ -746,7 +746,7 @@ def _missing_required_input_response(
         {
             "error": {
                 "message": f"{entry.modality} generation requires a non-empty {parameter}",
-                "code": "missing_required_input",
+                "code": "runner_failed",
                 "parameter": parameter,
                 "model": entry.id,
                 "modality": entry.modality,
