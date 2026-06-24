@@ -50,7 +50,7 @@ static bool flag_set(int argc, char ** argv, const char * flag) {
 
 static string executable_name(const char * path) {
     if (!path || !path[0]) {
-        return "utopic_runner";
+        return "utopic-runner";
     }
     string name(path);
     const size_t slash = name.find_last_of("/\\");
@@ -63,7 +63,10 @@ static string executable_name(const char * path) {
         name.resize(name.size() - suffix.size());
     }
 #endif
-    return name.empty() ? "utopic_runner" : name;
+    if (name == "utopic_runner") {
+        return "utopic-runner";
+    }
+    return name.empty() ? "utopic-runner" : name;
 }
 
 static const char * env_any(const char * preferred, const char * legacy = nullptr) {
@@ -120,6 +123,15 @@ static json error_response(const string & code, const string & message, const js
         }},
     };
 }
+
+struct runner_request {
+    string task;
+    string model;
+    json input;
+    json options;
+    string output_dir;
+    string runner;
+};
 
 static json contract_error(const string & message, const string & field) {
     return error_response("runner_failed", message, {
@@ -269,6 +281,17 @@ static bool validate_request_contract(const json & root, json & response) {
     return true;
 }
 
+static runner_request make_runner_request(const json & root, const string & runner_name) {
+    return {
+        root.value("task", ""),
+        root.value("model", ""),
+        root.value("input", json::object()),
+        root.value("options", json::object()),
+        root.value("output_dir", ""),
+        runner_name,
+    };
+}
+
 static vector<pair<string, string>> request_messages(const json & input) {
     vector<pair<string, string>> messages;
     if (input.contains("messages") && input["messages"].is_array()) {
@@ -401,6 +424,29 @@ static json run_chat(const json & root) {
     return out;
 }
 
+static json planned_native_response(const runner_request & req) {
+    return error_response("unsupported_model", "native task is not implemented behind utopic-runner yet", {
+        {"task", req.task},
+        {"model", req.model},
+        {"modality", req.options.value("modality", req.task)},
+        {"engine", req.options.value("engine", "")},
+        {"runtime", req.options.value("runtime", "")},
+        {"runner", req.options.value("runner", req.runner)},
+        {"native_status", req.options.value("native_status", "")},
+        {"supported_backends", req.options.value("supported_backends", json::array())},
+        {"expected_vram_gib", req.options.value("expected_vram_gib", json())},
+        {"expected_ram_gib", req.options.value("expected_ram_gib", json())},
+        {"detected", detected_capacity()},
+    });
+}
+
+static json run_request(const runner_request & req, const json & root) {
+    if (req.task == "chat") {
+        return run_chat(root);
+    }
+    return planned_native_response(req);
+}
+
 int main(int argc, char ** argv) {
     llama_log_set([](ggml_log_level, const char * text, void *) { fputs(text, stderr); }, nullptr);
     const string runner_name = executable_name(argc > 0 ? argv[0] : nullptr);
@@ -437,25 +483,8 @@ int main(int argc, char ** argv) {
         return 1;
     }
     try {
-        const string task = root.value("task", "");
-        if (task == "chat") {
-            response = run_chat(root);
-        } else {
-            const json opts = root.value("options", json::object());
-            response = error_response("unsupported_model", "native task is not implemented behind utopic-runner yet", {
-                {"task", task},
-                {"model", root.value("model", "")},
-                {"modality", opts.value("modality", task)},
-                {"engine", opts.value("engine", "")},
-                {"runtime", opts.value("runtime", "")},
-                {"runner", opts.value("runner", runner_name)},
-                {"native_status", opts.value("native_status", "")},
-                {"supported_backends", opts.value("supported_backends", json::array())},
-                {"expected_vram_gib", opts.value("expected_vram_gib", json())},
-                {"expected_ram_gib", opts.value("expected_ram_gib", json())},
-                {"detected", detected_capacity()},
-            });
-        }
+        const runner_request req = make_runner_request(root, runner_name);
+        response = run_request(req, root);
     } catch (const std::exception & exc) {
         response = error_response("runner_failed", string("request handling failed: ") + exc.what());
     }
