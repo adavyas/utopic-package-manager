@@ -60,7 +60,7 @@ def test_gateway_mcp_planned_modalities_are_described_as_native_readiness_surfac
         assert "native runner" in description
         assert "planned" in description
         assert "readiness" in description
-        assert "experimental bridge" in description
+        assert "bridge" not in description
         assert "generate local" not in description
         assert "local image generation" not in description
         assert "local music" not in description

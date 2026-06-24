@@ -115,7 +115,7 @@ def test_gateway_models_endpoint_exposes_bridge_activation_for_all_planned_model
     assert by_id["cosmos3-super"]["experimental_bridge"]["environment_variable"] == "UTOPIC_BRIDGE_COSMOS_COMMAND"
 
 
-def test_gateway_cosmos_returns_oom_preflight_before_starting_bridge(monkeypatch):
+def test_gateway_cosmos_returns_native_runner_oom_preflight(monkeypatch):
     monkeypatch.setattr(
         gateway,
         "_detect_runtime_capacity",
@@ -126,7 +126,7 @@ def test_gateway_cosmos_returns_oom_preflight_before_starting_bridge(monkeypatch
         },
         raising=False,
     )
-    monkeypatch.setattr(gateway, "_bridge_command", lambda entry: pytest.fail("bridge should not start"))
+    monkeypatch.setattr(gateway, "_run_bridge", lambda *_args, **_kwargs: pytest.fail("bridge should not start"))
 
     status, payload = decode(
         gateway.handle_openai_request(
@@ -137,7 +137,7 @@ def test_gateway_cosmos_returns_oom_preflight_before_starting_bridge(monkeypatch
     )
 
     assert status == 507
-    assert payload["error"]["code"] == "bridge_model_oom_preflight"
+    assert payload["error"]["code"] == "native_runner_oom_preflight"
     assert payload["error"]["model"] == "cosmos3-super"
     assert payload["error"]["required_gpu_memory_gib"] == 96
     assert payload["error"]["detected"]["device"] == "Apple M4 Pro"
@@ -322,7 +322,7 @@ def test_every_planned_catalog_model_has_openai_and_mcp_runtime_surface():
         assert payload["error"]["model"] == entry.id
         assert payload["error"]["modality"] == entry.modality
         assert payload["error"]["engine"] == entry.engine
-        assert payload["error"]["code"] in {"unsupported_model", "bridge_model_oom_preflight"}
+        assert payload["error"]["code"] in {"unsupported_model", "native_runner_oom_preflight"}
 
         responses_request = {
             "model": entry.id,

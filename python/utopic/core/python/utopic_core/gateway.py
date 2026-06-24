@@ -90,8 +90,7 @@ SPEECH_INPUT_SCHEMA = _schema(
 SPEECH_DESCRIPTION = (
     "Call the planned native runner surface for local speech audio from text. Current "
     "TTS models are cataloged for readiness checks and return a native runner planned "
-    "error until the C++ TTS runner exists; an experimental bridge can be used only when "
-    "explicitly enabled. Returns artifact JSON once native support is ready."
+    "error until the C++ TTS runner exists. Returns artifact JSON once native support is ready."
 )
 
 
@@ -129,8 +128,7 @@ MCP_TOOLS = [
             "Call the planned native runner surface for image creation from a text prompt. "
             "Image models such as FLUX, Qwen-Image, Krea, and Cosmos are cataloged for "
             "readiness, hardware, and OOM checks and return a native runner planned error "
-            "until the C++ image runner exists; an experimental bridge can be used only when "
-            "explicitly enabled. Returns OpenAI-compatible artifact JSON once native support is ready."
+            "until the C++ image runner exists. Returns OpenAI-compatible artifact JSON once native support is ready."
         ),
         "inputSchema": _schema(
             ["prompt"],
@@ -165,8 +163,7 @@ MCP_TOOLS = [
         "description": (
             "Call the planned native runner surface for music audio from a text prompt. "
             "Music models are cataloged for readiness checks and return a native runner "
-            "planned error until the C++ music runner exists; an experimental bridge can be "
-            "used only when explicitly enabled. Returns artifact JSON once native support is ready."
+            "planned error until the C++ music runner exists. Returns artifact JSON once native support is ready."
         ),
         "inputSchema": _schema(
             ["prompt"],
@@ -187,8 +184,7 @@ MCP_TOOLS = [
         "description": (
             "Call the planned native runner surface for video from a text prompt. Video models "
             "are cataloged for readiness and OOM checks and return a native runner planned error "
-            "until the C++ video runner exists; an experimental bridge can be used only when "
-            "explicitly enabled. Some video models require GB10 or high-memory CUDA; use "
+            "until the C++ video runner exists. Some video models require GB10 or high-memory CUDA; use "
             "utopic_models_check before running large jobs."
         ),
         "inputSchema": _schema(
@@ -214,9 +210,8 @@ MCP_TOOLS = [
         "description": (
             "Call the planned native runner surface for miscellaneous artifact workflows such "
             "as ZUNA signal processing. Misc models are cataloged for readiness checks and "
-            "return a native runner planned error until the C++ misc runner exists; an "
-            "experimental bridge can be used only when explicitly enabled. Returns artifact JSON "
-            "once native support is ready."
+            "return a native runner planned error until the C++ misc runner exists. Returns "
+            "artifact JSON once native support is ready."
         ),
         "inputSchema": _schema(
             ["artifact"],
@@ -576,54 +571,6 @@ def _default_model_for_endpoint(path: str) -> str:
     return models.default_model().id
 
 
-def _bridge_not_installed(entry: models.ModelEntry, endpoint: str) -> tuple[int, dict[str, str], bytes]:
-    return _json(
-        501,
-        {
-            "error": {
-                "message": f"{entry.engine} bridge for {entry.id} is not installed yet",
-                "code": "bridge_engine_not_installed",
-                "model": entry.id,
-                "modality": entry.modality,
-                "engine": entry.engine,
-            },
-            "contract": _bridge_contract(entry, endpoint),
-        },
-    )
-
-
-def _bridge_contract(entry: models.ModelEntry, endpoint: str) -> dict[str, Any]:
-    input_key = _input_key_for_modality(entry.modality)
-    first_output = entry.outputs[0] if entry.outputs else "application/octet-stream"
-    return {
-        "schema_version": "utopic-bridge/v1",
-        "input": input_key,
-        "outputs": list(entry.outputs),
-        "cache_path": str(entry.path),
-        "repo": entry.repo,
-        "requirements": entry.requirements or {},
-        "environment_variable": _bridge_command_env_var(entry),
-        "request_schema": {
-            "endpoint": endpoint,
-            "input": input_key,
-            "repo": entry.repo,
-            "model_cache_path": str(entry.path),
-            "output_dir": "<run-dir>/outputs",
-            "progress_path": "<run-dir>/progress.jsonl",
-        },
-        "artifact_schema": {
-            "type": first_output,
-            "path": "<absolute-output-path>",
-            "metadata": {},
-        },
-        "progress_event_schema": {
-            "event": "queued|loading|generating|completed|failed",
-            "progress": 0.0,
-            "message": "human-readable status",
-        },
-    }
-
-
 def _bridge_runtime_preflight(entry: models.ModelEntry) -> Optional[tuple[int, dict[str, str], bytes]]:
     requirements = entry.requirements or {}
     minimum = requirements.get("min_gpu_memory_gib")
@@ -654,7 +601,7 @@ def _bridge_runtime_preflight(entry: models.ModelEntry) -> Optional[tuple[int, d
                     f"model {entry.id} requires at least {minimum:g} GiB GPU memory; "
                     f"detected {detected_text}. This model is too large for this host."
                 ),
-                "code": "bridge_model_oom_preflight",
+                "code": "native_runner_oom_preflight",
                 "model": entry.id,
                 "modality": entry.modality,
                 "engine": entry.engine,
