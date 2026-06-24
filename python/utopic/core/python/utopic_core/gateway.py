@@ -12,7 +12,7 @@ from typing import Any, Optional
 import urllib.error
 import urllib.request
 
-from . import __version__, bridge, installer, models
+from . import __version__, bridge, installer, models, native_runner
 
 
 JSON_HEADERS = {"content-type": "application/json"}
@@ -323,16 +323,24 @@ def handle_openai_request(
         preflight = _bridge_runtime_preflight(entry)
         if preflight is not None:
             return preflight
-        command = _bridge_command(entry)
-        if command is None:
-            return _bridge_not_installed(entry, path)
-        return _run_bridge(entry, path, runtime_request, command)
+        command = _explicit_bridge_command(entry)
+        if command is not None:
+            return _run_bridge(entry, path, runtime_request, command)
+        return _json(503, native_runner.native_readiness_error(entry))
     if native_base_url and entry.modality == "text":
         native_path = "/v1/chat/completions" if path == "/v1/responses" else path
         status, headers, response_body = _forward_native_text(native_base_url, native_path, runtime_request)
         if path == "/v1/responses" and status < 400:
             return _json(status, _native_chat_to_response(entry, response_body))
         return status, headers, response_body
+    if entry.modality == "text":
+        runner_payload = native_runner.chat_completion(entry, runtime_request)
+        if runner_payload.get("ok") is False:
+            return _json(_native_runner_error_status(runner_payload), runner_payload)
+        chat_payload = _native_runner_to_chat_completion(entry, runner_payload)
+        if path == "/v1/responses":
+            return _json(200, _native_chat_payload_to_response(entry, chat_payload))
+        return _json(200, chat_payload)
     return _json(
         503,
         {
@@ -863,6 +871,11 @@ def _bridge_command(entry: models.ModelEntry) -> Optional[list[str]]:
     return [sys.executable, "-m", "utopic.bridge", entry.engine]
 
 
+def _explicit_bridge_command(entry: models.ModelEntry) -> Optional[list[str]]:
+    value = os.environ.get(_bridge_command_env_var(entry)) or os.environ.get("UTOPIC_BRIDGE_COMMAND")
+    return shlex.split(value) if value else None
+
+
 def _bridge_command_env_var(entry: models.ModelEntry) -> str:
     normalized = "".join(char if char.isalnum() else "_" for char in entry.engine.upper()).strip("_")
     return f"UTOPIC_BRIDGE_{normalized}_COMMAND"
@@ -1119,6 +1132,81 @@ def _native_chat_to_response(entry: models.ModelEntry, body: bytes) -> dict[str,
             "engine": entry.engine,
         },
     }
+
+
+def _native_runner_error_status(payload: dict[str, Any]) -> int:
+    error = payload.get("error") if isinstance(payload.get("error"), dict) else {}
+    code = error.get("code")
+    if code == "missing_model":
+        return 404
+    if code in {"backend_unavailable", "unsupported_model"}:
+        return 503
+    return 502
+
+
+def _native_runner_to_chat_completion(entry: models.ModelEntry, payload: dict[str, Any]) -> dict[str, Any]:
+    text = payload.get("text") if isinstance(payload.get("text"), str) else ""
+    metrics = payload.get("metrics") if isinstance(payload.get("metrics"), dict) else {}
+    prompt_tokens = _int_metric(metrics, "prompt_tokens")
+    answer_tokens = _int_metric(metrics, "answer_tokens")
+    message: dict[str, Any] = {"role": "assistant", "content": text}
+    reasoning = payload.get("reasoning")
+    if isinstance(reasoning, str) and reasoning:
+        message["reasoning_content"] = reasoning
+    return {
+        "id": f"chatcmpl-runner-{uuid.uuid4().hex}",
+        "object": "chat.completion",
+        "created": int(time.time()),
+        "model": entry.id,
+        "choices": [
+            {
+                "index": 0,
+                "message": message,
+                "finish_reason": "stop",
+            }
+        ],
+        "usage": {
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": answer_tokens,
+            "total_tokens": prompt_tokens + answer_tokens,
+        },
+        "metadata": {
+            "runtime": "native-runner",
+            "engine": entry.engine,
+            "backend": payload.get("backend"),
+            "metrics": metrics,
+        },
+    }
+
+
+def _native_chat_payload_to_response(entry: models.ModelEntry, payload: dict[str, Any]) -> dict[str, Any]:
+    text = _chat_completion_text(payload)
+    chat_id = payload.get("id") if isinstance(payload.get("id"), str) else uuid.uuid4().hex
+    created = payload.get("created") if isinstance(payload.get("created"), int) else int(time.time())
+    return {
+        "id": f"resp_{chat_id}",
+        "object": "response",
+        "created_at": created,
+        "model": entry.id,
+        "output": [
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": text}],
+            }
+        ],
+        "output_text": text,
+        "metadata": {
+            "source_object": payload.get("object"),
+            "runtime": "native-runner",
+            "engine": entry.engine,
+        },
+    }
+
+
+def _int_metric(metrics: dict[str, Any], key: str) -> int:
+    value = metrics.get(key)
+    return int(value) if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else 0
 
 
 def _artifact_response_to_responses(

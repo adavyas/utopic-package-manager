@@ -138,7 +138,7 @@ def test_gateway_cosmos_returns_oom_preflight_before_starting_bridge(monkeypatch
     assert "requires at least 96 GiB GPU memory" in payload["error"]["message"]
 
 
-def test_gateway_image_generation_reports_packaged_bridge_dependency_gap():
+def test_gateway_image_generation_reports_native_runner_not_ready_by_default():
     request = {
         "model": "qwen-image",
         "prompt": "a precise product photo of a glass teapot",
@@ -149,19 +149,16 @@ def test_gateway_image_generation_reports_packaged_bridge_dependency_gap():
         gateway.handle_openai_request("POST", "/v1/images/generations", request)
     )
 
-    assert status in {501, 502}
-    assert payload["error"]["code"] in {
-        "bridge_dependency_missing",
-        "bridge_adapter_api_mismatch",
-    }
+    assert status == 503
+    assert payload["error"]["code"] == "unsupported_model"
     assert payload["error"]["model"] == "qwen-image"
     assert payload["error"]["modality"] == "image"
     assert payload["error"]["engine"] == "diffusers"
-    assert payload["error"]["install_hint"] == 'pip install "utopic[image]"'
-    assert "diffusers bridge" in payload["error"]["message"]
+    assert payload["error"]["native_status"] == "planned"
+    assert "native C++ runner" in payload["error"]["message"]
 
 
-def test_gateway_uses_packaged_bridge_command_by_default_for_bridge_models(monkeypatch):
+def test_gateway_does_not_use_packaged_bridge_command_by_default_for_bridge_models(monkeypatch):
     monkeypatch.delenv("UTOPIC_BRIDGE_DIFFUSERS_COMMAND", raising=False)
     monkeypatch.delenv("UTOPIC_BRIDGE_COMMAND", raising=False)
 
@@ -173,15 +170,12 @@ def test_gateway_uses_packaged_bridge_command_by_default_for_bridge_models(monke
         )
     )
 
-    assert status in {501, 502}
-    assert payload["error"]["code"] in {
-        "bridge_dependency_missing",
-        "bridge_adapter_api_mismatch",
-    }
+    assert status == 503
+    assert payload["error"]["code"] == "unsupported_model"
     assert payload["error"]["engine"] == "diffusers"
     assert payload["error"]["model"] == "qwen-image"
     assert payload["error"]["modality"] == "image"
-    assert payload["error"]["install_hint"] == 'pip install "utopic[image]"'
+    assert payload["error"]["native_status"] == "planned"
 
 
 def test_gateway_exposes_openai_routes_for_each_bridge_modality():
@@ -191,60 +185,47 @@ def test_gateway_exposes_openai_routes_for_each_bridge_modality():
             {"model": "qwen-image", "prompt": "a teapot"},
             "image",
             "diffusers",
-            'pip install "utopic[image]"',
         ),
         (
             "/v1/audio/speech",
             {"model": "kokoro-82m", "input": "hello"},
             "tts",
             "kokoro",
-            (
-                'pip install "utopic[tts]" && python -m pip install '
-                "https://github.com/explosion/spacy-models/releases/download/"
-                "en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl"
-            ),
         ),
         (
             "/v1/audio/speech",
             {"model": "chatterbox", "input": "hello"},
             "tts",
             "chatterbox",
-            'pip install "utopic[chatterbox]"',
         ),
         (
             "/v1/audio/generations",
             {"model": "ace-step-3.5b", "prompt": "ambient piano"},
             "music",
             "ace-step",
-            'pip install "utopic[music]" && pip install git+https://github.com/ace-step/ACE-Step.git',
         ),
         (
             "/v1/videos/generations",
             {"model": "wan2.1-t2v-1.3b", "prompt": "waves"},
             "video",
             "wan",
-            'pip install "utopic[video]"',
         ),
         (
             "/v1/responses",
             {"model": "flux-1-schnell", "prompt": "a red cube"},
             "image",
             "diffusers",
-            'pip install "utopic[image]"',
         ),
     ]
 
-    for endpoint, request, modality, engine, install_hint in cases:
+    for endpoint, request, modality, engine in cases:
         status, payload = decode(gateway.handle_openai_request("POST", endpoint, request))
 
-        assert status in {501, 502}
-        assert payload["error"]["code"] in {
-            "bridge_dependency_missing",
-            "bridge_adapter_api_mismatch",
-        }
+        assert status == 503
+        assert payload["error"]["code"] == "unsupported_model"
         assert payload["error"]["modality"] == modality
         assert payload["error"]["engine"] == engine
-        assert payload["error"]["install_hint"] == install_hint
+        assert payload["error"]["native_status"] == "planned"
 
 
 def test_every_bridge_catalog_model_has_openai_and_mcp_runtime_surface():
@@ -275,11 +256,11 @@ def test_every_bridge_catalog_model_has_openai_and_mcp_runtime_surface():
         request = {"model": entry.id, **request_by_modality[entry.modality]}
         status, payload = decode(gateway.handle_openai_request("POST", modality_endpoint, request))
 
-        assert status in {501, 502, 507}, entry.id
+        assert status in {503, 507}, entry.id
         assert payload["error"]["model"] == entry.id
         assert payload["error"]["modality"] == entry.modality
         assert payload["error"]["engine"] == entry.engine
-        assert payload["error"]["code"].startswith("bridge_")
+        assert payload["error"]["code"] in {"unsupported_model", "bridge_model_oom_preflight"}
 
         responses_request = {
             "model": entry.id,
@@ -289,7 +270,7 @@ def test_every_bridge_catalog_model_has_openai_and_mcp_runtime_surface():
         }
         status, payload = decode(gateway.handle_openai_request("POST", "/v1/responses", responses_request))
 
-        assert status in {501, 502, 507}, entry.id
+        assert status in {503, 507}, entry.id
         assert payload["error"]["model"] == entry.id
         assert payload["error"]["modality"] == entry.modality
         assert payload["error"]["engine"] == entry.engine
@@ -1076,8 +1057,9 @@ def test_gateway_mcp_lists_and_dispatches_multimodal_tools():
     assert status == 200
     assert payload["result"]["isError"] is True
     assert payload["result"]["content"][0]["type"] == "text"
-    bridge_error = json.loads(payload["result"]["content"][0]["text"])["error"]["code"]
-    assert bridge_error in {"bridge_dependency_missing", "bridge_adapter_api_mismatch"}
+    error = json.loads(payload["result"]["content"][0]["text"])["error"]
+    assert error["code"] == "unsupported_model"
+    assert error["native_status"] == "planned"
 
 
 def test_gateway_mcp_tool_definitions_are_clear_for_agents():

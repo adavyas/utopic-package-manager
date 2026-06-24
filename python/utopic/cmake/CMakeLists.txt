@@ -67,6 +67,20 @@ endif()
 set_target_properties(utopic PROPERTIES
   BUILD_RPATH "${LLAMA_BIN}" INSTALL_RPATH "${LLAMA_BIN}")
 
+# JSON runner: one-shot native execution contract used by the Python MCP/CLI
+add_executable(utopic_runner
+  "${UTOPIC_NATIVE_SOURCE_DIR}/runner.cpp"
+  "${UTOPIC_NATIVE_SOURCE_DIR}/diffusion_driver.cpp")
+target_include_directories(utopic_runner PRIVATE ${UTOPIC_INCLUDES})
+target_compile_definitions(utopic_runner PRIVATE ${UTOPIC_LLAMA_DEFINES})
+target_link_directories(utopic_runner PRIVATE "${LLAMA_BIN}")
+target_link_libraries(utopic_runner PRIVATE llama ggml ggml-base)
+if(NOT UTOPIC_HAS_BLOCK_DECODE)
+  target_compile_definitions(utopic_runner PRIVATE DG_NO_BLOCK_DECODE)
+endif()
+set_target_properties(utopic_runner PROPERTIES
+  BUILD_RPATH "${LLAMA_BIN}" INSTALL_RPATH "${LLAMA_BIN}")
+
 # Server: resident model, OpenAI-compatible /v1/chat/completions
 # cpp-httplib is split-mode (.h + .cpp); compile its impl TU in (same as llama.cpp's server lib).
 add_executable(utopic_server

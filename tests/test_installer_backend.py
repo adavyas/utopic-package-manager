@@ -286,6 +286,20 @@ def test_install_binaries_ad_hoc_signs_macos_executables(monkeypatch, tmp_path):
     ]
 
 
+def test_runner_binary_is_owned_by_package_build():
+    cmake = (
+        Path(__file__).resolve().parents[1]
+        / "python"
+        / "utopic"
+        / "cmake"
+        / "CMakeLists.txt"
+    ).read_text(encoding="utf-8")
+
+    assert "utopic_runner" in installer.BIN_NAMES
+    assert "add_executable(utopic_runner" in cmake
+    assert "${UTOPIC_NATIVE_SOURCE_DIR}/runner.cpp" in cmake
+
+
 def test_managed_source_checkout_recovers_non_git_cache(monkeypatch, tmp_path):
     dest = tmp_path / "src" / "llama.cpp"
     dest.mkdir(parents=True)

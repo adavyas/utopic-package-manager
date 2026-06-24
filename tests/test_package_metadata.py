@@ -92,6 +92,7 @@ def test_vendored_core_layout_exists():
     assert (REPO_ROOT / "python" / "utopic" / "cmake" / "CMakeLists.txt").exists()
     assert not (REPO_ROOT / "python" / "utopic" / "core" / "native" / "CMakeLists.txt").exists()
     assert (REPO_ROOT / "python" / "utopic" / "core" / "native" / "main.cpp").exists()
+    assert (REPO_ROOT / "python" / "utopic" / "core" / "native" / "runner.cpp").exists()
     assert (
         REPO_ROOT
         / "python"
