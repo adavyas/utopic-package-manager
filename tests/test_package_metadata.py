@@ -21,6 +21,8 @@ CORE_CATALOG_PATH = (
 REQUIRED_NATIVE_RUNTIME_FILES = (
     "main.cpp",
     "runner.cpp",
+    "runner_tasks.cpp",
+    "runner_tasks.h",
     "server.cpp",
     "mcp_server.cpp",
     "acp_server.cpp",
@@ -179,12 +181,13 @@ def test_package_manager_no_longer_owns_typescript_chat_source():
 
 
 def test_native_runner_errors_echo_oom_policy_from_contract():
-    runner = (REPO_ROOT / "python" / "utopic" / "core" / "native" / "runner.cpp").read_text(
-        encoding="utf-8"
-    )
+    native_dir = REPO_ROOT / "python" / "utopic" / "core" / "native"
+    runner = (native_dir / "runner.cpp").read_text(encoding="utf-8")
+    runner_tasks = (native_dir / "runner_tasks.cpp").read_text(encoding="utf-8")
 
-    assert '{"oom_policy", opts.value("oom_policy", json::object())}' in runner
-    assert '{"oom_policy", req.options.value("oom_policy", json::object())}' in runner
+    assert '{"oom_policy", opts.value("oom_policy", json::object())}' in runner_tasks
+    assert '{"oom_policy", req.options.value("oom_policy", json::object())}' in runner_tasks
+    assert "run_planned_native_task(req)" in runner
 
 
 def test_vendor_script_sources_chat_artifact_from_typescript_build_output():

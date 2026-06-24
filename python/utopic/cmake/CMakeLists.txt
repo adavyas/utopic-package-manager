@@ -84,6 +84,7 @@ set_utopic_binary_rpath(utopic)
 function(add_utopic_json_runner target_name)
   add_executable(${target_name}
     "${UTOPIC_NATIVE_SOURCE_DIR}/runner.cpp"
+    "${UTOPIC_NATIVE_SOURCE_DIR}/runner_tasks.cpp"
     "${UTOPIC_NATIVE_SOURCE_DIR}/diffusion_driver.cpp")
   target_include_directories(${target_name} PRIVATE ${UTOPIC_INCLUDES})
   target_compile_definitions(${target_name} PRIVATE ${UTOPIC_LLAMA_DEFINES})

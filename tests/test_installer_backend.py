@@ -368,6 +368,14 @@ def test_runner_binary_is_owned_by_package_build():
         / "native"
         / "runner.cpp"
     ).read_text(encoding="utf-8")
+    runner_tasks = (
+        Path(__file__).resolve().parents[1]
+        / "python"
+        / "utopic"
+        / "core"
+        / "native"
+        / "runner_tasks.cpp"
+    ).read_text(encoding="utf-8")
     cmake = (
         Path(__file__).resolve().parents[1]
         / "python"
@@ -379,7 +387,9 @@ def test_runner_binary_is_owned_by_package_build():
     assert "utopic_runner" in installer.BIN_NAMES
     assert "add_utopic_json_runner(utopic_runner)" in cmake
     assert "${UTOPIC_NATIVE_SOURCE_DIR}/runner.cpp" in cmake
-    assert "UTOPIC_BACKEND_NAME" in native
+    assert "${UTOPIC_NATIVE_SOURCE_DIR}/runner_tasks.cpp" in cmake
+    assert "UTOPIC_BACKEND_NAME" in runner_tasks
+    assert '#include "runner_tasks.h"' in native
 
 
 def test_modality_runner_binaries_are_not_package_build_outputs():
@@ -393,6 +403,7 @@ def test_modality_runner_binaries_are_not_package_build_outputs():
 
     assert "function(add_utopic_json_runner target_name)" in cmake
     assert "${UTOPIC_NATIVE_SOURCE_DIR}/runner.cpp" in cmake
+    assert "${UTOPIC_NATIVE_SOURCE_DIR}/runner_tasks.cpp" in cmake
     for name in ("image_runner", "tts_runner", "music_runner", "video_runner", "misc_runner"):
         assert name not in installer.BIN_NAMES
         assert f"add_utopic_json_runner({name})" not in cmake

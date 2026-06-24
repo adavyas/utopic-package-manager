@@ -200,8 +200,8 @@ def test_core_runtime_does_not_own_package_manager_cmake():
 
 def test_native_runner_reports_package_selected_backend_when_defined():
     repo_root = Path(__file__).resolve().parents[1]
-    runner_source = (
-        repo_root / "python" / "utopic" / "core" / "native" / "runner.cpp"
+    runner_tasks_source = (
+        repo_root / "python" / "utopic" / "core" / "native" / "runner_tasks.cpp"
     ).read_text(encoding="utf-8")
 
-    assert "UTOPIC_BACKEND_NAME" in runner_source
+    assert "UTOPIC_BACKEND_NAME" in runner_tasks_source
