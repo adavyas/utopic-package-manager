@@ -567,8 +567,8 @@ def test_responses_endpoint_for_native_text_accepts_prompt_fallback(monkeypatch)
     assert payload["output_text"] == "hello"
 
 
-def test_packaged_bridge_reports_missing_dependencies_for_known_engine(capsys, monkeypatch):
-    monkeypatch.setenv("UTOPIC_EXPERIMENTAL_BRIDGE", "1")
+def test_packaged_bridge_reports_retired_for_known_engine(capsys, monkeypatch):
+    monkeypatch.delenv("UTOPIC_EXPERIMENTAL_BRIDGE", raising=False)
     request = {
         "schema_version": "utopic-bridge/v1",
         "model": "qwen-image",
@@ -583,12 +583,10 @@ def test_packaged_bridge_reports_missing_dependencies_for_known_engine(capsys, m
     captured = capsys.readouterr()
     payload = json.loads(captured.out)
 
-    assert payload["error"]["code"] in {
-        "bridge_dependency_missing",
-        "bridge_adapter_api_mismatch",
-    }
+    assert payload["error"]["code"] == "native_runner_required"
     assert payload["error"]["engine"] == "diffusers"
-    assert "pip install" in payload["error"]["install_hint"]
+    assert payload["error"]["install_hint"] == "utopic setup"
+    assert "native runner" in payload["error"]["message"]
     assert payload["metadata"]["schema_version"] == "utopic-bridge/v1"
 
 

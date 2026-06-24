@@ -33,8 +33,9 @@ For a reproducible install of this release:
 uv tool install utopic==0.1.8
 ```
 
-Utopic currently targets Python 3.10 through 3.12. That range matches the
-native launcher and the optional image, speech, music, video, and misc bridge engines.
+Utopic currently targets Python 3.10 through 3.12. Python is the debuggable
+control plane for setup, launchers, catalog checks, and diagnostics; production
+generation goes through the packaged native runtime.
 If your system `python3` is newer, let uv manage the tool Python or create a
 3.12 virtual environment for project-local installs.
 
@@ -282,58 +283,19 @@ prints the same readiness shape for one selected model. For native GGUF models
 it checks the local file and expected byte size when known. For planned non-text
 models it reports `native_runner_not_ready` until native support lands behind
 `utopic-runner`, plus the
-declared endpoints, model metadata, and hardware requirements. Optional Python
-bridge dependency checks are available only when `UTOPIC_EXPERIMENTAL_BRIDGE=1`
-or by running `utopic-bridge <engine> --check` directly.
+declared endpoints, model metadata, and hardware requirements.
 
 `utopic doctor` prints package version, cache/bin paths, native runtime cache
 state, and Node.js status without probing package-manager build internals.
 If native binaries are missing or stale, run `utopic setup`; that command owns
-backend detection, CMake/git checks, and native builds. Experimental Python
-bridge adapter checks are opt-in through `UTOPIC_EXPERIMENTAL_BRIDGE=1` or
-`utopic-bridge <engine> --check`.
+backend detection, CMake/git checks, and native builds.
 
-Install bridge dependencies by modality only for explicit experimental adapter runs:
-
-```sh
-uv pip install --python ~/.venvs/utopic/bin/python "utopic[image]"   # Qwen-Image and FLUX through Diffusers
-uv pip install --python ~/.venvs/utopic/bin/python "utopic[tts]"     # Kokoro and Dia
-uv pip install --python ~/.venvs/utopic/bin/python "utopic[chatterbox]" # Chatterbox, isolated because it pins Diffusers
-uv pip install --python ~/.venvs/utopic/bin/python "utopic[music]"   # Shared music audio stack, including TorchCodec
-uv pip install --python ~/.venvs/utopic/bin/python "utopic[video]"   # Wan and LTX video through Diffusers
-uv pip install --python ~/.venvs/utopic/bin/python "utopic[bridge]"  # Image, Kokoro/Dia, music, and video bridge groups; misc artifact bridge has no extra dependencies
-```
-
-Kokoro also needs the spaCy English model in the same Python environment:
-
-```sh
-~/.venvs/utopic/bin/python -m pip install https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl
-```
-
-Inside an already activated Python 3.10-3.12 environment, the same commands can
-be shorter:
-
-```sh
-uv pip install "utopic[image]"
-uv pip install "utopic[tts]"
-uv pip install "utopic[chatterbox]"
-uv pip install "utopic[music]"
-uv pip install "utopic[video]"
-uv pip install "utopic[bridge]"
-```
-
-Some research engines still require their upstream source package in addition
-to the PyPI-safe extra. `utopic models check <alias>` and `utopic-bridge
-<engine> --check` print the exact follow-up command when that applies.
-Chatterbox is a separate extra because the current upstream package pins an
-older Diffusers version that conflicts with the image and video bridge engines.
-ACE-Step currently works best in a Python 3.10 bridge environment, then:
-
-```sh
-uv pip install "utopic[music]"
-uv pip install git+https://github.com/ace-step/ACE-Step.git
-utopic-bridge ace-step --check
-```
+Python bridge adapters have been retired from the package-manager production
+surface. The `utopic-bridge` command remains as a compatibility shim for older
+scripts, but `utopic-bridge <engine> --check` reports the adapter as retired and
+regular invocations return structured `native_runner_required` JSON that points
+callers back to `utopic setup`. A normal Utopic install no longer advertises
+Diffusers, Torch, TTS, music, or video bridge extras.
 
 Call the same catalog and gateway contract for planned artifact modalities:
 
@@ -351,8 +313,8 @@ utopic generate misc zuna --artifact /path/to/input.bin -o output.bin
 `--quality fast` selects the smaller `wan2.1-t2v-1.3b` model. The `speech`
 subcommand also accepts the `tts` alias. Until native implementations land
 behind `utopic-runner` for these non-text modalities, the default response is a
-structured native-readiness error. Use `--param KEY=JSON` only for explicit experimental
-bridge runs enabled with `UTOPIC_EXPERIMENTAL_BRIDGE=1`.
+structured native-readiness error. Use `--param KEY=JSON` to pass request
+options through the gateway contract.
 
 Start the local runtime and print the live OpenAI-compatible and MCP URLs:
 
@@ -427,21 +389,20 @@ The `/mcp` route speaks JSON-RPC over HTTP for MCP `initialize`, `ping`, `tools/
 generation, speech, music, video, misc artifacts, and model cache operations, all routed through
 the same runtime boundary as the OpenAI-compatible endpoints.
 
-Experimental bridge engines use the same artifact/progress shape that native
-C++ engines will replace. A bridge command receives one JSON request on stdin
-and returns one JSON response on stdout. The request includes the endpoint,
-model metadata, normalized input, model cache path, output directory, progress
-event path, and hardware/output metadata:
+Native runner artifact engines use the same artifact/progress shape for planned
+image, speech, music, video, and misc models. A runner request includes the
+endpoint, model metadata, normalized input, model cache path, output directory,
+progress event path, and hardware/output metadata:
 
 ```json
 {
-  "schema_version": "utopic-bridge/v1",
+  "schema_version": "utopic-runner/v1",
   "run_id": "run_...",
   "endpoint": "/v1/images/generations",
   "model": "qwen-image",
   "repo": "Qwen/Qwen-Image",
   "modality": "image",
-  "engine": "diffusers",
+  "engine": "native-image",
   "input": { "prompt": "..." },
   "parameters": { "size": "1024x1024" },
   "model_cache_path": "/Users/me/.cache/utopic/models/qwen-image",
@@ -457,7 +418,7 @@ Progress is newline-delimited JSON written to `progress_path`:
 {"event":"completed","progress":1.0,"message":"done"}
 ```
 
-The bridge response returns artifacts:
+The native runner response returns artifacts:
 
 ```json
 {
@@ -480,42 +441,18 @@ translated to native chat-completions input and wrapped back into a
 Responses-style object. Image, TTS, music, video, and misc requests translate
 Responses `input` text into the planned modality request shape. By default they
 return native-readiness errors until native support lands behind `utopic-runner`;
-explicit experimental
-bridge runs return a Responses-style artifact message, while the
+artifact-producing runs return a Responses-style artifact message, while the
 modality-specific endpoints return the richer `utopic.artifact.response` object.
 
-The gateway does not run Python bridge adapters by default. Planned image, TTS,
-music, video, and misc models route through the native runner contract and
-return native runner readiness errors until their native implementations land behind
-`utopic-runner`. This keeps
-production generation local-native by default and prevents a normal install from
-silently falling back to Torch or Diffusers.
+The gateway routes planned image, TTS, music, video, and misc models through the
+native runner contract and returns native runner readiness errors until their
+native implementations land behind `utopic-runner`. This keeps production
+generation local-native and prevents a normal install from silently falling back
+to Torch or Diffusers.
 
-Bridge adapters are an explicit experimental escape hatch. To run one, set
-`UTOPIC_EXPERIMENTAL_BRIDGE=1` and provide either a generic bridge command or an
-engine-specific command that points at the adapter you want to test:
-
-```sh
-export UTOPIC_EXPERIMENTAL_BRIDGE=1
-export UTOPIC_BRIDGE_DIFFUSERS_COMMAND="utopic-bridge diffusers"
-export UTOPIC_BRIDGE_KOKORO_COMMAND="utopic-bridge kokoro"
-export UTOPIC_BRIDGE_CHATTERBOX_COMMAND="utopic-bridge chatterbox"
-export UTOPIC_BRIDGE_DIA_COMMAND="utopic-bridge dia"
-export UTOPIC_BRIDGE_ACE_STEP_COMMAND="utopic-bridge ace-step"
-export UTOPIC_BRIDGE_WAN_COMMAND="utopic-bridge wan"
-export UTOPIC_BRIDGE_LTX_COMMAND="utopic-bridge ltx"
-export UTOPIC_BRIDGE_ARTIFACT_COMMAND="utopic-bridge artifact"
-```
-
-With the experimental gate disabled, `GET /v1/models` exposes native readiness
-metadata only. With `UTOPIC_EXPERIMENTAL_BRIDGE=1`, it also exposes bridge
-activation metadata so clients and MCP hosts can discover the exact
-`utopic-bridge <engine>` command, environment variable, install hint, input key,
-output types, and progress event names without first attempting a generation
-request.
-
-Check an optional bridge engine before downloading or running heavyweight
-models:
+The retired `utopic-bridge` command is intentionally small. It preserves old
+engine names for compatibility and returns JSON diagnostics instead of importing
+or running Python model stacks:
 
 ```sh
 utopic-bridge diffusers --check
@@ -524,11 +461,9 @@ utopic-bridge wan --check
 utopic-bridge artifact --check
 ```
 
-The check prints JSON with `ready`, `status`, `missing`, `install_hint`, and any
-API mismatch message from the installed Python stack.
-If the message says `torch/torchvision versions are incompatible`, install a
-matching `torch` and `torchvision` pair in that same Python environment before
-retrying Diffusers, Wan, LTX, or Dia bridge generation.
+The check prints JSON with `ready: false`, `status: "retired"`, and a message
+that points callers back to `utopic setup`, the local native runner, the gateway,
+or MCP surfaces.
 
 Current release smoke coverage:
 
@@ -539,34 +474,7 @@ Current release smoke coverage:
 | Hardware surface | Apple Silicon, GB10/DGX Spark, RTX 4090 CUDA, and 4x A100 CUDA smoke tests for installed wheel, catalog, MCP tools, native-readiness diagnostics, and artifact contract |
 | Native text generation | DiffusionGemma Q4_K_M native C++ smoke tests on GB10/DGX Spark, 6x RTX 4090 CUDA, and 4x A100 CUDA; Q5_K_M, Q6_K, and Q8_0 native C++ smoke tests on 4x A100 CUDA, using the package-managed llama.cpp build |
 | Planned artifact modalities | Qwen-Image, FLUX, Krea, Cosmos3, Kokoro, Chatterbox, Dia, ACE-Step, Wan, LTX, and ZUNA expose stable routes, MCP tools, hardware preflight metadata, and native-readiness errors until native implementations land behind `utopic-runner` |
-| Experimental bridge adapters | Optional `utopic-bridge` commands expose dependency diagnostics and local Python adapter entrypoints when `UTOPIC_EXPERIMENTAL_BRIDGE=1`; they are compatibility testbeds, not the default production runtime |
-
-The packaged `utopic-bridge` command provides stable adapter entrypoints and
-dependency diagnostics for `diffusers`, `cosmos`, `kokoro`, `chatterbox`, `dia`,
-`ace-step`, `wan`, `ltx`, and `artifact`. With the experimental gate enabled,
-the adapters translate the shared Utopic request into their local Python
-engines:
-
-- `diffusers`: Qwen-Image, FLUX, and Krea image generation.
-- `cosmos`: Cosmos3 Super diagnostics and external bridge-command handoff.
-- `kokoro`: Kokoro speech synthesis.
-- `chatterbox`: Chatterbox speech synthesis.
-- `dia`: Dia speech synthesis through the Transformers implementation.
-- `ace-step`: ACE-Step music generation through the installed ACE-Step Python
-  package.
-- `wan`: Wan text-to-video generation through Diffusers.
-- `ltx`: LTX-Video generation through Diffusers.
-- `artifact`: generic misc file-in/file-out artifact bridge, including the ZUNA catalog entry.
-
-If an optional engine package is missing during an explicit experimental bridge
-run, the gateway returns a structured `bridge_dependency_missing` response with
-an install hint. If a fast-moving upstream package changes its Python API, the
-gateway returns `bridge_adapter_api_mismatch` instead of crashing. Bridge
-failures include `run_id`, `progress_url`, and any progress events already
-emitted by the adapter, so OpenAI clients and MCP hosts can still show useful
-diagnostics for long image, speech, music, video, or misc jobs. These bridge
-commands can be replaced by future native C++ engines without changing the
-OpenAI endpoint, MCP tool, cache, progress, or artifact contract.
+| Retired bridge shim | `utopic-bridge --help` and `utopic-bridge <engine> --check` stay available for compatibility, but generation requests return structured `native_runner_required` JSON |
 
 The MCP endpoint exposes the same runtime through tools:
 
@@ -582,17 +490,6 @@ The MCP endpoint exposes the same runtime through tools:
 
 `utopic_models_pull` accepts either `{ "model": "qwen-image" }` for one
 catalog entry or `{ "all": true }` to prepare the whole catalog.
-
-Diffusers bridge requests also accept `"disable_safety_checker": true` in
-`parameters` for nonstandard local pipelines whose built-in safety checker is
-incompatible with the generated image dimensions. It is opt-in and is passed only
-to the local bridge process.
-
-For experimental bridge runs, `repo` is the upstream model source and
-`model_cache_path` is the Utopic-managed local cache directory. If the cache
-directory already contains real model files, adapters load from it directly; if
-it only contains Utopic metadata, adapters load from `repo` while using
-`model_cache_path` as the cache location.
 
 Run a one-shot prompt:
 

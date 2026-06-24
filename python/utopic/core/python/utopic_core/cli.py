@@ -1038,25 +1038,7 @@ def _first_message_line(message: str) -> str:
 
 
 def _bridge_doctor_lines() -> list[str]:
-    if not bridge._experimental_bridge_enabled():
-        return [
-            "Experimental bridges: disabled "
-            "(set UTOPIC_EXPERIMENTAL_BRIDGE=1 to inspect local Python adapters)."
-        ]
-    lines = ["Bridge engines:"]
-    for engine in sorted(bridge.ADAPTERS):
-        adapter = bridge.ADAPTERS[engine]
-        try:
-            payload = bridge._check_adapter(adapter)
-        except Exception as exc:
-            payload = {
-                "engine": engine,
-                "status": "check_failed",
-                "ready": False,
-                "message": str(exc) or exc.__class__.__name__,
-            }
-        lines.append(_bridge_doctor_line(payload))
-    return lines
+    return ["Python bridges: removed; production generation uses local native runners."]
 
 
 def _doctor(argv: Sequence[str]) -> int:

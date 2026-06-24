@@ -1232,7 +1232,7 @@ def test_cli_doctor_reports_environment_without_running_setup(monkeypatch, tmp_p
     monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/node" if name == "node" else None)
     monkeypatch.setattr(cli.subprocess, "check_output", lambda command, text, stderr: "v20.0.0\n")
     monkeypatch.delenv("UTOPIC_EXPERIMENTAL_BRIDGE", raising=False)
-    monkeypatch.setattr(cli.bridge, "_check_adapter", lambda _adapter: pytest.fail("bridge checks are opt-in"))
+    monkeypatch.setattr(cli.bridge, "_check_adapter", lambda _adapter: pytest.fail("doctor should not probe retired bridges"))
 
     assert cli.main(["doctor"]) == 0
 
@@ -1247,7 +1247,7 @@ def test_cli_doctor_reports_environment_without_running_setup(monkeypatch, tmp_p
     assert "cmake:" not in captured.out
     assert "git:" not in captured.out
     assert "Node.js: /usr/bin/node (v20.0.0)" in captured.out
-    assert "Experimental bridges: disabled" in captured.out
+    assert "Python bridges: removed" in captured.out
     assert "Bridge engines:" not in captured.out
     assert captured.err == ""
     assert cache_checks == [cli.installer.BIN_NAMES]
@@ -1270,20 +1270,13 @@ def test_cli_doctor_reports_missing_native_runtime_without_build_tool_checks(mon
     assert "Node.js: missing (Python fallback chat remains available)" in captured.out
 
 
-def test_cli_doctor_can_probe_experimental_bridges_when_enabled(monkeypatch):
+def test_cli_doctor_does_not_probe_retired_bridges_when_enabled(monkeypatch):
     monkeypatch.setenv("UTOPIC_EXPERIMENTAL_BRIDGE", "1")
-    checked = []
-
-    def fake_check(adapter):
-        checked.append(adapter.engine)
-        return {"engine": adapter.engine, "status": "ready", "ready": True}
-
-    monkeypatch.setattr(cli.bridge, "_check_adapter", fake_check)
+    monkeypatch.setattr(cli.bridge, "_check_adapter", lambda _adapter: pytest.fail("doctor should not probe retired bridges"))
 
     lines = cli._bridge_doctor_lines()
 
-    assert lines[0] == "Bridge engines:"
-    assert checked
+    assert lines == ["Python bridges: removed; production generation uses local native runners."]
 
 
 def test_cli_doctor_bridge_line_collapses_multiline_api_errors():

@@ -158,24 +158,16 @@ def test_package_data_excludes_bytecode_cache_artifacts():
     assert "**/*.pyd" in pyproject_excludes
 
 
-def test_chatterbox_extra_is_declared_as_conflicting_with_modern_bridge_extras():
+def test_pyproject_does_not_advertise_heavy_bridge_extras():
     if sys.version_info >= (3, 11):
         import tomllib
     else:
         import tomli as tomllib
 
     pyproject = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-    conflicts = pyproject["tool"]["uv"]["conflicts"]
-    normalized = {
-        tuple(sorted(item["extra"] for item in conflict))
-        for conflict in conflicts
-    }
 
-    assert ("all", "chatterbox") in normalized
-    assert ("bridge", "chatterbox") in normalized
-    assert ("chatterbox", "image") in normalized
-    assert ("chatterbox", "tts") in normalized
-    assert ("chatterbox", "video") in normalized
+    assert "optional-dependencies" not in pyproject["project"]
+    assert "uv" not in pyproject
 
 
 def test_package_manager_no_longer_owns_legacy_native_source():
@@ -283,39 +275,22 @@ def test_github_workflows_use_supported_python_versions():
         assert 'python-version: "3.12"' in workflow
 
 
-def test_bridge_optional_dependency_extras_are_declared():
+def test_bridge_optional_dependency_extras_are_retired():
     if sys.version_info >= (3, 11):
         import tomllib
     else:
         import tomli as tomllib
 
-    pyproject = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    pyproject_source = (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    pyproject = tomllib.loads(pyproject_source)
     setup_source = (REPO_ROOT / "setup.py").read_text(encoding="utf-8")
-    pyproject_extras = pyproject["project"]["optional-dependencies"]
 
-    expected_extras = {"image", "tts", "chatterbox", "music", "video", "bridge", "all"}
-
-    assert expected_extras <= set(pyproject_extras)
+    assert "optional-dependencies" not in pyproject["project"]
     assert "extras_require" not in setup_source
-    assert "diffusers>=0.35.0" in pyproject_extras["image"]
-    assert "torchvision>=0.21.0" in pyproject_extras["image"]
-    assert "kokoro>=0.9.0" in pyproject_extras["tts"]
-    assert "torchvision>=0.21.0" in pyproject_extras["tts"]
-    assert "chatterbox-tts>=0.1.0" not in pyproject_extras["tts"]
-    assert "chatterbox-tts>=0.1.0" in pyproject_extras["chatterbox"]
-    assert "setuptools<81" in pyproject_extras["chatterbox"]
-    assert "chatterbox-tts>=0.1.0" not in pyproject_extras["bridge"]
-    assert "soundfile>=0.12.0" in pyproject_extras["music"]
-    assert "torchcodec>=0.8.0" in pyproject_extras["music"]
-    assert "imageio>=2.34.0" in pyproject_extras["video"]
-    assert "torchvision>=0.21.0" in pyproject_extras["video"]
-    assert sorted(set(pyproject_extras["image"] + pyproject_extras["tts"] + pyproject_extras["music"] + pyproject_extras["video"])) == pyproject_extras["bridge"]
-    assert pyproject_extras["bridge"] == pyproject_extras["all"]
-    assert all(
-        "git+" not in dependency
-        for dependencies in pyproject_extras.values()
-        for dependency in dependencies
-    )
+    assert "diffusers" not in pyproject_source
+    assert "torch" not in pyproject_source
+    assert "chatterbox-tts" not in pyproject_source
+    assert "kokoro" not in pyproject_source
 
 
 def test_python_module_entrypoint_is_shipped():
@@ -336,9 +311,12 @@ def test_readme_describes_bridges_as_explicit_experimental_only():
     readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
 
     assert "By default, the gateway runs the packaged bridge" not in readme
-    assert "UTOPIC_EXPERIMENTAL_BRIDGE=1" in readme
     assert "native runner readiness" in readme
-    assert "does not run Python bridge adapters by default" in readme
+    assert "does not run Python bridge adapters by default" not in readme
+    assert "Python bridge adapters have been retired" in readme
+    assert "utopic[image]" not in readme
+    assert "utopic[bridge]" not in readme
+    assert "UTOPIC_EXPERIMENTAL_BRIDGE=1" not in readme
 
 
 def test_chat_check_script_rejects_stale_bundled_javascript():
@@ -567,37 +545,38 @@ def test_readme_documents_supported_models_without_prohibited_mentions():
     assert "qwen-image" in readme
     assert "wan2.1-t2v-14b" in readme
     assert "utopic gateway --port 8911" in readme
-    assert "utopic-bridge/v1" in readme
-    assert "utopic-bridge diffusers" in readme
+    assert "utopic-runner/v1" in readme
+    assert "utopic-bridge diffusers --check" in readme
     assert "MCP `initialize`, `ping`, `tools/list`, and `tools/call`" in readme
     assert '"repo": "Qwen/Qwen-Image"' in readme
-    assert "`repo` is the upstream model source" in readme
-    assert "UTOPIC_BRIDGE_DIFFUSERS_COMMAND" in readme
-    assert "does not run Python bridge adapters by default" in readme
+    assert "`repo` is the upstream model source" not in readme
+    assert "UTOPIC_BRIDGE_DIFFUSERS_COMMAND" not in readme
+    assert "Python bridge adapters have been retired" in readme
     assert "native runner readiness errors" in readme
-    assert "until their native implementations land behind" in readme
-    assert "UTOPIC_EXPERIMENTAL_BRIDGE=1" in readme
+    assert "until native implementations land behind" in readme
+    assert "UTOPIC_EXPERIMENTAL_BRIDGE=1" not in readme
     assert "utopic models check qwen-image" in readme
     assert "utopic models check --all" in readme
     assert "reports `native_runner_not_ready` until native support lands behind" in readme
-    assert "bridge dependency checks are available only when `UTOPIC_EXPERIMENTAL_BRIDGE=1`" in readme
+    assert "bridge dependency checks are available only when `UTOPIC_EXPERIMENTAL_BRIDGE=1`" not in readme
     assert "utopic_models_check" in readme
-    assert 'uv pip install "utopic[image]"' in readme
-    assert 'uv pip install "utopic[tts]"' in readme
-    assert 'uv pip install "utopic[chatterbox]"' in readme
-    assert 'uv pip install "utopic[music]"' in readme
-    assert "including TorchCodec" in readme
-    assert "ACE-Step currently works best in a Python 3.10 bridge environment" in readme
-    assert "uv pip install git+https://github.com/ace-step/ACE-Step.git" in readme
-    assert 'uv pip install "utopic[video]"' in readme
-    assert 'uv pip install "utopic[bridge]"' in readme
+    assert 'uv pip install "utopic[image]"' not in readme
+    assert 'uv pip install "utopic[tts]"' not in readme
+    assert 'uv pip install "utopic[chatterbox]"' not in readme
+    assert 'uv pip install "utopic[music]"' not in readme
+    assert "including TorchCodec" not in readme
+    assert "ACE-Step currently works best in a Python 3.10 bridge environment" not in readme
+    assert "uv pip install git+https://github.com/ace-step/ACE-Step.git" not in readme
+    assert 'uv pip install "utopic[video]"' not in readme
+    assert 'uv pip install "utopic[bridge]"' not in readme
     assert "utopic run qwen-image" in readme
     assert "planned non-text models start the gateway without starting a native text server" in readme.lower()
     assert "Real bridge generation" not in readme
     assert "Heavy bridge models" not in readme
-    assert "compatibility testbeds, not the default production runtime" in readme
+    assert "native_runner_required" in readme
+    assert "Compatibility shim" in readme or "compatibility shim" in readme
     assert "utopic-bridge diffusers --check" in readme
-    assert "torch/torchvision versions are incompatible" in readme
+    assert "torch/torchvision versions are incompatible" not in readme
     assert "/v1/utopic/runs/{run_id}/events" in readme
     assert "GB10/DGX Spark, a 6x RTX 4090 host, and a 4x A100 host." in readme
     assert "DiffusionGemma Q4_K_M," in readme
