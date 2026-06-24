@@ -44,7 +44,7 @@ def test_gateway_models_endpoint_exposes_multimodal_runtime_metadata(monkeypatch
     assert by_id["diffusiongemma-26b-a4b-q4"]["modality"] == "text"
     assert by_id["diffusiongemma-26b-a4b-q4"]["runtime"] == "native"
     assert by_id["qwen-image"]["modality"] == "image"
-    assert by_id["qwen-image"]["runtime"] == "bridge"
+    assert by_id["qwen-image"]["runtime"] == "planned_native"
     assert by_id["qwen-image"]["repo"] == "Qwen/Qwen-Image"
     assert by_id["qwen-image"]["url"] == "https://huggingface.co/Qwen/Qwen-Image"
     assert "/v1/images/generations" in by_id["qwen-image"]["endpoints"]
@@ -68,21 +68,23 @@ def test_gateway_models_endpoint_exposes_multimodal_runtime_metadata(monkeypatch
     assert by_id["cosmos3-super"]["requirements"]["allow_cpu"] is False
     assert by_id["zuna"]["modality"] == "misc"
     assert by_id["zuna"]["engine"] == "artifact"
-    assert by_id["zuna"]["runtime"] == "bridge"
+    assert by_id["zuna"]["runtime"] == "planned_native"
     assert by_id["zuna"]["repo"] == "Zyphra/ZUNA"
     assert "/v1/utopic/misc/generations" in by_id["zuna"]["endpoints"]
     assert by_id["zuna"]["experimental_bridge"]["input"] == "artifact"
 
 
-def test_gateway_models_endpoint_exposes_bridge_activation_for_all_bridge_models(monkeypatch):
+def test_gateway_models_endpoint_exposes_bridge_activation_for_all_planned_models(monkeypatch):
     monkeypatch.setenv("UTOPIC_EXPERIMENTAL_BRIDGE", "1")
 
     status, payload = decode(gateway.handle_openai_request("GET", "/v1/models", None))
 
     assert status == 200
-    bridge_models = [item for item in payload["data"] if item["runtime"] == "bridge"]
+    planned_models = [
+        item for item in payload["data"] if item["runtime"] == "planned_native"
+    ]
 
-    assert {item["id"] for item in bridge_models} >= {
+    assert {item["id"] for item in planned_models} >= {
         "qwen-image",
         "flux-1-schnell",
         "krea-2-raw",
@@ -96,7 +98,7 @@ def test_gateway_models_endpoint_exposes_bridge_activation_for_all_bridge_models
         "ltx-video",
         "zuna",
     }
-    for item in bridge_models:
+    for item in planned_models:
         assert item["experimental_bridge"]["schema_version"] == "utopic-bridge/v1"
         assert item["experimental_bridge"]["engine"] == item["engine"]
         assert item["experimental_bridge"]["command"] == f"utopic-bridge {item['engine']}"
@@ -105,7 +107,7 @@ def test_gateway_models_endpoint_exposes_bridge_activation_for_all_bridge_models
         assert item["experimental_bridge"]["input"] in {"prompt", "input", "artifact"}
         assert item["experimental_bridge"]["outputs"] == item["outputs"]
 
-    by_id = {item["id"]: item for item in bridge_models}
+    by_id = {item["id"]: item for item in planned_models}
     assert by_id["ltx-video"]["repo"] == "Lightricks/LTX-Video"
     assert by_id["ltx-video"]["experimental_bridge"]["command"] == "utopic-bridge ltx"
     assert by_id["ltx-video"]["experimental_bridge"]["environment_variable"] == "UTOPIC_BRIDGE_LTX_COMMAND"
@@ -232,7 +234,7 @@ def test_gateway_exposes_openai_routes_for_each_bridge_modality():
         assert payload["error"]["native_status"] == "planned"
 
 
-def test_every_bridge_catalog_model_has_openai_and_mcp_runtime_surface():
+def test_every_planned_catalog_model_has_openai_and_mcp_runtime_surface():
     generation_tool_by_modality = {
         "image": "utopic_generate_image",
         "tts": "utopic_generate_speech",
@@ -248,10 +250,12 @@ def test_every_bridge_catalog_model_has_openai_and_mcp_runtime_surface():
         "misc": {"artifact": "/tmp/input.bin"},
     }
 
-    bridge_models = [entry for entry in gateway.models.list_models() if entry.runtime == "bridge"]
-    assert bridge_models
+    planned_models = [
+        entry for entry in gateway.models.list_models() if entry.runtime == "planned_native"
+    ]
+    assert planned_models
 
-    for entry in bridge_models:
+    for entry in planned_models:
         assert entry.modality in generation_tool_by_modality
         assert "/v1/responses" in entry.endpoints
         assert any(endpoint != "/v1/responses" for endpoint in entry.endpoints)
@@ -1269,7 +1273,7 @@ def test_gateway_mcp_pulls_all_models(monkeypatch):
                 {
                     "id": "qwen-image",
                     "path": "/models/qwen-image",
-                    "runtime": "bridge",
+                    "runtime": "planned_native",
                     "modality": "image",
                 },
             ],

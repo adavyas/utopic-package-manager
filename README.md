@@ -151,8 +151,9 @@ utopic setup --backend metal
 
 `utopic chat`, `utopic run`, and `utopic models pull` accept either a local
 GGUF path or a curated model alias. The catalog is modality-aware: each entry
-declares its runtime (`native` or `bridge`), engine, hardware fit, OpenAI-style
-endpoints, and output artifact type.
+declares its runtime (`native`, `planned_native`, or explicit experimental
+`bridge`), engine, hardware fit, OpenAI-style endpoints, and output artifact
+type.
 
 | Alias | Model | Modality | Runtime | Notes |
 |---|---|---|---|---|
@@ -160,25 +161,25 @@ endpoints, and output artifact type.
 | `diffusiongemma-26b-a4b-q5` | DiffusionGemma 26B-A4B IT Q5_K_M | text | native | Higher-quality DiffusionGemma quant for 48 GB Apple Silicon, GB10, and CUDA hosts. |
 | `diffusiongemma-26b-a4b-q6` | DiffusionGemma 26B-A4B IT Q6_K | text | native | High-quality DiffusionGemma quant for larger local memory budgets. |
 | `diffusiongemma-26b-a4b-q8` | DiffusionGemma 26B-A4B IT Q8_0 | text | native | Near-lossless 8-bit DiffusionGemma weights for GB10 and high-memory CUDA hosts. |
-| `qwen-image` | Qwen-Image | image | bridge | Open-weight image generation model with strong prompt following and text rendering. |
-| `flux-1-schnell` | FLUX.1-schnell | image | bridge | Fast Apache-licensed image generation model for local 1-4 step generation. |
-| `krea-2-raw` | Krea 2 Raw | image | bridge | High-quality Krea text-to-image model through Diffusers Krea2Pipeline; GB10 or high-memory CUDA recommended until Mac generation is validated. |
-| `cosmos3-super` | Cosmos3 Super Text2Image | image | bridge | Agentic high-memory NVIDIA Cosmos3 image model; preflights GPU memory before loading. |
-| `kokoro-82m` | Kokoro 82M | tts | bridge | Tiny, fast open-weight TTS model for local speech synthesis. |
-| `chatterbox` | Chatterbox | tts | bridge | Higher-quality open-weight TTS and voice cloning model. |
-| `dia-1.6b` | Dia 1.6B | tts | bridge | Open-weight dialogue TTS model for expressive multi-speaker speech. |
-| `ace-step-3.5b` | ACE-Step 3.5B | music | bridge | Open-weight music generation model for local text-to-music experiments. |
-| `wan2.1-t2v-1.3b` | Wan2.1 T2V 1.3B | video | bridge | Small open-weight text-to-video model; laptop-plausible at modest resolution. |
-| `wan2.1-t2v-14b` | Wan2.1 T2V 14B | video | bridge | Higher-quality open-weight text-to-video model; GB10 or high-memory CUDA recommended. |
-| `ltx-video` | LTX-Video | video | bridge | Optional LTX video bridge; license and runtime differ from Wan. |
-| `zuna` | ZUNA | misc | bridge | Open-weight EEG and signal foundation model exposed as a generic file-in/file-out artifact workflow. |
+| `qwen-image` | Qwen-Image | image | planned_native | Open-weight image generation model with strong prompt following and text rendering. |
+| `flux-1-schnell` | FLUX.1-schnell | image | planned_native | Fast Apache-licensed image generation model for local 1-4 step generation. |
+| `krea-2-raw` | Krea 2 Raw | image | planned_native | High-quality Krea text-to-image model; GB10 or high-memory CUDA recommended for the future native runner. |
+| `cosmos3-super` | Cosmos3 Super Text2Image | image | planned_native | Agentic high-memory NVIDIA Cosmos3 image model; preflights GPU memory before loading. |
+| `kokoro-82m` | Kokoro 82M | tts | planned_native | Tiny, fast open-weight TTS model for local speech synthesis. |
+| `chatterbox` | Chatterbox | tts | planned_native | Higher-quality open-weight TTS and voice cloning model. |
+| `dia-1.6b` | Dia 1.6B | tts | planned_native | Open-weight dialogue TTS model for expressive multi-speaker speech. |
+| `ace-step-3.5b` | ACE-Step 3.5B | music | planned_native | Open-weight music generation model for local text-to-music experiments. |
+| `wan2.1-t2v-1.3b` | Wan2.1 T2V 1.3B | video | planned_native | Small open-weight text-to-video model; laptop-plausible at modest resolution once native support lands. |
+| `wan2.1-t2v-14b` | Wan2.1 T2V 14B | video | planned_native | Higher-quality open-weight text-to-video model; GB10 or high-memory CUDA recommended. |
+| `ltx-video` | LTX-Video | video | planned_native | Optional LTX video target; license and runtime differ from Wan. |
+| `zuna` | ZUNA | misc | planned_native | Open-weight EEG and signal foundation model exposed as a generic file-in/file-out artifact workflow. |
 
 The native text path is centered on DiffusionGemma canvas / entropy-bound GGUF
-models. Other modalities use bridge engines today but share the same catalog,
-model cache, OpenAI-compatible gateway, and MCP tool contract that future native
-C++ engines will use.
+models. Other modalities are cataloged as planned native runners and share the
+same model cache, OpenAI-compatible gateway, and MCP tool contract that the
+future C++ engines will use.
 
-Large bridge models can declare runtime requirements in the catalog. For
+Large planned native models can declare runtime requirements in the catalog. For
 example, `cosmos3-super` is discoverable through `utopic models list`,
 `/v1/models`, and MCP, but requests fail fast with
 `bridge_model_oom_preflight` on hosts below its GPU-memory requirement instead
@@ -582,11 +583,11 @@ Diffusers bridge requests also accept `"disable_safety_checker": true` in
 incompatible with the generated image dimensions. It is opt-in and is passed only
 to the local bridge process.
 
-For bridge models, `repo` is the upstream model source and `model_cache_path` is
-the Utopic-managed local cache directory. If the cache directory already contains
-real model files, adapters load from it directly; if it only contains Utopic
-metadata, adapters load from `repo` while using `model_cache_path` as the cache
-location.
+For experimental bridge runs, `repo` is the upstream model source and
+`model_cache_path` is the Utopic-managed local cache directory. If the cache
+directory already contains real model files, adapters load from it directly; if
+it only contains Utopic metadata, adapters load from `repo` while using
+`model_cache_path` as the cache location.
 
 Run a one-shot prompt:
 

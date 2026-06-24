@@ -360,7 +360,7 @@ def test_bundled_chat_models_command_shows_native_readiness(fake_openai_server, 
                     "recommended": False,
                     "description": "High memory image model",
                     "modality": "image",
-                    "runtime": "bridge",
+                    "runtime": "planned_native",
                     "runner": "image_runner",
                     "native_status": "planned",
                     "supported_backends": ["cuda"],
@@ -387,7 +387,7 @@ def test_bundled_chat_models_command_shows_native_readiness(fake_openai_server, 
     assert "text / native / ready / utopic_runner" in completed.stdout
     assert "backends: metal, cuda, cpu; VRAM 24 GiB, RAM 32 GiB" in completed.stdout
     assert "cosmos3-super" in completed.stdout
-    assert "image / bridge / planned / image_runner" in completed.stdout
+    assert "image / planned_native / planned / image_runner" in completed.stdout
     assert "backends: cuda; VRAM 96 GiB, RAM 128 GiB" in completed.stdout
     assert requests == []
     assert paths == []

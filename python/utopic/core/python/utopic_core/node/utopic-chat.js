@@ -275,7 +275,7 @@ function validateCatalogEntry(item, index) {
     if (entry.modality !== undefined && !["text", "image", "tts", "music", "video", "misc"].includes(entry.modality)) {
         throw new Error(`Invalid model catalog entry ${index}: modality is not supported`);
     }
-    if (entry.runtime !== undefined && !["native", "bridge"].includes(entry.runtime)) {
+    if (entry.runtime !== undefined && !["native", "planned_native", "bridge"].includes(entry.runtime)) {
         throw new Error(`Invalid model catalog entry ${index}: runtime is not supported`);
     }
     if (entry.native_status !== undefined &&
@@ -296,11 +296,14 @@ function modelModality(entry) {
 function modelRuntime(entry) {
     return entry.runtime ?? "native";
 }
+function isArtifactRuntime(entry) {
+    return modelModality(entry) !== "text" && ["planned_native", "bridge"].includes(modelRuntime(entry));
+}
 function modelNativeStatus(entry) {
-    return entry.native_status ?? (modelRuntime(entry) === "bridge" ? "planned" : "ready");
+    return entry.native_status ?? (isArtifactRuntime(entry) ? "planned" : "ready");
 }
 function modelRunner(entry) {
-    return entry.runner ?? (modelRuntime(entry) === "bridge" ? `${modelModality(entry)}_runner` : "utopic_runner");
+    return entry.runner ?? (isArtifactRuntime(entry) ? `${modelModality(entry)}_runner` : "utopic_runner");
 }
 function modelBackends(entry) {
     return (entry.supported_backends && entry.supported_backends.length > 0 ? entry.supported_backends : ["metal", "cuda", "cpu"]).join(", ");
@@ -359,7 +362,7 @@ function validateModelUrl(entry) {
     }
 }
 function localModelPath(entry) {
-    if (entry.runtime === "bridge")
+    if (isArtifactRuntime(entry))
         return path.join(modelsDir(), entry.id);
     return path.join(modelsDir(), safeModelFilename(entry));
 }
@@ -382,7 +385,7 @@ function isInteractiveInput() {
 }
 function isModelDownloaded(entry) {
     const filePath = localModelPath(entry);
-    if (entry.runtime === "bridge")
+    if (isArtifactRuntime(entry))
         return fs.existsSync(path.join(filePath, "utopic-model.json"));
     if (!isNonEmptyFile(filePath))
         return false;

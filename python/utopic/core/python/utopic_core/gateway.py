@@ -375,7 +375,7 @@ def handle_openai_request(
             },
         )
     runtime_request = _normalize_request_for_runtime(path, entry, request)
-    if entry.runtime == "bridge":
+    if _is_artifact_runtime(entry):
         preflight = _bridge_runtime_preflight(entry)
         if preflight is not None:
             return preflight
@@ -1411,9 +1411,13 @@ def _model_payload(entry: models.ModelEntry) -> dict[str, Any]:
         "url": entry.url,
         "description": entry.description,
     }
-    if entry.runtime == "bridge" and _experimental_bridge_enabled():
+    if _is_artifact_runtime(entry) and _experimental_bridge_enabled():
         payload["experimental_bridge"] = _bridge_model_payload(entry)
     return payload
+
+
+def _is_artifact_runtime(entry: models.ModelEntry) -> bool:
+    return entry.modality != "text" and entry.runtime in {"planned_native", "bridge"}
 
 
 def _bridge_model_payload(entry: models.ModelEntry) -> dict[str, Any]:

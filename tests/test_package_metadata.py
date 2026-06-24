@@ -506,7 +506,7 @@ def test_model_catalog_declares_runtime_schema_for_every_entry():
         "outputs",
     }
     valid_modalities = {"text", "image", "tts", "music", "video", "misc"}
-    valid_runtimes = {"native", "bridge"}
+    valid_runtimes = {"native", "planned_native", "bridge"}
     valid_native_statuses = {"ready", "planned", "experimental", "unsupported_on_device"}
     valid_backends = {"metal", "cuda", "cpu"}
 
@@ -525,6 +525,9 @@ def test_model_catalog_declares_runtime_schema_for_every_entry():
         assert isinstance(entry["expected_ram_gib"], (int, float)) and entry["expected_ram_gib"] > 0
         if entry["native_status"] == "ready":
             assert entry["runtime"] == "native"
+        if entry["modality"] != "text":
+            assert entry["runtime"] == "planned_native"
+            assert entry["native_status"] == "planned"
         assert isinstance(entry["endpoints"], list) and entry["endpoints"]
         assert all(isinstance(item, str) and item.startswith("/v1/") for item in entry["endpoints"])
         assert isinstance(entry["outputs"], list) and entry["outputs"]
@@ -562,18 +565,18 @@ def test_model_catalog_includes_first_multimodal_model_set():
         "diffusiongemma-26b-a4b-q5": ("text", "native"),
         "diffusiongemma-26b-a4b-q6": ("text", "native"),
         "diffusiongemma-26b-a4b-q8": ("text", "native"),
-        "qwen-image": ("image", "bridge"),
-        "flux-1-schnell": ("image", "bridge"),
-        "krea-2-raw": ("image", "bridge"),
-        "cosmos3-super": ("image", "bridge"),
-        "kokoro-82m": ("tts", "bridge"),
-        "chatterbox": ("tts", "bridge"),
-        "dia-1.6b": ("tts", "bridge"),
-        "ace-step-3.5b": ("music", "bridge"),
-        "wan2.1-t2v-1.3b": ("video", "bridge"),
-        "wan2.1-t2v-14b": ("video", "bridge"),
-        "ltx-video": ("video", "bridge"),
-        "zuna": ("misc", "bridge"),
+        "qwen-image": ("image", "planned_native"),
+        "flux-1-schnell": ("image", "planned_native"),
+        "krea-2-raw": ("image", "planned_native"),
+        "cosmos3-super": ("image", "planned_native"),
+        "kokoro-82m": ("tts", "planned_native"),
+        "chatterbox": ("tts", "planned_native"),
+        "dia-1.6b": ("tts", "planned_native"),
+        "ace-step-3.5b": ("music", "planned_native"),
+        "wan2.1-t2v-1.3b": ("video", "planned_native"),
+        "wan2.1-t2v-14b": ("video", "planned_native"),
+        "ltx-video": ("video", "planned_native"),
+        "zuna": ("misc", "planned_native"),
     }
 
     for model_id, (modality, runtime) in expected.items():

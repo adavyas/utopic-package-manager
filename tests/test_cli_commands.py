@@ -2126,7 +2126,7 @@ def test_model_list_rejects_bridge_catalog_entry_with_unknown_engine(monkeypatch
 
     captured = capsys.readouterr()
     assert "utopic models: Invalid model catalog entry 0" in captured.err
-    assert "unknown bridge engine: not-a-real-engine" in captured.err
+    assert "unknown experimental bridge engine: not-a-real-engine" in captured.err
     assert "Traceback" not in captured.err
 
 
@@ -2657,7 +2657,7 @@ def test_model_pull_replaces_stale_model_directory(monkeypatch, tmp_path):
     assert model_dir.read_bytes() == b"model"
 
 
-def test_bridge_model_pull_prepares_metadata_cache(monkeypatch, tmp_path):
+def test_planned_model_pull_prepares_metadata_cache(monkeypatch, tmp_path):
     catalog = tmp_path / "models.json"
     models_dir = tmp_path / "models"
     catalog.write_text(
@@ -2675,7 +2675,7 @@ def test_bridge_model_pull_prepares_metadata_cache(monkeypatch, tmp_path):
     "description": "Image model",
     "modality": "image",
     "engine": "diffusers",
-    "runtime": "bridge",
+    "runtime": "planned_native",
     "hardware": ["mac-48gb", "gb10", "cuda"],
     "endpoints": ["/v1/images/generations", "/v1/responses"],
     "outputs": ["image/png"]
@@ -2702,7 +2702,7 @@ def test_bridge_model_pull_prepares_metadata_cache(monkeypatch, tmp_path):
         "outputs": ["image/png"],
         "repo": "Qwen/Qwen-Image",
         "runner": "image_runner",
-        "runtime": "bridge",
+        "runtime": "planned_native",
         "supported_backends": ["metal", "cuda", "cpu"],
         "url": "https://huggingface.co/Qwen/Qwen-Image",
     }
@@ -2746,7 +2746,7 @@ def test_models_pull_all_prepares_every_catalog_model(monkeypatch, tmp_path, cap
     "description": "Image model",
     "modality": "image",
     "engine": "diffusers",
-    "runtime": "bridge",
+    "runtime": "planned_native",
     "hardware": ["mac-48gb", "gb10", "cuda"],
     "endpoints": ["/v1/images/generations", "/v1/responses"],
     "outputs": ["image/png"]
@@ -2778,7 +2778,7 @@ def test_models_pull_all_prepares_every_catalog_model(monkeypatch, tmp_path, cap
             {
                 "id": "qwen-image",
                 "path": str(models_dir / "qwen-image"),
-                "runtime": "bridge",
+                "runtime": "planned_native",
                 "modality": "image",
             },
         ],
@@ -2794,7 +2794,7 @@ def test_models_pull_all_rejects_extra_model_argument(capsys):
     assert "utopic models: pull accepts either a model alias or --all, not both" in captured.err
 
 
-def test_models_check_reports_ready_bridge_model(monkeypatch, tmp_path, capsys):
+def test_models_check_reports_ready_planned_model_with_experimental_bridge(monkeypatch, tmp_path, capsys):
     catalog = tmp_path / "models.json"
     models_dir = tmp_path / "models"
     catalog.write_text(
@@ -2812,7 +2812,7 @@ def test_models_check_reports_ready_bridge_model(monkeypatch, tmp_path, capsys):
     "description": "Image model",
     "modality": "image",
     "engine": "diffusers",
-    "runtime": "bridge",
+    "runtime": "planned_native",
     "hardware": ["mac-48gb", "gb10", "cuda"],
     "endpoints": ["/v1/images/generations", "/v1/responses"],
     "outputs": ["image/png"]
@@ -2844,7 +2844,7 @@ def test_models_check_reports_ready_bridge_model(monkeypatch, tmp_path, capsys):
 
     payload = json.loads(capsys.readouterr().out)
     assert payload["id"] == "qwen-image"
-    assert payload["runtime"] == "bridge"
+    assert payload["runtime"] == "planned_native"
     assert payload["status"] == "ready"
     assert payload["ready"] is True
     assert payload["cache"]["prepared"] is True
@@ -2872,7 +2872,7 @@ def test_models_check_reports_bridge_dependency_gap(monkeypatch, tmp_path, capsy
     "description": "TTS model",
     "modality": "tts",
     "engine": "kokoro",
-    "runtime": "bridge",
+    "runtime": "planned_native",
     "hardware": ["mac-48gb", "gb10", "cuda"],
     "endpoints": ["/v1/audio/speech", "/v1/responses"],
     "outputs": ["audio/wav"]
@@ -2952,7 +2952,7 @@ def test_models_check_all_reports_every_model_and_fails_when_any_not_ready(monke
     "description": "TTS model",
     "modality": "tts",
     "engine": "kokoro",
-    "runtime": "bridge",
+    "runtime": "planned_native",
     "hardware": ["mac-48gb", "gb10", "cuda"],
     "endpoints": ["/v1/audio/speech", "/v1/responses"],
     "outputs": ["audio/wav"]

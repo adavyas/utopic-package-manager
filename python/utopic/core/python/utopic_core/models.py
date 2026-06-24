@@ -47,15 +47,15 @@ class ModelEntry:
 
     @property
     def path(self) -> Path:
-        if self.runtime == "bridge":
+        if _uses_metadata_cache(self):
             return models_dir() / _safe_cache_name(self.id)
         return models_dir() / _safe_model_filename(self)
 
     def __post_init__(self) -> None:
         if not self.runner:
-            object.__setattr__(self, "runner", f"{self.modality}_runner" if self.runtime == "bridge" else "utopic_runner")
+            object.__setattr__(self, "runner", f"{self.modality}_runner" if self.modality != "text" else "utopic_runner")
         if not self.native_status:
-            object.__setattr__(self, "native_status", "planned" if self.runtime == "bridge" else "ready")
+            object.__setattr__(self, "native_status", "ready" if self.runtime == "native" else "planned")
 
 
 @dataclass(frozen=True)
@@ -86,9 +86,13 @@ class LocalTextEntry:
 
 
 VALID_MODALITIES = {"text", "image", "tts", "music", "video", "misc"}
-VALID_RUNTIMES = {"native", "bridge"}
+VALID_RUNTIMES = {"native", "planned_native", "bridge"}
 VALID_NATIVE_STATUSES = {"ready", "planned", "experimental", "unsupported_on_device"}
 VALID_BACKENDS = {"metal", "cuda", "cpu"}
+
+
+def _uses_metadata_cache(entry: ModelEntry) -> bool:
+    return entry.modality != "text" and entry.runtime in {"planned_native", "bridge"}
 
 
 def _safe_model_filename(entry: ModelEntry) -> str:
@@ -172,7 +176,7 @@ def _validate_catalog_entry(item: object, index: int) -> ModelEntry:
     runtime = _string_field(item, "runtime", "native", index)
     hardware = _string_list_field(item, "hardware", ["local"], index)
     supported_backends = _string_list_field(item, "supported_backends", ["metal", "cuda", "cpu"], index)
-    runner = _string_field(item, "runner", f"{modality}_runner" if runtime == "bridge" else "utopic_runner", index)
+    runner = _string_field(item, "runner", f"{modality}_runner" if modality != "text" else "utopic_runner", index)
     native_status = _string_field(item, "native_status", "ready" if runtime == "native" else "planned", index)
     expected_vram_gib = _number_field(item, "expected_vram_gib", index)
     expected_ram_gib = _number_field(item, "expected_ram_gib", index)
@@ -199,10 +203,10 @@ def _validate_catalog_entry(item: object, index: int) -> ModelEntry:
         raise RuntimeError(f"Invalid model catalog entry {index}: unsupported backends: {unknown_backends}")
     if native_status == "ready" and runtime != "native":
         raise RuntimeError(f"Invalid model catalog entry {index}: only native runtime models can be native_status=ready")
-    if runtime == "native" and not item["filename"].lower().endswith(".gguf"):
-        raise RuntimeError(f"Invalid model catalog entry {index}: native models must use a GGUF filename")
-    if runtime == "bridge" and engine not in bridge.ADAPTERS:
-        raise RuntimeError(f"Invalid model catalog entry {index}: unknown bridge engine: {engine}")
+    if runtime == "native" and modality == "text" and not item["filename"].lower().endswith(".gguf"):
+        raise RuntimeError(f"Invalid model catalog entry {index}: native text models must use a GGUF filename")
+    if runtime in {"planned_native", "bridge"} and engine not in bridge.ADAPTERS:
+        raise RuntimeError(f"Invalid model catalog entry {index}: unknown experimental bridge engine: {engine}")
 
     return ModelEntry(
         id=item["id"],
@@ -334,7 +338,7 @@ def _is_nonempty_file(path: Path) -> bool:
 
 
 def is_model_downloaded(entry: ModelEntry) -> bool:
-    if entry.runtime == "bridge":
+    if _uses_metadata_cache(entry):
         return (entry.path / "utopic-model.json").is_file()
     if not _is_nonempty_file(entry.path):
         return False
@@ -406,7 +410,7 @@ def pull_model(model_id: str, *, force: bool = False) -> Path:
         raise RuntimeError(f"Unknown Utopic model '{model_id}'. Known models: {known}")
 
     destination = entry.path
-    if entry.runtime == "bridge":
+    if _uses_metadata_cache(entry):
         if destination.exists() and is_model_downloaded(entry) and not force:
             return destination
         destination.mkdir(parents=True, exist_ok=True)
@@ -603,7 +607,7 @@ def model_check(model_id: str) -> dict[str, object]:
     entry = get_model(model_id)
     if entry is None:
         raise RuntimeError(f"Unknown Utopic model '{model_id}'.")
-    if entry.runtime == "bridge":
+    if _uses_metadata_cache(entry):
         return _bridge_model_check(entry)
     return _native_model_check(entry)
 

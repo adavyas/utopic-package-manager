@@ -865,7 +865,7 @@ def _generate_request(args: argparse.Namespace) -> dict[str, Any]:
         raise RuntimeError(
             f"model {entry.id} is {entry.modality}, but `utopic generate {kind}` requires {expected_modality}"
         )
-    if entry.runtime != "bridge":
+    if entry.modality == "text":
         raise RuntimeError(
             f"model {entry.id} is a native text model; use `utopic run` or `utopic chat`"
         )
@@ -890,7 +890,7 @@ def _default_generate_model(kind: str, quality: str) -> str:
         return preferred
     expected_modality = _GENERATE_MODALITY[kind]
     for entry in models.list_models():
-        if entry.modality == expected_modality and entry.runtime == "bridge":
+        if entry.modality == expected_modality and entry.runtime != "native":
             return entry.id
     raise RuntimeError(f"no catalog model supports `utopic generate {kind}`")
 
@@ -1133,7 +1133,7 @@ def _run(argv: Sequence[str]) -> int:
         port = _value_after(server_args, "--port", "8910")
         if model_arg:
             entry = models.get_model(model_arg)
-            if entry is not None and entry.runtime == "bridge":
+            if entry is not None and entry.modality != "text":
                 models.pull_model(entry.id)
                 return _run_gateway_only(host, port, entry)
 
