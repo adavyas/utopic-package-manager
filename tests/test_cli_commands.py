@@ -55,12 +55,11 @@ def test_chat_launch_sets_runtime_paths_and_executes_node(monkeypatch, tmp_path)
     monkeypatch.setattr(chat.installer, "bin_dir", lambda: tmp_path / "bin")
     monkeypatch.setattr(chat.installer, "cache_root", lambda: tmp_path / "cache")
     monkeypatch.setattr(chat.installer, "native_installation_is_current", lambda binary_names: False)
-    monkeypatch.setattr(chat.installer, "setup", lambda argv: captured.setdefault("setup", list(argv)) or 0)
+    monkeypatch.setattr(chat.installer, "setup", lambda argv: pytest.fail("chat should not run setup"))
     monkeypatch.setattr(chat.subprocess, "run", lambda command, env, check: captured.update(command=command, env=env, check=check))
 
     assert chat.launch(["diffusiongemma-26b-a4b-q4"]) == 0
 
-    assert captured["setup"] == []
     assert captured["command"] == ["/usr/bin/node", str(script), "diffusiongemma-26b-a4b-q4"]
     assert captured["env"]["UTOPIC_BIN_DIR"] == str(tmp_path / "bin")
     assert captured["env"]["UTOPIC_MODELS_DIR"] == str(tmp_path / "cache" / "models")
@@ -88,7 +87,7 @@ def test_chat_launch_skips_setup_when_runner_binary_exists(monkeypatch, tmp_path
     assert setup_calls == []
 
 
-def test_chat_launch_runs_setup_when_runner_cache_is_stale(monkeypatch, tmp_path):
+def test_chat_launch_does_not_run_setup_when_runner_cache_is_stale(monkeypatch, tmp_path):
     script = tmp_path / "utopic-chat.js"
     script.write_text("console.log('chat')\n", encoding="utf-8")
     bin_dir = tmp_path / "bin"
@@ -101,34 +100,31 @@ def test_chat_launch_runs_setup_when_runner_cache_is_stale(monkeypatch, tmp_path
     monkeypatch.setattr(chat.installer, "bin_dir", lambda: bin_dir)
     monkeypatch.setattr(chat.installer, "cache_root", lambda: tmp_path / "cache")
     monkeypatch.setattr(chat.installer, "native_installation_is_current", lambda binary_names: False)
-    monkeypatch.setattr(chat.installer, "setup", lambda argv: captured.setdefault("setup", list(argv)) or 0)
+    monkeypatch.setattr(chat.installer, "setup", lambda argv: pytest.fail("chat should not run setup"))
     monkeypatch.setattr(chat.subprocess, "run", lambda command, env, check: captured.update(command=command))
 
     assert chat.launch(["diffusiongemma-26b-a4b-q4"]) == 0
 
-    assert captured["setup"] == []
     assert captured["command"] == ["/usr/bin/node", str(script), "diffusiongemma-26b-a4b-q4"]
 
 
-def test_chat_launch_reports_setup_subprocess_failures_without_traceback(monkeypatch, tmp_path, capsys):
+def test_chat_launch_does_not_run_setup_before_node_launch(monkeypatch, tmp_path):
     script = tmp_path / "utopic-chat.js"
     script.write_text("console.log('chat')\n", encoding="utf-8")
+    captured = {}
 
     def fail_setup(argv):
-        raise subprocess.CalledProcessError(2, ["cmake", "-B", "/tmp/build"])
+        raise AssertionError("chat should not run package-manager setup")
 
     monkeypatch.setattr(chat, "_chat_script", lambda: script)
     monkeypatch.setattr(chat.shutil, "which", lambda name: "/usr/bin/node" if name == "node" else None)
     monkeypatch.setattr(chat.installer, "native_installation_is_current", lambda binary_names: False)
     monkeypatch.setattr(chat.installer, "setup", fail_setup)
-    monkeypatch.setattr(chat.subprocess, "run", lambda command, env, check: pytest.fail("should not launch node"))
+    monkeypatch.setattr(chat.subprocess, "run", lambda command, env, check: captured.update(command=command))
 
-    assert chat.launch(["diffusiongemma-26b-a4b-q4"]) == 2
+    assert chat.launch(["diffusiongemma-26b-a4b-q4"]) == 0
 
-    captured = capsys.readouterr()
-    assert "utopic chat: setup command failed: cmake -B /tmp/build" in captured.err
-    assert "Traceback" not in captured.err
-    assert "CalledProcessError" not in captured.err
+    assert captured["command"] == ["/usr/bin/node", str(script), "diffusiongemma-26b-a4b-q4"]
 
 
 def test_chat_launch_skips_setup_for_existing_server(monkeypatch, tmp_path):
@@ -255,7 +251,7 @@ def test_chat_python_fallback_normalizes_openai_v1_server_base_url():
     )
 
 
-def test_chat_launch_python_fallback_runs_setup_for_local_server_when_node_is_missing(monkeypatch, tmp_path):
+def test_chat_launch_python_fallback_does_not_run_setup_for_local_server_when_node_is_missing(monkeypatch, tmp_path):
     setup_calls = []
     fallback_calls = []
 
@@ -270,7 +266,7 @@ def test_chat_launch_python_fallback_runs_setup_for_local_server_when_node_is_mi
 
     assert chat.launch(["diffusiongemma-26b-a4b-q4", "--port", "8999"]) == 0
 
-    assert setup_calls == [[]]
+    assert setup_calls == []
     assert fallback_calls == [["diffusiongemma-26b-a4b-q4", "--port", "8999"]]
 
 
@@ -1110,15 +1106,18 @@ def test_chat_launch_rejects_invalid_sampling_values_before_setup(monkeypatch, c
     assert f"utopic chat: {message}" in captured.err
 
 
-def test_cli_ensure_setup_rebuilds_stale_native_cache(monkeypatch):
+def test_cli_ensure_setup_reports_missing_native_without_running_setup(monkeypatch):
     calls = []
 
     monkeypatch.setattr(cli.installer, "native_installation_is_current", lambda binary_names: False)
     monkeypatch.setattr(cli.installer, "setup", lambda argv: calls.append(list(argv)) or 0)
 
-    cli._ensure_setup(True, "utopic_server")
+    with pytest.raises(RuntimeError) as exc_info:
+        cli._ensure_setup(True, "utopic_server")
 
-    assert calls == [[]]
+    assert calls == []
+    assert "utopic setup" in str(exc_info.value)
+    assert "utopic_server" in str(exc_info.value)
 
 
 def test_cli_ensure_setup_skips_current_native_cache(monkeypatch):
@@ -1132,9 +1131,9 @@ def test_cli_ensure_setup_skips_current_native_cache(monkeypatch):
     assert calls == []
 
 
-def test_cli_run_reports_auto_setup_subprocess_failures_without_traceback(monkeypatch, capsys):
+def test_cli_run_reports_missing_setup_without_traceback(monkeypatch, capsys):
     def fail_setup(argv):
-        raise subprocess.CalledProcessError(2, ["cmake", "-B", "/tmp/build"])
+        raise AssertionError("runtime commands should not run setup")
 
     monkeypatch.setattr(cli.installer, "native_installation_is_current", lambda binary_names: False)
     monkeypatch.setattr(cli.installer, "setup", fail_setup)
@@ -1143,9 +1142,9 @@ def test_cli_run_reports_auto_setup_subprocess_failures_without_traceback(monkey
     assert cli.main(["run", "-m", "/models/default.gguf", "-p", "hi"]) == 1
 
     captured = capsys.readouterr()
-    assert "utopic run: setup command failed: cmake -B /tmp/build" in captured.err
+    assert "utopic run: native runtime binary `utopic_runner` is not installed or is stale." in captured.err
+    assert "utopic setup" in captured.err
     assert "Traceback" not in captured.err
-    assert "CalledProcessError" not in captured.err
 
 
 def test_cli_setup_reports_subprocess_failures_without_traceback(monkeypatch, capsys):
@@ -1195,54 +1194,12 @@ def test_cli_doctor_reports_environment_without_running_setup(monkeypatch, tmp_p
         "native_installation_is_current",
         lambda binary_names: cache_checks.append(tuple(binary_names)) or True,
     )
-    monkeypatch.setattr(
-        cli.installer,
-        "_resolve_backend",
-        lambda requested, arch: cli.installer.BackendDecision(
-            backend="metal",
-            reason="Metal device available",
-            device="Apple M4 Pro",
-        ),
-    )
+    monkeypatch.setattr(cli.installer, "_resolve_backend", lambda *_args: pytest.fail("doctor should not own backend/build diagnostics"))
     monkeypatch.setattr(cli.installer, "setup", lambda argv: pytest.fail("should not run setup"))
-    monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/node" if name == "node" else None)
     monkeypatch.setattr(cli.subprocess, "check_output", lambda command, text, stderr: "v20.0.0\n")
-    monkeypatch.setattr(
-        cli.bridge,
-        "ADAPTERS",
-        {
-            "diffusers": object(),
-            "kokoro": object(),
-            "wan": object(),
-        },
-    )
-    checks = {
-        "diffusers": {
-            "engine": "diffusers",
-            "ready": False,
-            "status": "api_mismatch",
-            "install_hint": 'pip install "utopic[image]"',
-            "message": "torch/torchvision versions are incompatible",
-        },
-        "kokoro": {
-            "engine": "kokoro",
-            "ready": False,
-            "status": "missing_dependencies",
-            "install_hint": 'pip install "utopic[tts]"',
-            "missing": ["kokoro"],
-        },
-        "wan": {
-            "engine": "wan",
-            "ready": True,
-            "status": "ready",
-            "install_hint": 'pip install "utopic[video]"',
-        },
-    }
-    monkeypatch.setattr(
-        cli.bridge,
-        "_check_adapter",
-        lambda adapter: checks[next(key for key, value in cli.bridge.ADAPTERS.items() if value is adapter)],
-    )
+    monkeypatch.delenv("UTOPIC_EXPERIMENTAL_BRIDGE", raising=False)
+    monkeypatch.setattr(cli.bridge, "_check_adapter", lambda _adapter: pytest.fail("bridge checks are opt-in"))
 
     assert cli.main(["doctor"]) == 0
 
@@ -1250,44 +1207,50 @@ def test_cli_doctor_reports_environment_without_running_setup(monkeypatch, tmp_p
     assert f"Utopic {cli.__version__}" in captured.out
     assert f"Cache root: {tmp_path / 'cache'}" in captured.out
     assert f"Bin dir: {tmp_path / 'bin'}" in captured.out
-    assert "Backend: metal" in captured.out
-    assert "Device: Apple M4 Pro" in captured.out
-    assert "Reason: Metal device available" in captured.out
-    assert "Native cache: current" in captured.out
-    assert "cmake: /usr/bin/cmake" in captured.out
-    assert "git: /usr/bin/git" in captured.out
+    assert "Backend:" not in captured.out
+    assert "Device:" not in captured.out
+    assert "Reason:" not in captured.out
+    assert "Native runtime: current" in captured.out
+    assert "cmake:" not in captured.out
+    assert "git:" not in captured.out
     assert "Node.js: /usr/bin/node (v20.0.0)" in captured.out
-    assert "Bridge engines:" in captured.out
-    assert "diffusers: api_mismatch - torch/torchvision versions are incompatible" in captured.out
-    assert 'kokoro: missing_dependencies - missing kokoro; pip install "utopic[tts]"' in captured.out
-    assert "wan: ready" in captured.out
+    assert "Experimental bridges: disabled" in captured.out
+    assert "Bridge engines:" not in captured.out
     assert captured.err == ""
     assert cache_checks == [cli.installer.BIN_NAMES]
 
 
-def test_cli_doctor_reports_missing_package_manager_setup_tools_without_failing(monkeypatch, tmp_path, capsys):
+def test_cli_doctor_reports_missing_native_runtime_without_build_tool_checks(monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(cli.installer, "cache_root", lambda: tmp_path / "cache")
     monkeypatch.setattr(cli.installer, "bin_dir", lambda: tmp_path / "bin")
     monkeypatch.setattr(cli.installer, "native_installation_is_current", lambda binary_names: False)
-    monkeypatch.setattr(
-        cli.installer,
-        "_resolve_backend",
-        lambda requested, arch: cli.installer.BackendDecision(
-            backend="cpu",
-            reason="No usable Metal device or CUDA compiler found",
-            device="CPU",
-        ),
-    )
+    monkeypatch.setattr(cli.installer, "_resolve_backend", lambda *_args: pytest.fail("doctor should not probe backend"))
     monkeypatch.setattr(shutil, "which", lambda name: None)
 
     assert cli.main(["doctor"]) == 0
 
     captured = capsys.readouterr()
-    assert "Native cache: missing or stale" in captured.out
-    assert "cmake: missing (install via package manager setup when building native binaries)" in captured.out
-    assert "git: missing (install via package manager setup when building native binaries)" in captured.out
+    assert "Native runtime: missing or stale" in captured.out
+    assert "Run `utopic setup` to build or refresh native binaries." in captured.out
+    assert "cmake:" not in captured.out
+    assert "git:" not in captured.out
     assert "Node.js: missing (Python fallback chat remains available)" in captured.out
-    assert "Missing required setup tools" not in captured.err
+
+
+def test_cli_doctor_can_probe_experimental_bridges_when_enabled(monkeypatch):
+    monkeypatch.setenv("UTOPIC_EXPERIMENTAL_BRIDGE", "1")
+    checked = []
+
+    def fake_check(adapter):
+        checked.append(adapter.engine)
+        return {"engine": adapter.engine, "status": "ready", "ready": True}
+
+    monkeypatch.setattr(cli.bridge, "_check_adapter", fake_check)
+
+    lines = cli._bridge_doctor_lines()
+
+    assert lines[0] == "Bridge engines:"
+    assert checked
 
 
 def test_cli_doctor_bridge_line_collapses_multiline_api_errors():

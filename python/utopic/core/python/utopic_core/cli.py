@@ -1,7 +1,6 @@
 import argparse
 import json
 import math
-import os
 import shlex
 import shutil
 import subprocess
@@ -90,12 +89,10 @@ _LEGACY_NATIVE_BOOLEAN_FLAGS = {"--reasoning", "--soft-schema"}
 
 def _ensure_setup(enabled: bool = True, binary_name: str = "utopic") -> None:
     if enabled and not installer.native_installation_is_current((binary_name,)):
-        try:
-            code = installer.setup([])
-        except subprocess.CalledProcessError as exc:
-            raise RuntimeError(f"setup command failed: {_format_command(exc.cmd)}") from exc
-        if code != 0:
-            raise SystemExit(code)
+        raise RuntimeError(
+            f"native runtime binary `{binary_name}` is not installed or is stale. "
+            "Run `utopic setup` before starting local native generation."
+        )
 
 
 def _has_prompt(args: Sequence[str]) -> bool:
@@ -720,7 +717,7 @@ Server options:
   --native-port PORT    Internal native text server port. Default: PORT+1
   -ngl N                GPU layers to offload. Default: native default
   --ctx-size N          Server context size. Default: native default
-  --no-setup            Do not run setup automatically if binaries are missing.
+  --no-setup            Skip native install freshness checks.
 
 Examples:
   utopic run diffusiongemma-26b-a4b-q4
@@ -986,11 +983,9 @@ starting the native runtime.
 Checks:
   - package version
   - cache and binary directories
-  - detected backend, device, and reason
   - whether cached native binaries are current
-  - package-manager setup tools: cmake and git
   - optional chat tool: Node.js
-  - explicit experimental bridge adapters for planned image, speech, music, video, and misc artifacts
+  - experimental bridge status without probing optional adapters unless explicitly enabled
 """
     )
 
@@ -1043,6 +1038,11 @@ def _first_message_line(message: str) -> str:
 
 
 def _bridge_doctor_lines() -> list[str]:
+    if not bridge._experimental_bridge_enabled():
+        return [
+            "Experimental bridges: disabled "
+            "(set UTOPIC_EXPERIMENTAL_BRIDGE=1 to inspect local Python adapters)."
+        ]
     lines = ["Bridge engines:"]
     for engine in sorted(bridge.ADAPTERS):
         adapter = bridge.ADAPTERS[engine]
@@ -1067,41 +1067,14 @@ def _doctor(argv: Sequence[str]) -> int:
         print(f"utopic doctor {__version__}")
         return 0
 
-    requested_backend = os.environ.get("UTOPIC_BACKEND", "auto")
-    cuda_architectures = os.environ.get("UTOPIC_CUDA_ARCHITECTURES")
-    try:
-        decision = installer._resolve_backend(requested_backend, cuda_architectures)
-    except ValueError as exc:
-        print(f"utopic doctor: {exc}", file=sys.stderr)
-        return 1
-
-    setup_tools = ("cmake", "git")
-    tool_paths = {}
-    for name in setup_tools:
-        path = shutil.which(name)
-        tool_paths[name] = path
-
     print(f"Utopic {__version__}")
     print(f"Cache root: {installer.cache_root()}")
     print(f"Bin dir: {installer.bin_dir()}")
-    print(f"Backend: {decision.backend}")
-    print(f"Device: {decision.device}")
-    print(f"Reason: {decision.reason}")
-    if decision.cuda_architectures:
-        print(f"CUDA architectures: {decision.cuda_architectures}")
-    if decision.cuda_graphs:
-        print(f"CUDA graphs: {decision.cuda_graphs}")
-    native_cache = (
-        "current"
-        if installer.native_installation_is_current(installer.BIN_NAMES)
-        else "missing or stale"
-    )
-    print(f"Native cache: {native_cache}")
-    for name in setup_tools:
-        if tool_paths[name] is None:
-            print(f"{name}: missing (install via package manager setup when building native binaries)")
-        else:
-            print(f"{name}: {tool_paths[name]}")
+    native_current = installer.native_installation_is_current(installer.BIN_NAMES)
+    native_status = "current" if native_current else "missing or stale"
+    print(f"Native runtime: {native_status}")
+    if not native_current:
+        print("Run `utopic setup` to build or refresh native binaries.")
     print(f"Node.js: {_node_status()}")
     for line in _bridge_doctor_lines():
         print(line)
@@ -1203,7 +1176,11 @@ def main(argv: Optional[Sequence[str]] = None) -> Optional[int]:
         print(f"utopic: {exc}", file=sys.stderr)
         return 1
 
-    _ensure_setup(True)
+    try:
+        _ensure_setup(True)
+    except RuntimeError as exc:
+        print(f"utopic: {exc}", file=sys.stderr)
+        return 1
     _native.main("utopic", args)
     return 0
 

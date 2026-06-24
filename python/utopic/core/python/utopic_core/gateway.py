@@ -368,6 +368,20 @@ def handle_openai_request(
                 }
             },
         )
+    streaming_error = _streaming_unsupported_response(path, entry, request, native_base_url)
+    if streaming_error is not None:
+        return streaming_error
+    unsupported_options_error = _unsupported_direct_runner_options_response(
+        path,
+        entry,
+        request,
+        native_base_url,
+    )
+    if unsupported_options_error is not None:
+        return unsupported_options_error
+    missing_input_error = _missing_required_input_response(path, entry, request)
+    if missing_input_error is not None:
+        return missing_input_error
     runtime_request = _normalize_request_for_runtime(path, entry, request)
     if _is_artifact_runtime(entry):
         preflight = _native_runtime_preflight(entry)
@@ -474,7 +488,11 @@ def _mcp_tool_call(
     active_text_model_id: str,
 ) -> dict[str, Any]:
     if name == "utopic_models_list":
-        content = json.dumps([_model_payload(entry) for entry in models.list_models()], indent=2)
+        entries: list[Any] = list(models.list_models())
+        active_entry = _active_text_entry(active_text_model_path, active_text_model_id)
+        if active_entry is not None:
+            entries.append(active_entry)
+        content = json.dumps([_model_payload(entry) for entry in entries], indent=2)
         return _mcp_text_result(request_id, content, is_error=False)
     if name == "utopic_models_check":
         try:
@@ -484,7 +502,11 @@ def _mcp_tool_call(
                 model_id = str(arguments.get("model") or "")
                 if not model_id:
                     raise RuntimeError("utopic_models_check requires model or all=true")
-                payload = models.model_check(model_id)
+                active_entry = _active_text_entry(active_text_model_path, active_text_model_id)
+                if active_entry is not None and model_id in {active_entry.id, "utopic"}:
+                    payload = _local_text_model_check(active_entry)
+                else:
+                    payload = models.model_check(model_id)
         except RuntimeError as exc:
             return _mcp_text_result(request_id, str(exc), is_error=True)
         return _mcp_text_result(
@@ -533,6 +555,33 @@ def _mcp_tool_call(
     )
     payload = json.loads(body.decode("utf-8"))
     return _mcp_text_result(request_id, json.dumps(payload, sort_keys=True), is_error=status >= 400)
+
+
+def _local_text_model_check(entry: models.LocalTextEntry) -> dict[str, object]:
+    present = entry.path.is_file() and entry.path.stat().st_size > 0
+    size = entry.path.stat().st_size if present else 0
+    return {
+        "id": entry.id,
+        "name": entry.name,
+        "runtime": entry.runtime,
+        "modality": entry.modality,
+        "engine": entry.engine,
+        "runner": entry.runner,
+        "native_status": entry.native_status,
+        "supported_backends": list(entry.supported_backends),
+        "expected_vram_gib": entry.expected_vram_gib,
+        "expected_ram_gib": entry.expected_ram_gib,
+        "status": "ready" if present else "missing_model_file",
+        "ready": present,
+        "requirements": entry.requirements or {},
+        "cache": {
+            "path": str(entry.path),
+            "present": present,
+            "size": size,
+            "expected_size": entry.bytes,
+        },
+        "next_steps": [] if present else ["provide a readable local GGUF model path"],
+    }
 
 
 def _normalize_mcp_tool_arguments(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -610,6 +659,132 @@ def _native_runtime_preflight(entry: models.ModelEntry) -> Optional[tuple[int, d
             }
         },
     )
+
+
+def _streaming_unsupported_response(
+    path: str,
+    entry: models.ModelEntry,
+    request: dict[str, Any],
+    native_base_url: Optional[str],
+) -> Optional[tuple[int, dict[str, str], bytes]]:
+    if request.get("stream") is not True:
+        return None
+    if path == "/v1/chat/completions" and entry.modality == "text" and native_base_url:
+        return None
+    return _json(
+        400,
+        {
+            "error": {
+                "message": (
+                    "streaming is only supported through the native C++ chat server. "
+                    "Start one with `utopic run <model>` or use `utopic chat`, then "
+                    "call its /v1/chat/completions endpoint."
+                ),
+                "code": "streaming_not_supported",
+                "model": entry.id,
+                "modality": entry.modality,
+                "endpoint": path,
+            }
+        },
+    )
+
+
+def _unsupported_direct_runner_options_response(
+    path: str,
+    entry: models.ModelEntry,
+    request: dict[str, Any],
+    native_base_url: Optional[str],
+) -> Optional[tuple[int, dict[str, str], bytes]]:
+    if native_base_url or entry.modality != "text" or path not in {"/v1/chat/completions", "/v1/responses"}:
+        return None
+    unsupported: list[str] = []
+    if request.get("n") not in (None, 1):
+        unsupported.append("n")
+    for key in (
+        "tool_choice",
+        "parallel_tool_calls",
+        "presence_penalty",
+        "frequency_penalty",
+        "logit_bias",
+        "logprobs",
+        "top_logprobs",
+    ):
+        if key in request:
+            unsupported.append(key)
+    if not unsupported:
+        return None
+    return _json(
+        400,
+        {
+            "error": {
+                "message": (
+                    "the direct native runner path does not support these OpenAI "
+                    f"parameters yet: {', '.join(unsupported)}"
+                ),
+                "code": "unsupported_parameter",
+                "unsupported_parameters": unsupported,
+                "model": entry.id,
+                "modality": entry.modality,
+                "endpoint": path,
+            }
+        },
+    )
+
+
+def _missing_required_input_response(
+    path: str,
+    entry: models.ModelEntry,
+    request: dict[str, Any],
+) -> Optional[tuple[int, dict[str, str], bytes]]:
+    if not _is_artifact_runtime(entry):
+        return None
+    parameter = _required_input_parameter(entry.modality)
+    if parameter is None or _has_required_input(path, entry.modality, request):
+        return None
+    return _json(
+        400,
+        {
+            "error": {
+                "message": f"{entry.modality} generation requires a non-empty {parameter}",
+                "code": "missing_required_input",
+                "parameter": parameter,
+                "model": entry.id,
+                "modality": entry.modality,
+                "endpoint": path,
+            }
+        },
+    )
+
+
+def _required_input_parameter(modality: str) -> Optional[str]:
+    if modality in {"image", "music", "video"}:
+        return "prompt"
+    if modality == "tts":
+        return "input"
+    if modality == "misc":
+        return "artifact"
+    return None
+
+
+def _has_required_input(path: str, modality: str, request: dict[str, Any]) -> bool:
+    if path == "/v1/responses":
+        if _non_empty_string(request.get("prompt")) or _non_empty_string(request.get("artifact")):
+            return True
+        return bool(_responses_input_text(request.get("input")).strip())
+    if modality in {"image", "music", "video"}:
+        return _non_empty_string(request.get("prompt"))
+    if modality == "tts":
+        return _non_empty_string(request.get("input"))
+    if modality == "misc":
+        return any(
+            _non_empty_string(request.get(key))
+            for key in ("artifact", "input_file", "path")
+        )
+    return True
+
+
+def _non_empty_string(value: object) -> bool:
+    return isinstance(value, str) and bool(value.strip())
 
 
 def _detected_runtime_text(detected: dict[str, Any]) -> str:

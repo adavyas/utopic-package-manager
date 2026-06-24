@@ -126,6 +126,10 @@ def _runner_request(
         options["requirements"] = dict(entry.requirements)
     _copy_option(request, options, "max_tokens", "max_tokens")
     _copy_option(request, options, "temperature", "temperature")
+    _copy_option(request, options, "top_p", "top_p")
+    _copy_option(request, options, "top_k", "top_k")
+    _copy_option(request, options, "min_p", "min_p")
+    _copy_option(request, options, "stop", "stop")
     _copy_option(request, options, "seed", "seed")
     _copy_option(request, options, "gpu_layers", "gpu_layers")
     _copy_option(request, options, "diffusion_canvas_tokens", "canvas")
@@ -200,6 +204,7 @@ def native_readiness_error(entry: models.ModelEntry) -> dict[str, Any]:
             "supported_backends": list(entry.supported_backends),
             "expected_vram_gib": entry.expected_vram_gib,
             "expected_ram_gib": entry.expected_ram_gib,
+            "requirements": dict(entry.requirements or {}),
         },
     )
     payload["error"]["model"] = entry.id

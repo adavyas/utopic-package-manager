@@ -285,11 +285,12 @@ declared endpoints, model metadata, and hardware requirements. Optional Python
 bridge dependency checks are available only when `UTOPIC_EXPERIMENTAL_BRIDGE=1`
 or by running `utopic-bridge <engine> --check` directly.
 
-`utopic doctor` prints the detected backend, native binary cache state,
-package-manager setup-tool status, Node.js status, and one compact experimental
-bridge-engine readiness line for each image, TTS, music, video, and misc
-adapter. Missing `cmake` or `git` is informational here; `utopic setup` owns the
-actual native build.
+`utopic doctor` prints package version, cache/bin paths, native runtime cache
+state, and Node.js status without probing package-manager build internals.
+If native binaries are missing or stale, run `utopic setup`; that command owns
+backend detection, CMake/git checks, and native builds. Experimental Python
+bridge adapter checks are opt-in through `UTOPIC_EXPERIMENTAL_BRIDGE=1` or
+`utopic-bridge <engine> --check`.
 
 Install bridge dependencies by modality only for explicit experimental adapter runs:
 

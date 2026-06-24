@@ -1,7 +1,6 @@
 import json
 import math
 import os
-import shlex
 import shutil
 import subprocess
 import sys
@@ -72,7 +71,7 @@ Options:
   --ctx-size N          Context size for an auto-started server. Default: 4096
   --max-tokens N        Max response tokens. Default: 512
   --temperature N       Sampling temperature. Default: 0
-  --no-setup            Skip Python-side first-use setup.
+  --no-setup            Forwarded to spawned `utopic run` commands.
   -h, --help            Show this help.
 
 Chat commands:
@@ -98,14 +97,6 @@ class NodeUnavailable(RuntimeError):
 
 def _chat_script() -> Path:
     return NODE_CHAT_SCRIPT
-
-
-def _wants_setup(argv: Sequence[str]) -> bool:
-    if _wants_help(argv):
-        return False
-    if _uses_existing_server(argv):
-        return False
-    return "--no-setup" not in argv
 
 
 def _wants_help(argv: Sequence[str]) -> bool:
@@ -256,12 +247,6 @@ def _parse_node_major(value: str) -> Optional[int]:
         return int(major)
     except ValueError:
         return None
-
-
-def _format_command(command: object) -> str:
-    if isinstance(command, (list, tuple)):
-        return shlex.join(str(part) for part in command)
-    return str(command)
 
 
 def _value_after(args: Sequence[str], flag: str, default: str) -> str:
@@ -669,44 +654,11 @@ def launch(argv: Optional[Sequence[str]] = None) -> int:
         _validate_value_args(args)
         _validate_server_url_arg(args)
         if shutil.which("node") is None:
-            if _wants_setup(args) and not installer.native_installation_is_current(("utopic_runner",)):
-                try:
-                    code = installer.setup([])
-                except subprocess.CalledProcessError as exc:
-                    print(
-                        f"utopic chat: setup command failed: {_format_command(exc.cmd)}",
-                        file=sys.stderr,
-                    )
-                    return exc.returncode if isinstance(exc.returncode, int) and exc.returncode > 0 else 1
-                if code != 0:
-                    return code
             return _python_fallback_launch(args)
         try:
             command = _node_command(args)
         except NodeUnavailable as exc:
-            if _wants_setup(args) and not installer.native_installation_is_current(("utopic_runner",)):
-                try:
-                    code = installer.setup([])
-                except subprocess.CalledProcessError as setup_exc:
-                    print(
-                        f"utopic chat: setup command failed: {_format_command(setup_exc.cmd)}",
-                        file=sys.stderr,
-                    )
-                    return setup_exc.returncode if isinstance(setup_exc.returncode, int) and setup_exc.returncode > 0 else 1
-                if code != 0:
-                    return code
             return _python_fallback_launch(args, fallback_reason=str(exc))
-        if _wants_setup(args) and not installer.native_installation_is_current(("utopic_runner",)):
-            try:
-                code = installer.setup([])
-            except subprocess.CalledProcessError as exc:
-                print(
-                    f"utopic chat: setup command failed: {_format_command(exc.cmd)}",
-                    file=sys.stderr,
-                )
-                return exc.returncode if isinstance(exc.returncode, int) and exc.returncode > 0 else 1
-            if code != 0:
-                return code
 
         env = os.environ.copy()
         env.setdefault("UTOPIC_BIN_DIR", str(installer.bin_dir()))
