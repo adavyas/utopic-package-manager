@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://utopic.dev/schemas/utopic-runner/v1/response.schema.json",
+  "title": "Utopic native runner response",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["ok", "type", "artifacts", "metrics", "backend"],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "type": {
+          "enum": ["text", "image", "audio", "video", "artifact"]
+        },
+        "text": {
+          "type": "string"
+        },
+        "artifacts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "type": {
+                "type": "string"
+              },
+              "path": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              },
+              "mime_type": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "metrics": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "backend": {
+          "enum": ["metal", "cuda", "cpu"]
+        },
+        "device": {
+          "type": "string"
+        },
+        "reasoning": {
+          "type": "string"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["ok", "error"],
+      "properties": {
+        "ok": {
+          "const": false
+        },
+        "error": {
+          "type": "object",
+          "additionalProperties": true,
+          "required": ["code", "message", "detail"],
+          "properties": {
+            "code": {
+              "enum": [
+                "missing_model",
+                "oom",
+                "backend_unavailable",
+                "unsupported_model",
+                "runner_failed"
+              ]
+            },
+            "message": {
+              "type": "string",
+              "minLength": 1
+            },
+            "detail": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          }
+        }
+      }
+    }
+  ]
+}

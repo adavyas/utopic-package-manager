@@ -33,6 +33,7 @@ def _normalize_runner_request(payload: dict[str, object]) -> dict[str, object]:
 
 def test_runner_contract_schema_and_fixtures_are_packaged():
     schema = _load_fixture("schema.json")
+    response_schema = _load_fixture("response_schema.json")
     chat = _load_fixture("chat_request.json")
 
     assert schema["properties"]["schema_version"]["const"] == native_runner.SCHEMA_VERSION
@@ -51,6 +52,23 @@ def test_runner_contract_schema_and_fixtures_are_packaged():
     assert option_properties["oom_policy"]["properties"]["allow_cpu"]["type"] == ["boolean", "null"]
     assert chat["options"]["requirements"]["allow_cpu"] is True
     assert chat["options"]["oom_policy"]["action"] == "fail_before_runner"
+    success_schema, error_schema = response_schema["oneOf"]
+    assert success_schema["required"] == ["ok", "type", "artifacts", "metrics", "backend"]
+    assert success_schema["properties"]["ok"]["const"] is True
+    assert success_schema["properties"]["type"]["enum"] == ["text", "image", "audio", "video", "artifact"]
+    assert success_schema["properties"]["backend"]["enum"] == ["metal", "cuda", "cpu"]
+    assert success_schema["properties"]["artifacts"]["items"]["properties"]["mime_type"]["type"] == "string"
+    assert error_schema["required"] == ["ok", "error"]
+    assert error_schema["properties"]["ok"]["const"] is False
+    error_properties = error_schema["properties"]["error"]["properties"]
+    assert error_properties["code"]["enum"] == [
+        "missing_model",
+        "oom",
+        "backend_unavailable",
+        "unsupported_model",
+        "runner_failed",
+    ]
+    assert error_properties["detail"]["type"] == "object"
 
 
 def test_runner_request_emits_stable_contract_for_chat(tmp_path):
