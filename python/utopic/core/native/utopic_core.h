@@ -287,7 +287,7 @@ struct result {
 // Separate DiffusionGemma's reasoning channel from the final answer. Its chat template emits
 //   <|channel>thought\n<thinking>\n<channel|><final answer>
 // so the answer is whatever follows the last <channel|>, and the thinking is between the markers.
-// No-op for models that emit neither marker (LLaDA/Dream) -> {reasoning:"", final:raw}.
+// No-op for models that emit neither marker -> {reasoning:"", final:raw}.
 struct channels { std::string reasoning; std::string final; };
 inline channels split_channels(const std::string & raw) {
     static const std::string OPEN  = "<|channel>";
@@ -404,7 +404,7 @@ inline int ctx_size_for(llama_model * model, const request & req) {
 }
 
 // Run one diffusion generation over a RESIDENT context. Clears context memory first so requests are isolated.
-// Selects the entropy-bound path for canvas models (DiffusionGemma) and the masked path for LLaDA/Dream.
+// Selects the entropy-bound path for canvas models (DiffusionGemma) and the masked path for non-canvas diffusion models.
 inline result generate(llama_context * ctx, llama_model * model, const request & req) {
     result R;
     const llama_vocab * vocab = llama_model_get_vocab(model);
@@ -426,7 +426,7 @@ inline result generate(llama_context * ctx, llama_model * model, const request &
     std::vector<uint8_t>          slot_class;
     const std::vector<uint64_t> * class_allow = nullptr;  // points into the cached per-vocab table (no copy)
     int                           cls_words   = 0;
-    // The typed scaffold + per-slot class masking is a masked-path (LLaDA/Dream) feature: it rides on
+    // The typed scaffold + per-slot class masking is a masked-path feature: it rides on
     // diffusion_generate's canvas_template / slot_class hooks. The entropy-bound kernel (canvas models like
     // DiffusionGemma) has no such hooks, so a scaffold there would size an odd canvas the EB pass then fills
     // unconstrained -> garbage. On the EB path we skip the scaffold and let the prompt steer the JSON instead.

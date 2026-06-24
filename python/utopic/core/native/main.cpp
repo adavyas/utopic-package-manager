@@ -3,7 +3,7 @@
 //   ./utopic -m model.gguf -p "prompt" [-n 256] [--temp 0] [--seed 0] [-ngl 99]
 //        [--system "..."] [--tools "fn(a,b), fn2(c)"] [--schema '{"k":"__s__"}'] [--soft-schema] [--reasoning]
 //        [--confidence 0.9] [--converge 2] [--steps 256] [--diffusion-block-length 32] [--canvas N] [--eb-steps N]
-// Canvas models (DiffusionGemma) -> entropy-bound path; LLaDA/Dream -> masked path. See NOTICE.md.
+// Canvas models (DiffusionGemma) -> entropy-bound path; non-canvas masked models -> masked path.
 #include "utopic_core.h"
 #include "llama.h"
 

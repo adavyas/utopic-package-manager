@@ -191,7 +191,7 @@ void diffusion_generate(llama_context *          ctx,
 
     // Prefix-KV cache (fork-side): PREFILL the prompt once into the per-layer K/V store, then each step DECODE
     // only the canvas (reading the cached prompt via the diffusion-decode attention path). Uses the fork's
-    // llama_diffusion_set_phase (now generalized to LLaDA/Dream). Masked-absorbing regime only (no CFG/SC).
+    // llama_diffusion_set_phase for non-canvas masked diffusion models. Masked-absorbing regime only (no CFG/SC).
     // shift_logits supported: the first canvas position's prediction is the last prompt row, stashed at PREFILL.
     const bool    prefix_kv = params.prefix_kv && params.cfg_scale == 0.0f && !params.self_conditioning;
     const int32_t C_canvas  = params.max_length - n_input;
@@ -275,7 +275,7 @@ void diffusion_generate(llama_context *          ctx,
     int64_t time_start          = ggml_time_us();
 
     if (prefix_kv) {
-        // PREFILL: forward the prompt once; the LLaDA/Dream graph writes its per-layer K/V into the store.
+        // PREFILL: forward the prompt once; the masked graph writes its per-layer K/V into the store.
         utopic_llama_diffusion_set_phase(model_mut, /*PKV_PREFILL=*/1, n_input);
         batch.n_tokens = n_input;
         for (int32_t i = 0; i < n_input; i++) {
@@ -461,7 +461,7 @@ void diffusion_generate(llama_context *          ctx,
                     return llama_get_logits_ith(ctx, r);
                 }
                 if (prefix_kv && pkv_decode) {  // canvas-only DECODE logits (a UNIFIED refresh step falls through)
-                    // DIAG: force non-shift reading to localize the Dream all-EOS bug (graph vs indexing).
+                    // DIAG: force non-shift reading to localize all-EOS bugs (graph vs indexing).
                     static const bool dg_noshift = getenv("DG_PKV_NOSHIFT") != nullptr;
                     if (dg_noshift) { return llama_get_logits_ith(ctx, pos - n_input); }
                     // DECODE produced canvas-only logits; row r = prediction for canvas position n_input+r.

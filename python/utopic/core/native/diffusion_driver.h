@@ -16,8 +16,8 @@ enum diffusion_algorithm {
 
 // Unified transfer scheduling methods
 enum diffusion_transfer_schedule {
-    DIFFUSION_TRANSFER_SCHEDULE_TIMESTEP_BASED = 0,  // Dream-style: (1.0 - s/t) * remaining
-    DIFFUSION_TRANSFER_SCHEDULE_BLOCK_BASED    = 1,  // LLaDA-style: process in blocks with get_num_transfer_tokens
+    DIFFUSION_TRANSFER_SCHEDULE_TIMESTEP_BASED = 0,  // timestep-based: (1.0 - s/t) * remaining
+    DIFFUSION_TRANSFER_SCHEDULE_BLOCK_BASED    = 1,  // block-based: process in blocks with get_num_transfer_tokens
 };
 
 typedef bool (*diffusion_step_callback_t)(int32_t             step,
@@ -60,12 +60,12 @@ struct diffusion_params {
     // that wasted work. Attention is UNCHANGED (we still decode the full [prompt|canvas] batch), so output is
     // bit-identical to the unified path - this is a pure compute/transfer trim, PUBLIC-API only.
     // (NOTE: true prefix-KV-cache - skipping the prompt forward entirely - needs fork-side graph surgery in the
-    //  LLaDA/Dream model files; the eb path's prefix-KV is DiffusionGemma-graph-specific. Tracked separately.)
+    //  non-canvas masked model files; the eb path's prefix-KV is DiffusionGemma-graph-specific. Tracked separately.)
     bool    canvas_logits_only = false;
 
     // Prefix-KV cache (fork-side, WS1-3): PREFILL the prompt once into the per-layer K/V store, then DECODE
     // only the canvas each step (reads cached prompt K/V via llama_diffusion_set_phase + the diffusion-decode
-    // attention path in the LLaDA/Dream graph). The per-step lever for long context (forward only the canvas,
+    // attention path in the masked graph). The per-step lever for long context (forward only the canvas,
     // not the whole [prompt|canvas]). Masked-absorbing regime only; shift_logits not yet supported.
     bool    prefix_kv = false;
     // Periodic refresh: every N steps run a UNIFIED full-attention forward so the prompt re-sees the committed

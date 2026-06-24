@@ -1,6 +1,6 @@
 // tool_extract.h - tolerant tool-call extractor for diffusion LM output.
 //
-// Empirical basis (LLaDA-8B, 2026-06-18): diffusion tool-calling reasoning is
+// Empirical basis from early masked-diffusion testing: tool-calling reasoning is
 // SOLVED (100% function selection incl. multi-call), but strict-JSON validity is
 // only ~60% (missing commas/quotes, ```json fences, ]-vs-} mismatch, truncation).
 // The semantic content is present even when the JSON envelope is malformed, so we

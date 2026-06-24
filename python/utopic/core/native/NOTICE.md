@@ -7,8 +7,9 @@ loop, the entropy-bound/canvas path, the masked-absorbing schedule helpers
 self-conditioning hook. We link `libllama`/`ggml` as a library (the forward + kernels + GGUF)
 and own the loop on top.
 
-Diffusion-LM arch support in llama.cpp: DiffusionGemma; LLaDA (PRs #14771, #16003); Dream (#14644).
-Model authors: Google (DiffusionGemma), GSAI-ML (LLaDA), Dream-org (Dream).
+Diffusion-LM arch support in the pinned llama.cpp dependency currently centers
+the shippable DiffusionGemma GGUF path.
+Model authors: Google (DiffusionGemma).
 
 This directory is the native Utopic runtime:
 own the denoise loop + policies + freeze + calibration; rent ggml kernels + GGUF.
