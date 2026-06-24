@@ -290,6 +290,36 @@ def test_install_binaries_ad_hoc_signs_macos_executables(monkeypatch, tmp_path):
     ]
 
 
+def test_install_binaries_copies_optional_shared_plugins(monkeypatch, tmp_path):
+    build_dir = tmp_path / "build"
+    build_dir.mkdir()
+    for name in installer.BIN_NAMES:
+        _write_executable(build_dir / name)
+    for name in installer.SHARED_PLUGIN_NAMES:
+        _write_executable(build_dir / f"{name}.dylib")
+    dest_dir = tmp_path / "bin"
+    commands = []
+
+    monkeypatch.setattr(installer, "bin_dir", lambda: dest_dir)
+    monkeypatch.setattr(installer.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(installer, "_run", lambda command, **kwargs: commands.append(command))
+
+    installer._install_binaries(build_dir)
+
+    for name in installer.SHARED_PLUGIN_NAMES:
+        plugin = dest_dir / f"{name}.dylib"
+        assert plugin.is_file()
+        assert plugin.read_text(encoding="utf-8") == "binary"
+
+    assert commands == [
+        ["codesign", "--force", "--sign", "-", dest_dir / name]
+        for name in installer.BIN_NAMES
+    ] + [
+        ["codesign", "--force", "--sign", "-", dest_dir / f"{name}.dylib"]
+        for name in installer.SHARED_PLUGIN_NAMES
+    ]
+
+
 def test_managed_source_checkout_recovers_non_git_cache(monkeypatch, tmp_path):
     dest = tmp_path / "src" / "llama.cpp"
     dest.mkdir(parents=True)
@@ -490,6 +520,37 @@ def test_build_utopic_enables_stable_diffusion_when_source_is_available(monkeypa
     assert commands[0][:5] == ["cmake", "-B", build_dir, "-S", cmake_dir]
     assert f"-DUTOPIC_STABLE_DIFFUSION_DIR={stable_diffusion_dir}" in commands[0]
     assert "-DUTOPIC_ENABLE_STABLE_DIFFUSION=ON" in commands[0]
+
+
+def test_build_utopic_enables_sherpa_onnx_when_source_is_available(monkeypatch, tmp_path):
+    cache_root = tmp_path / "cache"
+    cmake_dir = tmp_path / "site-packages" / "utopic" / "cmake"
+    native_dir = tmp_path / "site-packages" / "utopic" / "core" / "native"
+    llama_dir = cache_root / "src" / "llama.cpp"
+    sherpa_onnx_dir = cache_root / "src" / "sherpa-onnx"
+    build_dir = cache_root / "build" / "utopic"
+
+    cmake_dir.mkdir(parents=True)
+    native_dir.mkdir(parents=True)
+    llama_dir.mkdir(parents=True)
+    sherpa_onnx_dir.mkdir(parents=True)
+
+    commands = []
+    monkeypatch.setattr(installer, "build_root", lambda: cache_root / "build")
+    monkeypatch.setattr(installer, "PACKAGED_CMAKE_DIR", cmake_dir)
+    monkeypatch.setattr(installer, "_run", lambda command, **kwargs: commands.append(command))
+
+    installer._build_utopic(
+        native_dir,
+        llama_dir,
+        sherpa_onnx_dir=sherpa_onnx_dir,
+        jobs=None,
+        dry_run=False,
+    )
+
+    assert commands[0][:5] == ["cmake", "-B", build_dir, "-S", cmake_dir]
+    assert f"-DUTOPIC_SHERPA_ONNX_DIR={sherpa_onnx_dir}" in commands[0]
+    assert "-DUTOPIC_ENABLE_SHERPA_ONNX=ON" in commands[0]
 
 
 def test_build_utopic_clears_stale_cmake_cache_when_package_cmake_source_changes(monkeypatch, tmp_path):

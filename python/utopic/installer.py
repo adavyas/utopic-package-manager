@@ -18,12 +18,13 @@ PACKAGED_CORE_DIR = PACKAGE_DIR / "core"
 PACKAGED_NATIVE_DIR = PACKAGED_CORE_DIR / "native"
 PACKAGED_CMAKE_DIR = PACKAGE_DIR / "cmake"
 UTOPIC_NATIVE_REPO = "https://github.com/adavyas/utopic.git"
-UTOPIC_NATIVE_REF = "0deddc085043eea73a4c6494928e57b6b1e7ae27"
+UTOPIC_NATIVE_REF = "88347355de126f5f73f086acc9d475337625af0b"
 LLAMA_REPO = "https://github.com/ggml-org/llama.cpp.git"
 LLAMA_REF = "ef5e2dcce"
 STABLE_DIFFUSION_REPO = "https://github.com/leejet/stable-diffusion.cpp.git"
 STABLE_DIFFUSION_REF = "8caa3f908ae6d4a4bef531e73b9a969f266a3d1f"
 BIN_NAMES = ("utopic", "utopic_server", "utopic_mcp", "utopic_acp", "utopic_runner")
+SHARED_PLUGIN_NAMES = ("utopic_sherpa_tts",)
 INSTALL_METADATA_NAME = "install.json"
 INSTALL_METADATA_SCHEMA_VERSION = 2
 INSTALL_METADATA_MATCH_KEYS = (
@@ -39,6 +40,7 @@ INSTALL_METADATA_MATCH_KEYS = (
     "llama_dir",
     "native_dir",
     "stable_diffusion_dir",
+    "sherpa_onnx_dir",
     "system",
     "machine",
 )
@@ -131,6 +133,13 @@ def default_stable_diffusion_dir() -> Path:
     if configured:
         return Path(configured).expanduser()
     return source_root() / "stable-diffusion.cpp"
+
+
+def default_sherpa_onnx_dir() -> Optional[Path]:
+    configured = os.environ.get("UTOPIC_SHERPA_ONNX_DIR")
+    if configured:
+        return Path(configured).expanduser()
+    return None
 
 
 def _run(
@@ -458,6 +467,7 @@ def _install_metadata(
     llama_dir: Path,
     native_dir: Path,
     stable_diffusion_dir: Optional[Path],
+    sherpa_onnx_dir: Optional[Path],
 ) -> dict[str, object]:
     cuda_graphs = decision.cuda_graphs
     if decision.backend == "cuda" and cuda_graphs is None:
@@ -480,6 +490,7 @@ def _install_metadata(
         "stable_diffusion_dir": (
             str(_normalize_path(stable_diffusion_dir)) if stable_diffusion_dir is not None else None
         ),
+        "sherpa_onnx_dir": str(_normalize_path(sherpa_onnx_dir)) if sherpa_onnx_dir is not None else None,
         "system": platform.system(),
         "machine": platform.machine(),
     }
@@ -503,6 +514,7 @@ def _write_install_metadata(
     llama_dir: Path,
     native_dir: Path,
     stable_diffusion_dir: Optional[Path] = None,
+    sherpa_onnx_dir: Optional[Path] = None,
 ) -> None:
     path = install_metadata_path()
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -514,12 +526,21 @@ def _write_install_metadata(
         llama_dir=llama_dir,
         native_dir=native_dir,
         stable_diffusion_dir=stable_diffusion_dir,
+        sherpa_onnx_dir=sherpa_onnx_dir,
     )
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def _binary_suffix() -> str:
     return ".exe" if os.name == "nt" else ""
+
+
+def _shared_library_suffix() -> str:
+    if platform.system() == "Darwin":
+        return ".dylib"
+    if os.name == "nt":
+        return ".dll"
+    return ".so"
 
 
 def native_installation_is_current(binary_names: Sequence[str] = BIN_NAMES) -> bool:
@@ -577,6 +598,7 @@ def native_installation_is_current(binary_names: Sequence[str] = BIN_NAMES) -> b
         llama_dir=default_llama_dir(),
         native_dir=default_native_dir(),
         stable_diffusion_dir=default_stable_diffusion_dir(),
+        sherpa_onnx_dir=default_sherpa_onnx_dir(),
     )
     return all(metadata.get(key) == expected.get(key) for key in INSTALL_METADATA_MATCH_KEYS)
 
@@ -691,6 +713,7 @@ def _build_utopic(
     llama_dir: Path,
     *,
     stable_diffusion_dir: Optional[Path] = None,
+    sherpa_onnx_dir: Optional[Path] = None,
     jobs: Optional[int],
     dry_run: bool,
 ) -> Path:
@@ -716,6 +739,15 @@ def _build_utopic(
                 f"-DUTOPIC_STABLE_DIFFUSION_DIR={stable_diffusion_dir}",
             ]
         )
+    if sherpa_onnx_dir is None:
+        command.append("-DUTOPIC_ENABLE_SHERPA_ONNX=OFF")
+    else:
+        command.extend(
+            [
+                "-DUTOPIC_ENABLE_SHERPA_ONNX=ON",
+                f"-DUTOPIC_SHERPA_ONNX_DIR={sherpa_onnx_dir}",
+            ]
+        )
     _run(command, dry_run=dry_run)
     _run(_build_command(out_dir, jobs=jobs), dry_run=dry_run)
     return out_dir
@@ -730,6 +762,17 @@ def _install_binaries(build_dir: Path) -> None:
         src = build_dir / f"{name}{suffix}"
         if not src.exists():
             raise RuntimeError(f"Expected Utopic build output was not found: {src}")
+        dest = dest_dir / src.name
+        shutil.copy2(src, dest)
+        dest.chmod(0o755)
+        if platform.system() == "Darwin":
+            _run(["codesign", "--force", "--sign", "-", dest])
+
+    plugin_suffix = _shared_library_suffix()
+    for name in SHARED_PLUGIN_NAMES:
+        src = build_dir / f"{name}{plugin_suffix}"
+        if not src.exists():
+            continue
         dest = dest_dir / src.name
         shutil.copy2(src, dest)
         dest.chmod(0o755)
@@ -769,6 +812,7 @@ def setup(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--llama-dir", help=argparse.SUPPRESS)
     parser.add_argument("--native-dir", help=argparse.SUPPRESS)
     parser.add_argument("--stable-diffusion-dir", help=argparse.SUPPRESS)
+    parser.add_argument("--sherpa-onnx-dir", help=argparse.SUPPRESS)
     parser.add_argument(
         "--skip-llama-build",
         action="store_true",
@@ -791,6 +835,11 @@ def setup(argv: Optional[Sequence[str]] = None) -> int:
         Path(args.stable_diffusion_dir).expanduser()
         if args.stable_diffusion_dir
         else default_stable_diffusion_dir()
+    )
+    sherpa_onnx_dir = (
+        Path(args.sherpa_onnx_dir).expanduser()
+        if args.sherpa_onnx_dir
+        else default_sherpa_onnx_dir()
     )
 
     if args.force:
@@ -850,10 +899,14 @@ def setup(argv: Optional[Sequence[str]] = None) -> int:
             reset=True,
         )
 
+    if sherpa_onnx_dir is not None:
+        print(f"Using external sherpa-onnx source or install at {sherpa_onnx_dir}")
+
     native_build_dir = _build_utopic(
         native_dir,
         llama_dir,
         stable_diffusion_dir=stable_diffusion_dir,
+        sherpa_onnx_dir=sherpa_onnx_dir,
         jobs=args.jobs,
         dry_run=dry_run,
     )
@@ -868,6 +921,7 @@ def setup(argv: Optional[Sequence[str]] = None) -> int:
         llama_dir=llama_dir,
         native_dir=native_dir,
         stable_diffusion_dir=stable_diffusion_dir,
+        sherpa_onnx_dir=sherpa_onnx_dir,
     )
     print(f"Installed Utopic native binaries to {bin_dir()}")
     return 0

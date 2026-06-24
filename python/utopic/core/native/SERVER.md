@@ -12,7 +12,7 @@ OpenAI-compatible and MCP gateway for the full Utopic catalog:
 |---|---|---|
 | text | `/v1/chat/completions`, `/v1/responses` | native GGUF, optionally proxied through `utopic-server` |
 | image | `/v1/images/generations`, `/v1/responses` | native stable-diffusion.cpp plus bridge fallback |
-| tts | `/v1/audio/speech`, `/v1/responses` | bridge |
+| tts | `/v1/audio/speech`, `/v1/responses` | native Sherpa-ONNX plugin for Kokoro-class models plus bridge fallback |
 | music | `/v1/audio/generations`, `/v1/responses` | bridge |
 | video | `/v1/videos/generations`, `/v1/responses` | bridge |
 
@@ -23,6 +23,11 @@ Native plugin engines for TTS, music, video, and misc tasks should include
 entry explicitly names another `native_entrypoint`. The gateway passes catalog
 artifacts and request parameters to `utopic_runner`, and the runner loads the
 shared library locally; no remote API is involved.
+
+The first native non-text plugin is `sherpa_tts_plugin.cpp`. It wraps the
+Sherpa-ONNX offline TTS C API, accepts Kokoro model artifacts (`model_path`,
+`voices_path`, `tokens_path`, `data_dir`), and writes a local WAV artifact using
+the built-in audio engine.
 
 ## Setup
 

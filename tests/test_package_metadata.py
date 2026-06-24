@@ -19,7 +19,7 @@ CORE_CATALOG_PATH = (
     / "utopic_core"
     / "models.json"
 )
-EXPECTED_NATIVE_REF = "0deddc085043eea73a4c6494928e57b6b1e7ae27"
+EXPECTED_NATIVE_REF = "88347355de126f5f73f086acc9d475337625af0b"
 
 REQUIRED_NATIVE_RUNNER_FILES = {
     "runner.cpp",
@@ -32,6 +32,7 @@ REQUIRED_NATIVE_RUNNER_FILES = {
     "runner_tasks.h",
     "audio_engine.cpp",
     "audio_engine.h",
+    "sherpa_tts_plugin.cpp",
     "image_engine.cpp",
     "image_engine.h",
     "video_engine.cpp",
@@ -187,6 +188,20 @@ def test_package_cmake_builds_native_runner_and_multimodal_sources():
     assert "target_link_libraries(utopic_runner PRIVATE ${UTOPIC_RUNNER_LIBS})" in cmake
     assert "stable-diffusion" in cmake
     assert "target_compile_definitions(utopic_runner PRIVATE" in cmake
+
+
+def test_package_cmake_builds_optional_sherpa_tts_native_plugin():
+    cmake = (REPO_ROOT / "python" / "utopic" / "cmake" / "CMakeLists.txt").read_text(
+        encoding="utf-8"
+    )
+
+    assert "UTOPIC_ENABLE_SHERPA_ONNX" in cmake
+    assert "UTOPIC_SHERPA_ONNX_DIR" in cmake
+    assert "sherpa-onnx/c-api/c-api.h" in cmake
+    assert "add_library(utopic_sherpa_tts SHARED" in cmake
+    assert "${UTOPIC_NATIVE_SOURCE_DIR}/sherpa_tts_plugin.cpp" in cmake
+    assert "${UTOPIC_NATIVE_SOURCE_DIR}/audio_engine.cpp" in cmake
+    assert "target_link_libraries(utopic_sherpa_tts PRIVATE ${UTOPIC_SHERPA_ONNX_LIBRARY})" in cmake
 
 
 def test_gateway_console_script_is_declared():

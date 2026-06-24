@@ -5,8 +5,9 @@ and uses one runtime schema for all local modalities. Native text models are
 GGUF files driven by the C++ runtime. The native image path is backed by
 stable-diffusion.cpp. TTS, music, video, and misc entries still share the same
 cache, OpenAI endpoint, MCP tool, and metadata contract that native C++ engines
-use, with Python bridges remaining as transitional debug paths until native
-model engines land.
+use. TTS now has a native Sherpa-ONNX plugin path for Kokoro-class offline
+speech models; Python bridges remain as transitional debug paths where native
+model engines have not landed yet.
 
 | Model family | Modality | Runtime | Release status |
 |---|---|---|---|
@@ -15,7 +16,8 @@ model engines land.
 | FLUX.1-schnell | image | native stable-diffusion.cpp / bridge | Native Q4 component bundle plus bridge fallback entries behind `/v1/images/generations` and MCP image generation |
 | Krea 2 Raw | image | bridge | Cataloged behind `/v1/images/generations` and MCP image generation |
 | Cosmos3 Super Text2Image | image | bridge | Cataloged with GPU-memory preflight before bridge execution |
-| Kokoro / Chatterbox / Dia | tts | bridge | Cataloged behind `/v1/audio/speech` and MCP speech generation |
+| Kokoro | tts | native Sherpa-ONNX plugin / bridge | Native C++ plugin writes local WAV artifacts through the runner plugin ABI; bridge fallback remains cataloged behind `/v1/audio/speech` and MCP speech generation |
+| Chatterbox / Dia | tts | bridge | Cataloged behind `/v1/audio/speech` and MCP speech generation |
 | ACE-Step | music | bridge | Cataloged behind `/v1/audio/generations` and MCP music generation |
 | Wan2.1 T2V / LTX-Video | video | bridge | Cataloged behind `/v1/videos/generations` and MCP video generation |
 

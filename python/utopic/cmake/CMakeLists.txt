@@ -34,6 +34,7 @@ endif()
 
 find_package(Threads REQUIRED)
 option(UTOPIC_ENABLE_STABLE_DIFFUSION "Build the native image engine against stable-diffusion.cpp" OFF)
+option(UTOPIC_ENABLE_SHERPA_ONNX "Build the native TTS plugin against sherpa-onnx" OFF)
 
 set(UTOPIC_INCLUDES
   "${UTOPIC_NATIVE_SOURCE_DIR}"
@@ -94,6 +95,26 @@ if(UTOPIC_ENABLE_STABLE_DIFFUSION)
   list(APPEND UTOPIC_INCLUDES "${UTOPIC_STABLE_DIFFUSION_DIR}/include")
   set(UTOPIC_IMAGE_ENGINE_SOURCE "${UTOPIC_NATIVE_SOURCE_DIR}/image_engine.cpp")
   list(APPEND UTOPIC_RUNNER_LIBS stable-diffusion)
+endif()
+
+if(UTOPIC_ENABLE_SHERPA_ONNX)
+  if(NOT DEFINED UTOPIC_SHERPA_ONNX_DIR)
+    message(FATAL_ERROR "UTOPIC_SHERPA_ONNX_DIR is required when UTOPIC_ENABLE_SHERPA_ONNX=ON")
+  endif()
+  get_filename_component(UTOPIC_SHERPA_ONNX_DIR "${UTOPIC_SHERPA_ONNX_DIR}" ABSOLUTE)
+  if(NOT EXISTS "${UTOPIC_SHERPA_ONNX_DIR}/sherpa-onnx/c-api/c-api.h" AND
+     NOT EXISTS "${UTOPIC_SHERPA_ONNX_DIR}/include/sherpa-onnx/c-api/c-api.h")
+    message(FATAL_ERROR "UTOPIC_SHERPA_ONNX_DIR must contain sherpa-onnx/c-api/c-api.h or include/sherpa-onnx/c-api/c-api.h: ${UTOPIC_SHERPA_ONNX_DIR}")
+  endif()
+
+  find_library(UTOPIC_SHERPA_ONNX_LIBRARY
+    NAMES sherpa-onnx-c-api
+    PATHS
+      "${UTOPIC_SHERPA_ONNX_DIR}/lib"
+      "${UTOPIC_SHERPA_ONNX_DIR}/build/lib"
+      "${UTOPIC_SHERPA_ONNX_DIR}/build/bin"
+    NO_DEFAULT_PATH
+    REQUIRED)
 endif()
 
 # CLI: one-shot generation
@@ -176,3 +197,18 @@ if(NOT UTOPIC_ENABLE_STABLE_DIFFUSION)
 endif()
 set_target_properties(utopic_runner PROPERTIES
   BUILD_RPATH "${LLAMA_BIN}" INSTALL_RPATH "${LLAMA_BIN}")
+
+if(UTOPIC_ENABLE_SHERPA_ONNX)
+  add_library(utopic_sherpa_tts SHARED
+    "${UTOPIC_NATIVE_SOURCE_DIR}/sherpa_tts_plugin.cpp"
+    "${UTOPIC_NATIVE_SOURCE_DIR}/audio_engine.cpp")
+  target_include_directories(utopic_sherpa_tts PRIVATE
+    ${UTOPIC_INCLUDES}
+    "${UTOPIC_SHERPA_ONNX_DIR}"
+    "${UTOPIC_SHERPA_ONNX_DIR}/include")
+  target_link_libraries(utopic_sherpa_tts PRIVATE ${UTOPIC_SHERPA_ONNX_LIBRARY})
+  set_target_properties(utopic_sherpa_tts PROPERTIES
+    PREFIX ""
+    BUILD_RPATH "${UTOPIC_SHERPA_ONNX_DIR}/lib;${UTOPIC_SHERPA_ONNX_DIR}/build/lib;${UTOPIC_SHERPA_ONNX_DIR}/build/bin"
+    INSTALL_RPATH "${UTOPIC_SHERPA_ONNX_DIR}/lib;${UTOPIC_SHERPA_ONNX_DIR}/build/lib;${UTOPIC_SHERPA_ONNX_DIR}/build/bin")
+endif()

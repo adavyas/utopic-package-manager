@@ -147,6 +147,14 @@ To force Metal on macOS:
 utopic setup --backend metal
 ```
 
+To also build the optional native Kokoro TTS plugin, provide a local
+Sherpa-ONNX install or build tree that contains `sherpa-onnx/c-api/c-api.h` and
+`libsherpa-onnx-c-api`:
+
+```sh
+utopic setup --sherpa-onnx-dir /path/to/sherpa-onnx
+```
+
 ## Models
 
 `utopic chat`, `utopic run`, and `utopic models pull` accept either a local
@@ -165,7 +173,7 @@ endpoints, and output artifact type.
 | `flux-1-schnell-q4-native` | FLUX.1-schnell Q4 Native | image | native | Ready native image entry backed by stable-diffusion.cpp artifacts; `utopic setup` builds the image engine dependency with the native runner. |
 | `krea-2-raw` | Krea 2 Raw | image | bridge | High-quality Krea text-to-image model through Diffusers Krea2Pipeline; GB10 or high-memory CUDA recommended until Mac generation is validated. |
 | `cosmos3-super` | Cosmos3 Super Text2Image | image | bridge | Agentic high-memory NVIDIA Cosmos3 image model; preflights GPU memory before loading. |
-| `kokoro-82m` | Kokoro 82M | tts | bridge | Tiny, fast open-weight TTS model for local speech synthesis. |
+| `kokoro-82m` | Kokoro 82M | tts | native / bridge | Tiny, fast open-weight TTS model for local speech synthesis. Native path uses the optional Sherpa-ONNX plugin when setup is built with `--sherpa-onnx-dir`. |
 | `chatterbox` | Chatterbox | tts | bridge | Higher-quality open-weight TTS and voice cloning model. |
 | `dia-1.6b` | Dia 1.6B | tts | bridge | Open-weight dialogue TTS model for expressive multi-speaker speech. |
 | `ace-step-3.5b` | ACE-Step 3.5B | music | bridge | Open-weight music generation model for local text-to-music experiments. |
@@ -175,9 +183,10 @@ endpoints, and output artifact type.
 | `zuna` | ZUNA | misc | bridge | Open-weight EEG and signal foundation model exposed as a generic file-in/file-out artifact workflow. |
 
 The native text path is centered on DiffusionGemma canvas / entropy-bound GGUF
-models. Other modalities use bridge engines today but share the same catalog,
-model cache, OpenAI-compatible gateway, and MCP tool contract that future native
-C++ engines will use.
+models. Image also has a native stable-diffusion.cpp path, and Kokoro TTS has an
+optional native Sherpa-ONNX plugin path. Other modalities use bridge engines
+today but share the same catalog, model cache, OpenAI-compatible gateway, and
+MCP tool contract that future native C++ engines will use.
 
 Large bridge models can declare runtime requirements in the catalog. For
 example, `cosmos3-super` is discoverable through `utopic models list`,
@@ -615,6 +624,7 @@ The package manager owns the user-facing setup path:
 - use the vendored Utopic core source snapshot
 - fetch the pinned compatible public llama.cpp dependency source
 - configure the native build for Metal, CUDA, or CPU, including CUDA compiler and architecture detection
+- optionally build native plugin targets such as `utopic_sherpa_tts` when their dependency directories are supplied
 - build the dependency layer and Utopic
 - copy the final binaries into the Utopic cache
 
