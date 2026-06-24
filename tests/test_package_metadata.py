@@ -449,11 +449,18 @@ def test_model_catalog_declares_runtime_schema_for_every_entry():
         "engine",
         "runtime",
         "hardware",
+        "supported_backends",
+        "runner",
+        "native_status",
+        "expected_vram_gib",
+        "expected_ram_gib",
         "endpoints",
         "outputs",
     }
     valid_modalities = {"text", "image", "tts", "music", "video", "misc"}
     valid_runtimes = {"native", "bridge"}
+    valid_native_statuses = {"ready", "planned", "experimental", "unsupported_on_device"}
+    valid_backends = {"metal", "cuda", "cpu"}
 
     for entry in catalog:
         assert required_fields <= set(entry), entry["id"]
@@ -462,6 +469,14 @@ def test_model_catalog_declares_runtime_schema_for_every_entry():
         assert entry["runtime"] in valid_runtimes
         assert isinstance(entry["hardware"], list) and entry["hardware"]
         assert all(isinstance(item, str) and item for item in entry["hardware"])
+        assert isinstance(entry["supported_backends"], list) and entry["supported_backends"]
+        assert set(entry["supported_backends"]).issubset(valid_backends)
+        assert isinstance(entry["runner"], str) and entry["runner"].endswith("_runner")
+        assert entry["native_status"] in valid_native_statuses
+        assert isinstance(entry["expected_vram_gib"], (int, float)) and entry["expected_vram_gib"] > 0
+        assert isinstance(entry["expected_ram_gib"], (int, float)) and entry["expected_ram_gib"] > 0
+        if entry["native_status"] == "ready":
+            assert entry["runtime"] == "native"
         assert isinstance(entry["endpoints"], list) and entry["endpoints"]
         assert all(isinstance(item, str) and item.startswith("/v1/") for item in entry["endpoints"])
         assert isinstance(entry["outputs"], list) and entry["outputs"]
@@ -499,6 +514,7 @@ def test_model_catalog_includes_first_multimodal_model_set():
         "wan2.1-t2v-1.3b": ("video", "bridge"),
         "wan2.1-t2v-14b": ("video", "bridge"),
         "ltx-video": ("video", "bridge"),
+        "zuna": ("misc", "bridge"),
     }
 
     for model_id, (modality, runtime) in expected.items():

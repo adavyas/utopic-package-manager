@@ -2571,9 +2571,12 @@ def test_bridge_model_pull_prepares_metadata_cache(monkeypatch, tmp_path):
         "id": "qwen-image",
         "modality": "image",
         "name": "Qwen-Image",
+        "native_status": "planned",
         "outputs": ["image/png"],
         "repo": "Qwen/Qwen-Image",
+        "runner": "image_runner",
         "runtime": "bridge",
+        "supported_backends": ["metal", "cuda", "cpu"],
         "url": "https://huggingface.co/Qwen/Qwen-Image",
     }
     assert models.is_model_downloaded(models.get_model("qwen-image"))

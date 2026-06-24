@@ -35,6 +35,11 @@ class ModelEntry:
     engine: str = "native-gguf"
     runtime: str = "native"
     hardware: tuple[str, ...] = ("local",)
+    supported_backends: tuple[str, ...] = ("metal", "cuda", "cpu")
+    runner: str = ""
+    native_status: str = ""
+    expected_vram_gib: Optional[float] = None
+    expected_ram_gib: Optional[float] = None
     endpoints: tuple[str, ...] = ("/v1/chat/completions",)
     outputs: tuple[str, ...] = ("text",)
     repo: Optional[str] = None
@@ -46,9 +51,17 @@ class ModelEntry:
             return models_dir() / _safe_cache_name(self.id)
         return models_dir() / _safe_model_filename(self)
 
+    def __post_init__(self) -> None:
+        if not self.runner:
+            object.__setattr__(self, "runner", f"{self.modality}_runner" if self.runtime == "bridge" else "utopic_runner")
+        if not self.native_status:
+            object.__setattr__(self, "native_status", "planned" if self.runtime == "bridge" else "ready")
+
 
 VALID_MODALITIES = {"text", "image", "tts", "music", "video", "misc"}
 VALID_RUNTIMES = {"native", "bridge"}
+VALID_NATIVE_STATUSES = {"ready", "planned", "experimental", "unsupported_on_device"}
+VALID_BACKENDS = {"metal", "cuda", "cpu"}
 
 
 def _safe_model_filename(entry: ModelEntry) -> str:
@@ -131,6 +144,11 @@ def _validate_catalog_entry(item: object, index: int) -> ModelEntry:
     engine = _string_field(item, "engine", "native-gguf", index)
     runtime = _string_field(item, "runtime", "native", index)
     hardware = _string_list_field(item, "hardware", ["local"], index)
+    supported_backends = _string_list_field(item, "supported_backends", ["metal", "cuda", "cpu"], index)
+    runner = _string_field(item, "runner", f"{modality}_runner" if runtime == "bridge" else "utopic_runner", index)
+    native_status = _string_field(item, "native_status", "ready" if runtime == "native" else "planned", index)
+    expected_vram_gib = _number_field(item, "expected_vram_gib", index)
+    expected_ram_gib = _number_field(item, "expected_ram_gib", index)
     endpoints = _string_list_field(item, "endpoints", ["/v1/chat/completions"], index)
     outputs = _string_list_field(item, "outputs", ["text"], index)
     repo = item.get("repo")
@@ -145,6 +163,15 @@ def _validate_catalog_entry(item: object, index: int) -> ModelEntry:
         raise RuntimeError(f"Invalid model catalog entry {index}: modality must be one of {sorted(VALID_MODALITIES)}")
     if runtime not in VALID_RUNTIMES:
         raise RuntimeError(f"Invalid model catalog entry {index}: runtime must be one of {sorted(VALID_RUNTIMES)}")
+    if native_status not in VALID_NATIVE_STATUSES:
+        raise RuntimeError(
+            f"Invalid model catalog entry {index}: native_status must be one of {sorted(VALID_NATIVE_STATUSES)}"
+        )
+    unknown_backends = sorted(set(supported_backends) - VALID_BACKENDS)
+    if unknown_backends:
+        raise RuntimeError(f"Invalid model catalog entry {index}: unsupported backends: {unknown_backends}")
+    if native_status == "ready" and runtime != "native":
+        raise RuntimeError(f"Invalid model catalog entry {index}: only native runtime models can be native_status=ready")
     if runtime == "native" and not item["filename"].lower().endswith(".gguf"):
         raise RuntimeError(f"Invalid model catalog entry {index}: native models must use a GGUF filename")
     if runtime == "bridge" and engine not in bridge.ADAPTERS:
@@ -164,6 +191,11 @@ def _validate_catalog_entry(item: object, index: int) -> ModelEntry:
         engine=engine,
         runtime=runtime,
         hardware=tuple(hardware),
+        supported_backends=tuple(supported_backends),
+        runner=runner,
+        native_status=native_status,
+        expected_vram_gib=expected_vram_gib,
+        expected_ram_gib=expected_ram_gib,
         endpoints=tuple(endpoints),
         outputs=tuple(outputs),
         repo=repo,
@@ -172,7 +204,7 @@ def _validate_catalog_entry(item: object, index: int) -> ModelEntry:
 
 
 def _validate_requirements(requirements: dict[str, object], index: int) -> None:
-    for key in ("min_gpu_memory_gib", "preferred_gpu_memory_gib"):
+    for key in ("min_gpu_memory_gib", "preferred_gpu_memory_gib", "min_ram_gib", "preferred_ram_gib"):
         value = requirements.get(key)
         if value is not None and not (
             isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0
@@ -188,6 +220,15 @@ def _string_field(item: dict[str, object], field: str, default: str, index: int)
     if not isinstance(value, str) or not value:
         raise RuntimeError(f"Invalid model catalog entry {index}: {field} must be a non-empty string")
     return value
+
+
+def _number_field(item: dict[str, object], field: str, index: int) -> Optional[float]:
+    value = item.get(field)
+    if value is None:
+        return None
+    if not isinstance(value, (int, float)) or isinstance(value, bool) or value <= 0:
+        raise RuntimeError(f"Invalid model catalog entry {index}: {field} must be a positive number")
+    return float(value)
 
 
 def _string_list_field(
@@ -300,6 +341,9 @@ def _bridge_model_metadata(entry: ModelEntry) -> dict[str, object]:
         "endpoints": list(entry.endpoints),
         "engine": entry.engine,
         "hardware": list(entry.hardware),
+        "supported_backends": list(entry.supported_backends),
+        "runner": entry.runner,
+        "native_status": entry.native_status,
         "id": entry.id,
         "modality": entry.modality,
         "name": entry.name,
@@ -308,6 +352,10 @@ def _bridge_model_metadata(entry: ModelEntry) -> dict[str, object]:
         "runtime": entry.runtime,
         "url": entry.url,
     }
+    if entry.expected_vram_gib is not None:
+        payload["expected_vram_gib"] = entry.expected_vram_gib
+    if entry.expected_ram_gib is not None:
+        payload["expected_ram_gib"] = entry.expected_ram_gib
     if entry.requirements:
         payload["requirements"] = entry.requirements
     return payload
@@ -390,7 +438,10 @@ def _print_models() -> None:
     for entry in list_models():
         marker = "*" if entry.recommended else " "
         status = "downloaded" if is_model_downloaded(entry) else "not downloaded"
-        print(f"{marker} {entry.id:28} {entry.size:14} {entry.modality:6} {entry.runtime:6} {status}")
+        print(
+            f"{marker} {entry.id:28} {entry.size:14} {entry.modality:6} "
+            f"{entry.runtime:6} {entry.native_status:8} {status}"
+        )
         print(f"  {entry.name}")
         print(f"  {entry.description}")
 
@@ -414,6 +465,11 @@ def _native_model_check(entry: ModelEntry) -> dict[str, object]:
         "runtime": entry.runtime,
         "modality": entry.modality,
         "engine": entry.engine,
+        "runner": entry.runner,
+        "native_status": entry.native_status,
+        "supported_backends": list(entry.supported_backends),
+        "expected_vram_gib": entry.expected_vram_gib,
+        "expected_ram_gib": entry.expected_ram_gib,
         "status": "ready" if ready else "missing_model_file",
         "ready": ready,
         "requirements": entry.requirements or {},
@@ -457,6 +513,11 @@ def _bridge_model_check(entry: ModelEntry) -> dict[str, object]:
         "runtime": entry.runtime,
         "modality": entry.modality,
         "engine": entry.engine,
+        "runner": entry.runner,
+        "native_status": entry.native_status,
+        "supported_backends": list(entry.supported_backends),
+        "expected_vram_gib": entry.expected_vram_gib,
+        "expected_ram_gib": entry.expected_ram_gib,
         "status": "ready" if ready else "not_ready",
         "ready": ready,
         "requirements": entry.requirements or {},

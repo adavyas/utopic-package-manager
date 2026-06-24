@@ -120,13 +120,19 @@ def native_readiness_error(entry: models.ModelEntry) -> dict[str, Any]:
             "modality": entry.modality,
             "engine": entry.engine,
             "runtime": entry.runtime,
-            "native_status": "planned",
+            "runner": entry.runner,
+            "native_status": entry.native_status,
+            "supported_backends": list(entry.supported_backends),
+            "expected_vram_gib": entry.expected_vram_gib,
+            "expected_ram_gib": entry.expected_ram_gib,
         },
     )
     payload["error"]["model"] = entry.id
     payload["error"]["modality"] = entry.modality
     payload["error"]["engine"] = entry.engine
-    payload["error"]["native_status"] = "planned"
+    payload["error"]["runner"] = entry.runner
+    payload["error"]["native_status"] = entry.native_status
+    payload["error"]["supported_backends"] = list(entry.supported_backends)
     return payload
 
 
