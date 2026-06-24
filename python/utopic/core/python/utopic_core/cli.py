@@ -1095,12 +1095,17 @@ def _run(argv: Sequence[str]) -> int:
         _ensure_setup(setup_enabled, models.TEXT_RUNNER)
         _native.binary_path(models.TEXT_RUNNER)
         model_path = models.ensure_model(model_arg)
-        active_model_id = model_arg if model_arg and models.get_model(model_arg) is not None else "utopic"
-        return _run_gateway_only(
+        native_port = _value_after(
+            server_args,
+            "--native-port",
+            _default_native_port(port),
+        )
+        return _run_server(
+            str(model_path),
+            _native_server_args(server_args),
             host,
             port,
-            active_text_model_path=model_path,
-            active_text_model_id=active_model_id,
+            native_port,
         )
     except RuntimeError as exc:
         print(f"utopic run: {exc}", file=sys.stderr)
