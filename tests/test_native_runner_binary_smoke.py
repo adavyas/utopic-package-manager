@@ -311,6 +311,10 @@ def test_native_runner_reports_planned_non_text_task_readiness(tmp_path):
                         "supported_backends": ["metal", "cuda"],
                         "expected_vram_gib": 8.0,
                         "expected_ram_gib": 16.0,
+                        "requirements": {
+                            "min_ram_gib": 16.0,
+                            "allow_cpu": False,
+                        },
                         "oom_policy": {
                             "action": "fail_before_runner",
                             "min_gpu_memory_gib": 8.0,
@@ -341,6 +345,10 @@ def test_native_runner_reports_planned_non_text_task_readiness(tmp_path):
     assert payload["error"]["detail"]["supported_backends"] == ["metal", "cuda"]
     assert payload["error"]["detail"]["expected_vram_gib"] == 8.0
     assert payload["error"]["detail"]["expected_ram_gib"] == 16.0
+    assert payload["error"]["detail"]["requirements"] == {
+        "min_ram_gib": 16.0,
+        "allow_cpu": False,
+    }
     assert payload["error"]["detail"]["oom_policy"] == {
         "action": "fail_before_runner",
         "min_gpu_memory_gib": 8.0,

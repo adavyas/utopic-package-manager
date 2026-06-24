@@ -509,6 +509,7 @@ static json planned_native_response(const runner_request & req) {
         {"supported_backends", req.options.value("supported_backends", json::array())},
         {"expected_vram_gib", req.options.value("expected_vram_gib", json())},
         {"expected_ram_gib", req.options.value("expected_ram_gib", json())},
+        {"requirements", req.options.value("requirements", json::object())},
         {"oom_policy", req.options.value("oom_policy", json::object())},
         {"detected", detected_capacity()},
     });

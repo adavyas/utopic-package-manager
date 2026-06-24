@@ -269,6 +269,7 @@ def _enrich_native_readiness_error(entry: models.ModelEntry, payload: dict[str, 
     detail.setdefault("supported_backends", list(entry.supported_backends))
     detail.setdefault("expected_vram_gib", entry.expected_vram_gib)
     detail.setdefault("expected_ram_gib", entry.expected_ram_gib)
+    detail.setdefault("requirements", models.effective_requirements(entry))
 
     error["model"] = entry.id
     error["modality"] = entry.modality
