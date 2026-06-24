@@ -455,6 +455,8 @@ def test_readme_documents_supported_models_without_prohibited_mentions():
     assert "UTOPIC_EXPERIMENTAL_BRIDGE=1" in readme
     assert "utopic models check qwen-image" in readme
     assert "utopic models check --all" in readme
+    assert "reports `native_runner_not_ready` until a C++ runner exists" in readme
+    assert "bridge dependency checks are available only when `UTOPIC_EXPERIMENTAL_BRIDGE=1`" in readme
     assert "utopic_models_check" in readme
     assert 'uv pip install "utopic[image]"' in readme
     assert 'uv pip install "utopic[tts]"' in readme
@@ -466,7 +468,10 @@ def test_readme_documents_supported_models_without_prohibited_mentions():
     assert 'uv pip install "utopic[video]"' in readme
     assert 'uv pip install "utopic[bridge]"' in readme
     assert "utopic run qwen-image" in readme
-    assert "bridge-only models start the gateway without starting a native text server" in readme.lower()
+    assert "planned non-text models start the gateway without starting a native text server" in readme.lower()
+    assert "Real bridge generation" not in readme
+    assert "Heavy bridge models" not in readme
+    assert "compatibility testbeds, not the default production runtime" in readme
     assert "utopic-bridge diffusers --check" in readme
     assert "torch/torchvision versions are incompatible" in readme
     assert "/v1/utopic/runs/{run_id}/events" in readme
@@ -524,6 +529,17 @@ def test_model_catalog_declares_runtime_schema_for_every_entry():
         assert all(isinstance(item, str) and item.startswith("/v1/") for item in entry["endpoints"])
         assert isinstance(entry["outputs"], list) and entry["outputs"]
         assert all(isinstance(item, str) and item for item in entry["outputs"])
+
+
+def test_vendored_native_docs_describe_planned_modalities_as_native_readiness():
+    supported = (REPO_ROOT / "python" / "utopic" / "core" / "native" / "SUPPORTED_MODELS.md").read_text(
+        encoding="utf-8"
+    )
+    server = (REPO_ROOT / "python" / "utopic" / "core" / "native" / "SERVER.md").read_text(encoding="utf-8")
+
+    assert "bridge runtimes today" not in supported
+    assert "| Qwen-Image | image | planned native runner |" in supported
+    assert "| video | `/v1/videos/generations`, `/v1/responses` | planned native runner" in server
 
 
 def test_catalog_defaults_to_diffusiongemma_and_excludes_legacy_masked_models():

@@ -988,7 +988,7 @@ Checks:
   - cache and binary directories
   - detected backend, device, and reason
   - whether cached native binaries are current
-  - required setup tools: cmake and git
+  - package-manager setup tools: cmake and git
   - optional chat tool: Node.js
   - explicit experimental bridge adapters for planned image, speech, music, video, and misc artifacts
 """
@@ -1075,14 +1075,11 @@ def _doctor(argv: Sequence[str]) -> int:
         print(f"utopic doctor: {exc}", file=sys.stderr)
         return 1
 
-    required_tools = ("cmake", "git")
-    missing_required: list[str] = []
+    setup_tools = ("cmake", "git")
     tool_paths = {}
-    for name in required_tools:
+    for name in setup_tools:
         path = shutil.which(name)
         tool_paths[name] = path
-        if path is None:
-            missing_required.append(name)
 
     print(f"Utopic {__version__}")
     print(f"Cache root: {installer.cache_root()}")
@@ -1100,18 +1097,15 @@ def _doctor(argv: Sequence[str]) -> int:
         else "missing or stale"
     )
     print(f"Native cache: {native_cache}")
-    for name in required_tools:
-        print(f"{name}: {tool_paths[name] or 'missing'}")
+    for name in setup_tools:
+        if tool_paths[name] is None:
+            print(f"{name}: missing (install via package manager setup when building native binaries)")
+        else:
+            print(f"{name}: {tool_paths[name]}")
     print(f"Node.js: {_node_status()}")
     for line in _bridge_doctor_lines():
         print(line)
 
-    if missing_required:
-        print(
-            f"Missing required setup tools: {', '.join(missing_required)}",
-            file=sys.stderr,
-        )
-        return 1
     return 0
 
 

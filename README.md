@@ -270,25 +270,27 @@ To prepare every catalog entry explicitly:
 utopic models pull --all
 ```
 
-This downloads every native GGUF catalog file and prepares bridge metadata
-directories for image, TTS, music, video, and misc artifact models. It is intentionally
-opt-in because the DiffusionGemma quantization ladder is large. For most users,
-pull the single text model or bridge model they plan to run first.
+This downloads every native GGUF catalog file and prepares metadata directories
+for planned image, TTS, music, video, and misc artifact models. It is
+intentionally opt-in because the DiffusionGemma quantization ladder is large.
+For most users, pull the single native text model they plan to run first.
 
 `utopic models check --all` prints one JSON readiness report for every catalog
 model and exits nonzero if any model is not ready. `utopic models check <alias>`
 prints the same readiness shape for one selected model. For native GGUF models
-it checks the local file and expected byte size when known. For bridge models it
-checks both the prepared model cache metadata and the optional Python engine
-dependencies, then prints concrete next steps such as `utopic models pull
-qwen-image` or the relevant `pip install ...` command.
+it checks the local file and expected byte size when known. For planned non-text
+models it reports `native_runner_not_ready` until a C++ runner exists, plus the
+declared endpoints, model metadata, and hardware requirements. Optional Python
+bridge dependency checks are available only when `UTOPIC_EXPERIMENTAL_BRIDGE=1`
+or by running `utopic-bridge <engine> --check` directly.
 
-`utopic doctor` prints the detected backend, native binary cache state, required
-setup tools, Node.js status, and one compact bridge-engine readiness line for
-each image, TTS, music, video, and misc adapter. For detailed bridge import errors,
-run the matching `utopic-bridge <engine> --check` command.
+`utopic doctor` prints the detected backend, native binary cache state,
+package-manager setup-tool status, Node.js status, and one compact experimental
+bridge-engine readiness line for each image, TTS, music, video, and misc
+adapter. Missing `cmake` or `git` is informational here; `utopic setup` owns the
+actual native build.
 
-Install bridge dependencies by modality when you want non-text generation:
+Install bridge dependencies by modality only for explicit experimental adapter runs:
 
 ```sh
 uv pip install --python ~/.venvs/utopic/bin/python "utopic[image]"   # Qwen-Image and FLUX through Diffusers
@@ -330,7 +332,7 @@ uv pip install git+https://github.com/ace-step/ACE-Step.git
 utopic-bridge ace-step --check
 ```
 
-Generate local artifacts directly from the same catalog and gateway contract:
+Call the same catalog and gateway contract for planned artifact modalities:
 
 ```sh
 utopic generate image qwen-image -p "A crisp product photo of a titanium robot assistant" --size 1024x1024 --steps 30 -o image.png
@@ -344,8 +346,10 @@ utopic generate misc zuna --artifact /path/to/input.bin -o output.bin
 `utopic generate video --quality high` selects the higher-quality
 `wan2.1-t2v-14b` catalog entry when no explicit video model is provided.
 `--quality fast` selects the smaller `wan2.1-t2v-1.3b` model. The `speech`
-subcommand also accepts the `tts` alias. Use `--param KEY=JSON` to pass an
-engine-specific bridge option that is not exposed as a first-class CLI flag yet.
+subcommand also accepts the `tts` alias. Until native C++ runners exist for
+these non-text modalities, the default response is a structured
+native-readiness error. Use `--param KEY=JSON` only for explicit experimental
+bridge runs enabled with `UTOPIC_EXPERIMENTAL_BRIDGE=1`.
 
 Start the local runtime and print the live OpenAI-compatible and MCP URLs:
 
@@ -382,15 +386,16 @@ If you need to choose the private native backend port explicitly:
 utopic run diffusiongemma-26b-a4b-q4 --port 8910 --native-port 9910 -ngl 99
 ```
 
-Bridge-only models start the gateway without starting a native text server:
+Planned non-text models start the gateway without starting a native text server:
 
 ```sh
 utopic run qwen-image --port 8910
 ```
 
-For bridge-only models, the command prints the OpenAI-compatible endpoint(s)
-declared by that model, such as `/v1/images/generations` and `/v1/responses`,
-plus `/v1/models` and `/mcp`.
+For planned non-text models, the command prints the OpenAI-compatible
+endpoint(s) declared by that model, such as `/v1/images/generations` and
+`/v1/responses`, plus `/v1/models` and `/mcp`. Requests return
+native-readiness errors until the matching C++ runner is available.
 
 `utopic gateway` remains available for advanced setups where you already have a
 native text server running separately:
@@ -399,8 +404,8 @@ native text server running separately:
 utopic gateway --port 8911 --native-base-url http://127.0.0.1:8910
 ```
 
-The gateway exposes catalog and bridge contracts even before every modality has
-a native C++ engine:
+The gateway exposes catalog and native-readiness contracts even before every
+modality has a native C++ engine:
 
 ```text
 GET  http://127.0.0.1:8911/v1/models
@@ -418,11 +423,11 @@ The `/mcp` route speaks JSON-RPC over HTTP for MCP `initialize`, `ping`, `tools/
 generation, speech, music, video, misc artifacts, and model cache operations, all routed through
 the same runtime boundary as the OpenAI-compatible endpoints.
 
-Bridge engines use the same `utopic-bridge/v1` contract that future native C++
-engines will replace. A bridge command receives one JSON request on stdin and
-returns one JSON response on stdout. The request includes the endpoint, model
-metadata, normalized input, model cache path, output directory, progress event
-path, and hardware/output metadata:
+Experimental bridge engines use the same artifact/progress shape that native
+C++ engines will replace. A bridge command receives one JSON request on stdin
+and returns one JSON response on stdout. The request includes the endpoint,
+model metadata, normalized input, model cache path, output directory, progress
+event path, and hardware/output metadata:
 
 ```json
 {
@@ -469,9 +474,10 @@ GET /v1/utopic/runs/{run_id}/events
 `/v1/responses` is normalized at the gateway boundary. Text requests are
 translated to native chat-completions input and wrapped back into a
 Responses-style object. Image, TTS, music, video, and misc requests translate
-Responses `input` text into the bridge `prompt`, `input`, or `artifact` field and return a
-Responses-style artifact message, while the modality-specific endpoints return
-the richer `utopic.artifact.response` object.
+Responses `input` text into the planned modality request shape. By default they
+return native-readiness errors until a C++ runner exists; explicit experimental
+bridge runs return a Responses-style artifact message, while the
+modality-specific endpoints return the richer `utopic.artifact.response` object.
 
 The gateway does not run Python bridge adapters by default. Planned image, TTS,
 music, video, and misc models route through the native runner contract and
@@ -524,15 +530,16 @@ Current release smoke coverage:
 |---|---|
 | Package install | Fresh wheel install, `utopic-runtime --help`, and `utopic-bridge --help` |
 | Runtime gateway | `/v1/models`, `/v1/responses`, modality-specific OpenAI-style routes, `/mcp`, and MCP `tools/list` / `tools/call` |
-| Hardware surface | Apple Silicon, GB10/DGX Spark, RTX 4090 CUDA, and 4x A100 CUDA smoke tests for installed wheel, catalog, MCP tools, bridge diagnostics, and artifact contract |
+| Hardware surface | Apple Silicon, GB10/DGX Spark, RTX 4090 CUDA, and 4x A100 CUDA smoke tests for installed wheel, catalog, MCP tools, native-readiness diagnostics, and artifact contract |
 | Native text generation | DiffusionGemma Q4_K_M native C++ smoke tests on GB10/DGX Spark, 6x RTX 4090 CUDA, and 4x A100 CUDA; Q5_K_M, Q6_K, and Q8_0 native C++ smoke tests on 4x A100 CUDA, using the package-managed llama.cpp build |
-| Real bridge generation | Qwen-Image PNG on CUDA, Kokoro WAV, Chatterbox WAV, Dia WAV, ACE-Step WAV through the MCP gateway on CUDA, and Wan2.1 1.3B MP4 on CUDA |
-| Heavy bridge models | FLUX.1-schnell, Krea 2 Raw, Cosmos3 Super, LTX, and ZUNA expose stable routes and diagnostics, but can still require Hugging Face access, a complete local model download, sufficient GPU memory, and matching local Python engine dependencies before real generation |
+| Planned artifact modalities | Qwen-Image, FLUX, Krea, Cosmos3, Kokoro, Chatterbox, Dia, ACE-Step, Wan, LTX, and ZUNA expose stable routes, MCP tools, hardware preflight metadata, and native-readiness errors until native C++ runners land |
+| Experimental bridge adapters | Optional `utopic-bridge` commands expose dependency diagnostics and local Python adapter entrypoints when `UTOPIC_EXPERIMENTAL_BRIDGE=1`; they are compatibility testbeds, not the default production runtime |
 
 The packaged `utopic-bridge` command provides stable adapter entrypoints and
 dependency diagnostics for `diffusers`, `cosmos`, `kokoro`, `chatterbox`, `dia`,
-`ace-step`, `wan`, `ltx`, and `artifact`. The adapters translate the shared Utopic request into
-their local Python engines:
+`ace-step`, `wan`, `ltx`, and `artifact`. With the experimental gate enabled,
+the adapters translate the shared Utopic request into their local Python
+engines:
 
 - `diffusers`: Qwen-Image, FLUX, and Krea image generation.
 - `cosmos`: Cosmos3 Super diagnostics and external bridge-command handoff.
@@ -545,15 +552,15 @@ their local Python engines:
 - `ltx`: LTX-Video generation through Diffusers.
 - `artifact`: generic misc file-in/file-out artifact bridge, including the ZUNA catalog entry.
 
-If an optional engine package is missing, the gateway returns a structured
-`bridge_dependency_missing` response with an install hint. If a fast-moving
-upstream package changes its Python API, the gateway returns
-`bridge_adapter_api_mismatch` instead of crashing. Bridge failures include
-`run_id`, `progress_url`, and any progress events already emitted by the
-adapter, so OpenAI clients and MCP hosts can still show useful diagnostics for
-long image, speech, music, video, or misc jobs. These bridge commands can be replaced
-by future native C++ engines without changing the OpenAI endpoint, MCP tool,
-cache, progress, or artifact contract.
+If an optional engine package is missing during an explicit experimental bridge
+run, the gateway returns a structured `bridge_dependency_missing` response with
+an install hint. If a fast-moving upstream package changes its Python API, the
+gateway returns `bridge_adapter_api_mismatch` instead of crashing. Bridge
+failures include `run_id`, `progress_url`, and any progress events already
+emitted by the adapter, so OpenAI clients and MCP hosts can still show useful
+diagnostics for long image, speech, music, video, or misc jobs. These bridge
+commands can be replaced by future native C++ engines without changing the
+OpenAI endpoint, MCP tool, cache, progress, or artifact contract.
 
 The MCP endpoint exposes the same runtime through tools:
 

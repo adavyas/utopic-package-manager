@@ -1185,7 +1185,7 @@ def test_cli_doctor_reports_environment_without_running_setup(monkeypatch, tmp_p
     assert cache_checks == [cli.installer.BIN_NAMES]
 
 
-def test_cli_doctor_returns_failure_when_required_setup_tools_are_missing(monkeypatch, tmp_path, capsys):
+def test_cli_doctor_reports_missing_package_manager_setup_tools_without_failing(monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(cli.installer, "cache_root", lambda: tmp_path / "cache")
     monkeypatch.setattr(cli.installer, "bin_dir", lambda: tmp_path / "bin")
     monkeypatch.setattr(cli.installer, "native_installation_is_current", lambda binary_names: False)
@@ -1200,14 +1200,14 @@ def test_cli_doctor_returns_failure_when_required_setup_tools_are_missing(monkey
     )
     monkeypatch.setattr(shutil, "which", lambda name: None)
 
-    assert cli.main(["doctor"]) == 1
+    assert cli.main(["doctor"]) == 0
 
     captured = capsys.readouterr()
     assert "Native cache: missing or stale" in captured.out
-    assert "cmake: missing" in captured.out
-    assert "git: missing" in captured.out
+    assert "cmake: missing (install via package manager setup when building native binaries)" in captured.out
+    assert "git: missing (install via package manager setup when building native binaries)" in captured.out
     assert "Node.js: missing (Python fallback chat remains available)" in captured.out
-    assert "Missing required setup tools: cmake, git" in captured.err
+    assert "Missing required setup tools" not in captured.err
 
 
 def test_cli_doctor_bridge_line_collapses_multiline_api_errors():
