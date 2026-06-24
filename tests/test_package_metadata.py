@@ -101,6 +101,15 @@ def test_vendor_script_sources_chat_artifact_from_typescript_build_output():
     assert 'tmp / "python" / "utopic_core" / "node"' not in vendor_script
 
 
+def test_vendor_script_does_not_import_native_source_from_utopic():
+    vendor_script = (REPO_ROOT / "scripts" / "vendor_core.py").read_text(encoding="utf-8")
+
+    assert 'tmp / "native"' not in vendor_script
+    assert "copytree(tmp / \"native\"" not in vendor_script
+    assert "shutil.rmtree(CORE_DIR)" not in vendor_script
+    assert "core native source is owned by this repository" in vendor_script
+
+
 def test_vendored_core_layout_exists():
     assert (REPO_ROOT / "python" / "utopic" / "cmake" / "CMakeLists.txt").exists()
     assert not (REPO_ROOT / "python" / "utopic" / "core" / "native" / "CMakeLists.txt").exists()

@@ -2,12 +2,12 @@
 
 Python package management for the Utopic native runtime.
 
-This repository is intentionally thin. The wheel installs Python launchers plus
-a pinned vendored snapshot of the shippable Utopic runtime source. Product
-runtime code, native C++ code, and the TypeScript chat UI are developed in the
-main Utopic repository; this repository packages that snapshot and owns setup,
-dependency checkout, build configuration, and binary installation through
-`utopic setup`.
+This repository is intentionally thin from the user's perspective. The wheel
+installs Python launchers, the package-owned native C++ runtime source, and a
+pinned vendored snapshot of Utopic's Python control plane and built chat UI.
+Utopic owns product UX, catalog, MCP, OpenAI gateway, and TypeScript chat source;
+this repository owns native C++ source packaging, setup, dependency checkout,
+build configuration, and binary installation through `utopic setup`.
 
 ## Install
 
@@ -634,8 +634,9 @@ model alias.
 
 ## Development
 
-Runtime, native, model catalog, and chat UI source changes should land in the
-main Utopic repository first. Then vendor a pinned core snapshot here:
+Native C++ and CMake changes land directly in this repository. Python control
+plane, model catalog, MCP/OpenAI routing, and chat UI source changes land in the
+main Utopic repository first; then vendor a pinned control-plane snapshot here:
 
 ```sh
 python scripts/vendor_core.py --ref <utopic-commit>

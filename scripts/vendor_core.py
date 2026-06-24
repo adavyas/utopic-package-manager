@@ -26,12 +26,15 @@ def main() -> int:
     run(["git", "clone", args.repo, str(tmp)])
     run(["git", "checkout", args.ref], cwd=tmp)
 
-    if CORE_DIR.exists():
-        shutil.rmtree(CORE_DIR)
     CORE_DIR.mkdir(parents=True, exist_ok=True)
     ignore = shutil.ignore_patterns("CMakeLists.txt", ".gitignore", "__pycache__", "*.pyc", "*.pyo")
-    shutil.copytree(tmp / "native", CORE_DIR / "native", ignore=ignore)
-    shutil.copytree(tmp / "python", CORE_DIR / "python", ignore=ignore)
+
+    # The core native source is owned by this repository. Vendoring only refreshes
+    # the Utopic Python control plane and built chat UI snapshot.
+    python_dir = CORE_DIR / "python"
+    if python_dir.exists():
+        shutil.rmtree(python_dir)
+    shutil.copytree(tmp / "python", python_dir, ignore=ignore)
 
     chat_dir = tmp / "chat"
     run(["npm", "ci"], cwd=chat_dir)
