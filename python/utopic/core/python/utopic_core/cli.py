@@ -518,6 +518,7 @@ def _print_top_help() -> None:
 Commands:
   chat      Start the bundled chat TUI. Runs setup on first use.
   run       Start the unified OpenAI-compatible and MCP runtime, or run one-shot prompts with -p.
+  serve     Alias for `utopic run` in server mode.
   generate  Generate image, speech, music, video, or misc artifacts.
   gateway   Start the unified multimodal OpenAI-compatible and MCP gateway.
   mcp       Start the MCP stdio server. Use --runtime for the Python gateway tools.
@@ -530,6 +531,7 @@ Examples:
   utopic chat
   utopic chat diffusiongemma-26b-a4b-q4
   utopic run diffusiongemma-26b-a4b-q4 --port 8910 -ngl 99
+  utopic serve diffusiongemma-26b-a4b-q4 --port 8910 -ngl 99
   utopic generate video --quality high -p "cinematic glass city sunrise" -o video.mp4
   utopic generate misc zuna --artifact /path/to/input.bin -o output.bin
   utopic gateway --port 8911
@@ -1064,7 +1066,7 @@ def main(argv: Optional[Sequence[str]] = None) -> Optional[int]:
         raise SystemExit(chat.launch(rest))
     if command == "models":
         raise SystemExit(models.main(rest))
-    if command == "run":
+    if command in {"run", "serve"}:
         return _run(rest)
     if command == "generate":
         return _generate(rest)

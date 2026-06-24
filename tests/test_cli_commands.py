@@ -547,10 +547,11 @@ def test_python_module_entrypoint_matches_console_script():
     assert completed.stderr == ""
 
 
-def test_cli_help_mentions_mcp_command(capsys):
+def test_cli_help_mentions_runtime_commands(capsys):
     assert cli.main(["--help"]) == 0
 
     captured = capsys.readouterr()
+    assert "serve     Alias for `utopic run` in server mode." in captured.out
     assert "mcp       Start the MCP stdio server" in captured.out
 
 
@@ -565,6 +566,19 @@ def test_cli_mcp_delegates_to_mcp_module(monkeypatch):
 
     assert cli.main(["mcp", "--runtime"]) == 0
     assert captured["args"] == ["--runtime"]
+
+
+def test_cli_serve_delegates_to_run(monkeypatch):
+    captured = {}
+
+    def fake_run(args):
+        captured["args"] = args
+        return 0
+
+    monkeypatch.setattr(cli, "_run", fake_run)
+
+    assert cli.main(["serve", "diffusiongemma-26b-a4b-q4", "--port", "8910"]) == 0
+    assert captured["args"] == ["diffusiongemma-26b-a4b-q4", "--port", "8910"]
 
 
 def test_cli_rejects_unknown_command_before_setup(monkeypatch, capsys):
