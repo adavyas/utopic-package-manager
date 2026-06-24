@@ -118,6 +118,10 @@ def bin_dir() -> Path:
     return cache_root() / "bin"
 
 
+def lib_dir() -> Path:
+    return bin_dir() / "lib"
+
+
 def install_metadata_path() -> Path:
     return bin_dir() / INSTALL_METADATA_NAME
 
@@ -572,7 +576,24 @@ def runner_environment() -> dict[str, str]:
     device = metadata.get("device")
     if isinstance(device, str) and device:
         env["UTOPIC_RUNTIME_DEVICE"] = device
+    library_path = str(lib_dir())
+    path_var = _runtime_library_path_variable()
+    existing_path = os.environ.get(path_var)
+    env[path_var] = (
+        library_path
+        if not existing_path
+        else os.pathsep.join([library_path, existing_path])
+    )
     return env
+
+
+def _runtime_library_path_variable() -> str:
+    system = platform.system()
+    if system == "Darwin":
+        return "DYLD_LIBRARY_PATH"
+    if system == "Windows":
+        return "PATH"
+    return "LD_LIBRARY_PATH"
 
 
 def _write_install_metadata(
@@ -664,17 +685,13 @@ def _metadata_runtime_libs_exist(metadata: Mapping[str, object]) -> bool:
     raw_libs = metadata.get("llama_runtime_libs")
     if not isinstance(raw_libs, list):
         return False
-    raw_llama_dir = metadata.get("llama_dir")
-    if not isinstance(raw_llama_dir, str) or not raw_llama_dir:
-        return False
-    llama_dir = Path(raw_llama_dir)
     for raw_lib in raw_libs:
         if not isinstance(raw_lib, str) or not raw_lib:
             return False
         rel = Path(raw_lib)
         if rel.is_absolute() or ".." in rel.parts:
             return False
-        if not (llama_dir / rel).is_file():
+        if not (lib_dir() / rel.name).is_file():
             return False
     return True
 
@@ -829,6 +846,26 @@ def _install_binaries(build_dir: Path) -> None:
             _run(["codesign", "--force", "--sign", "-", dest])
 
 
+def _install_runtime_libs(llama_dir: Path) -> None:
+    dest_dir = lib_dir()
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    expected_names: set[str] = set()
+
+    for raw_lib in _llama_runtime_libs(llama_dir):
+        rel = Path(raw_lib)
+        src = llama_dir / rel
+        dest = dest_dir / rel.name
+        expected_names.add(dest.name)
+        if not src.is_file():
+            raise RuntimeError(f"Expected llama.cpp runtime library was not found: {src}")
+        shutil.copy2(src, dest)
+
+    for existing in dest_dir.iterdir():
+        if existing.is_file() and _is_llama_runtime_lib(existing.name):
+            if existing.name not in expected_names:
+                existing.unlink()
+
+
 def setup(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         prog="utopic setup",
@@ -928,6 +965,7 @@ def setup(argv: Optional[Sequence[str]] = None) -> int:
         return 0
 
     _install_binaries(native_build_dir)
+    _install_runtime_libs(llama_dir)
     _write_install_metadata(
         backend_decision,
         requested_backend=requested_backend,

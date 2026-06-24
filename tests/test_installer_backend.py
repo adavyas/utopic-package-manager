@@ -12,6 +12,15 @@ def _write_executable(path: Path) -> None:
     path.chmod(0o755)
 
 
+def _library_path_variable() -> str:
+    system = installer.platform.system()
+    if system == "Darwin":
+        return "DYLD_LIBRARY_PATH"
+    if system == "Windows":
+        return "PATH"
+    return "LD_LIBRARY_PATH"
+
+
 def test_dry_run_quotes_arguments_that_need_shell_escaping(capsys):
     installer._run(["cmake", "-DCMAKE_BUILD_RPATH=/a;/b"], dry_run=True)
 
@@ -285,6 +294,24 @@ def test_install_binaries_ad_hoc_signs_macos_executables(monkeypatch, tmp_path):
         ["codesign", "--force", "--sign", "-", dest_dir / name]
         for name in installer.BIN_NAMES
     ]
+
+
+def test_install_runtime_libs_copies_llama_shared_libraries_to_install_lib_dir(monkeypatch, tmp_path):
+    llama_bin = tmp_path / "src" / "llama.cpp" / "build" / "bin"
+    llama_bin.mkdir(parents=True)
+    llama_dir = tmp_path / "src" / "llama.cpp"
+    bin_dir = tmp_path / "install" / "bin"
+    (llama_bin / "libllama.dylib").write_text("llama", encoding="utf-8")
+    (llama_bin / "libggml.dylib").write_text("ggml", encoding="utf-8")
+    (llama_bin / "notes.txt").write_text("ignore", encoding="utf-8")
+
+    monkeypatch.setattr(installer, "bin_dir", lambda: bin_dir)
+
+    installer._install_runtime_libs(llama_dir)
+
+    assert (bin_dir / "lib" / "libllama.dylib").read_text(encoding="utf-8") == "llama"
+    assert (bin_dir / "lib" / "libggml.dylib").read_text(encoding="utf-8") == "ggml"
+    assert not (bin_dir / "lib" / "notes.txt").exists()
 
 
 def test_runner_binary_is_owned_by_package_build():
@@ -845,6 +872,48 @@ def test_native_installation_is_not_current_when_recorded_llama_library_is_missi
     assert installer.native_installation_is_current(("utopic_server",)) is False
 
 
+def test_native_installation_is_not_current_when_installed_runtime_library_is_missing(monkeypatch, tmp_path):
+    bin_dir = tmp_path / "bin"
+    native_dir = tmp_path / "site" / "utopic" / "core" / "native"
+    cmake_dir = tmp_path / "site" / "utopic" / "cmake"
+    llama_dir = tmp_path / "src" / "llama.cpp"
+    llama_bin = llama_dir / "build" / "bin"
+    installed_lib_dir = bin_dir / "lib"
+    bin_dir.mkdir()
+    native_dir.mkdir(parents=True)
+    cmake_dir.mkdir(parents=True)
+    llama_bin.mkdir(parents=True)
+    installed_lib_dir.mkdir()
+    _write_executable(bin_dir / "utopic_server")
+    (native_dir / "runner.cpp").write_text("native source\n", encoding="utf-8")
+    (cmake_dir / "CMakeLists.txt").write_text("cmake\n", encoding="utf-8")
+    (llama_bin / "libllama.dylib").write_text("llama", encoding="utf-8")
+    installed_lib = installed_lib_dir / "libllama.dylib"
+    installed_lib.write_text("llama", encoding="utf-8")
+    decision = installer.BackendDecision(
+        backend="cpu",
+        reason="No usable Metal device or CUDA compiler found",
+        device="CPU",
+    )
+
+    monkeypatch.setattr(installer, "bin_dir", lambda: bin_dir)
+    monkeypatch.setattr(installer, "PACKAGED_NATIVE_DIR", native_dir)
+    monkeypatch.setattr(installer, "PACKAGED_CMAKE_DIR", cmake_dir)
+    monkeypatch.setattr(installer, "default_llama_dir", lambda: llama_dir)
+    monkeypatch.setattr(installer, "default_native_dir", lambda: native_dir)
+    monkeypatch.setattr(installer, "_resolve_backend", lambda requested, arch: decision)
+    installer._write_install_metadata(
+        decision,
+        requested_backend="auto",
+        llama_dir=llama_dir,
+        native_dir=native_dir,
+    )
+
+    installed_lib.unlink()
+
+    assert installer.native_installation_is_current(("utopic_server",)) is False
+
+
 def test_native_installation_is_not_current_when_cached_binary_is_not_executable(monkeypatch, tmp_path):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -890,6 +959,39 @@ def test_native_installation_accepts_different_request_that_resolves_to_same_bac
     )
 
     assert installer.native_installation_is_current(("utopic_server",)) is True
+
+
+def test_runner_environment_includes_install_runtime_library_path(monkeypatch, tmp_path):
+    bin_dir = tmp_path / "bin"
+    native_dir = tmp_path / "site" / "utopic" / "core" / "native"
+    cmake_dir = tmp_path / "site" / "utopic" / "cmake"
+    llama_dir = tmp_path / "src" / "llama.cpp"
+    bin_dir.mkdir()
+    native_dir.mkdir(parents=True)
+    cmake_dir.mkdir(parents=True)
+    (native_dir / "runner.cpp").write_text("native source\n", encoding="utf-8")
+    (cmake_dir / "CMakeLists.txt").write_text("cmake\n", encoding="utf-8")
+    decision = installer.BackendDecision(
+        backend="cpu",
+        reason="No usable Metal device or CUDA compiler found",
+        device="CPU",
+    )
+
+    monkeypatch.setattr(installer, "bin_dir", lambda: bin_dir)
+    monkeypatch.setattr(installer, "PACKAGED_NATIVE_DIR", native_dir)
+    monkeypatch.setattr(installer, "PACKAGED_CMAKE_DIR", cmake_dir)
+    installer._write_install_metadata(
+        decision,
+        requested_backend="auto",
+        llama_dir=llama_dir,
+        native_dir=native_dir,
+    )
+
+    env = installer.runner_environment()
+
+    assert env["UTOPIC_RUNTIME_BACKEND"] == "cpu"
+    assert env["UTOPIC_RUNTIME_DEVICE"] == "CPU"
+    assert str(bin_dir / "lib") in env[_library_path_variable()].split(installer.os.pathsep)
 
 
 def test_setup_writes_install_metadata_after_success(monkeypatch, tmp_path):
@@ -939,6 +1041,7 @@ def test_setup_writes_install_metadata_after_success(monkeypatch, tmp_path):
     assert installer.runner_environment() == {
         "UTOPIC_RUNTIME_BACKEND": "cpu",
         "UTOPIC_RUNTIME_DEVICE": "CPU",
+        _library_path_variable(): str(bin_dir / "lib"),
     }
 
 
