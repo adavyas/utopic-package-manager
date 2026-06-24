@@ -19,10 +19,7 @@ CORE_CATALOG_PATH = (
     / "models.json"
 )
 REQUIRED_NATIVE_RUNTIME_FILES = (
-    "artifact_runner_common.cpp",
-    "artifact_runner_common.h",
     "main.cpp",
-    "image_runner.cpp",
     "runner.cpp",
     "runner_tasks.cpp",
     "runner_tasks.h",
