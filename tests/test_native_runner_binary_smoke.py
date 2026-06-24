@@ -55,20 +55,33 @@ def test_native_runner_rejects_malformed_json(tmp_path):
     assert "invalid JSON request" in payload["error"]["message"]
 
 
-@pytest.mark.parametrize(
-    ("runner_request", "field", "message"),
-    [
-        (
+def test_native_runner_accepts_contract_without_schema_version(tmp_path):
+    request_path = tmp_path / "without-schema-version.json"
+    request_path.write_text(
+        json.dumps(
             {
                 "task": "chat",
                 "model": "unit-text",
                 "input": {"prompt": "hello"},
                 "options": {},
-                "output_dir": ".",
-            },
-            "schema_version",
-            "schema_version must be utopic-runner/v1",
+                "output_dir": str(tmp_path),
+            }
         ),
+        encoding="utf-8",
+    )
+
+    completed = _run_runner(_runner_binary(), request_path)
+    payload = _last_json(completed.stdout)
+
+    assert completed.returncode != 0
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "missing_model"
+    assert payload["error"]["message"] == "options.model_path is required for native chat"
+
+
+@pytest.mark.parametrize(
+    ("runner_request", "field", "message"),
+    [
         (
             {
                 "schema_version": "utopic-runner/v0",

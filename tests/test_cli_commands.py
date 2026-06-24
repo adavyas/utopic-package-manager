@@ -54,6 +54,7 @@ def test_chat_launch_sets_runtime_paths_and_executes_node(monkeypatch, tmp_path)
     monkeypatch.setattr(chat.shutil, "which", lambda name: "/usr/bin/node" if name == "node" else None)
     monkeypatch.setattr(chat.installer, "bin_dir", lambda: tmp_path / "bin")
     monkeypatch.setattr(chat.installer, "cache_root", lambda: tmp_path / "cache")
+    monkeypatch.setattr(chat.installer, "native_installation_is_current", lambda binary_names: False)
     monkeypatch.setattr(chat.installer, "setup", lambda argv: captured.setdefault("setup", list(argv)) or 0)
     monkeypatch.setattr(chat.subprocess, "run", lambda command, env, check: captured.update(command=command, env=env, check=check))
 

@@ -118,13 +118,15 @@ static bool read_json_file(const char * path, json & out, string & error) {
 }
 
 static bool validate_request_contract(const json & root, json & response) {
-    if (!root.contains("schema_version") || !root["schema_version"].is_string()) {
-        response = invalid_request("schema_version must be utopic-runner/v1", "schema_version");
-        return false;
-    }
-    if (root["schema_version"].get<string>() != "utopic-runner/v1") {
-        response = invalid_request("unsupported schema_version", "schema_version");
-        return false;
+    if (root.contains("schema_version")) {
+        if (!root["schema_version"].is_string()) {
+            response = invalid_request("schema_version must be utopic-runner/v1", "schema_version");
+            return false;
+        }
+        if (root["schema_version"].get<string>() != "utopic-runner/v1") {
+            response = invalid_request("unsupported schema_version", "schema_version");
+            return false;
+        }
     }
     if (!root.contains("task") || !root["task"].is_string() || root["task"].get<string>().empty()) {
         response = invalid_request("task is required", "task");
