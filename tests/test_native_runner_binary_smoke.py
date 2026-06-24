@@ -32,6 +32,23 @@ def _run_runner(runner: Path, request_path: Path) -> subprocess.CompletedProcess
     )
 
 
+def _run_runner_with_env(
+    runner: Path,
+    request_path: Path,
+    extra_env: dict[str, str],
+) -> subprocess.CompletedProcess[str]:
+    env = os.environ.copy()
+    env.update(extra_env)
+    return subprocess.run(
+        [str(runner), "--json-request", str(request_path)],
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=30,
+        env=env,
+    )
+
+
 def _last_json(stdout: str) -> dict[str, object]:
     for line in reversed(stdout.splitlines()):
         if not line.strip():
@@ -322,6 +339,57 @@ def test_modality_runner_entrypoint_reports_its_own_name_without_runner_option(t
     assert payload["error"]["code"] == "unsupported_model"
     assert payload["error"]["detail"]["runner"] == "image_runner"
     assert payload["error"]["detail"]["task"] == "image"
+
+
+def test_native_runner_reports_oom_preflight_before_planned_readiness(tmp_path):
+    request_path = tmp_path / "too-large-image.json"
+    request_path.write_text(
+        json.dumps(
+            {
+                "task": "image",
+                "model": "cosmos3-super",
+                "input": {"prompt": "a red cube"},
+                "options": {
+                    "modality": "image",
+                    "engine": "cosmos",
+                    "runtime": "planned_native",
+                    "runner": "image_runner",
+                    "native_status": "planned",
+                    "supported_backends": ["cuda"],
+                    "expected_vram_gib": 96.0,
+                    "requirements": {
+                        "min_gpu_memory_gib": 96,
+                        "allow_cpu": False,
+                    },
+                },
+                "output_dir": str(tmp_path),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    completed = _run_runner_with_env(
+        _runner_binary("image_runner"),
+        request_path,
+        {
+            "UTOPIC_GPU_MEMORY_GIB": "40",
+            "UTOPIC_RUNTIME_BACKEND": "cuda",
+            "UTOPIC_RUNTIME_DEVICE": "unit-test-gpu",
+        },
+    )
+    payload = _last_json(completed.stdout)
+
+    assert completed.returncode != 0
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "oom"
+    assert "requires at least 96 GiB GPU memory" in payload["error"]["message"]
+    detail = payload["error"]["detail"]
+    assert detail["model"] == "cosmos3-super"
+    assert detail["runner"] == "image_runner"
+    assert detail["required_gpu_memory_gib"] == 96
+    assert detail["detected"]["gpu_memory_gib"] == 40
+    assert detail["detected"]["backend"] == "cuda"
+    assert detail["detected"]["device"] == "unit-test-gpu"
 
 
 def test_native_runner_reports_unloadable_model_cleanly(tmp_path):

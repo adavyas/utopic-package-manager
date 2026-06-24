@@ -63,6 +63,7 @@ def test_runner_request_emits_stable_contract_for_artifact_generation():
         runner="image_runner",
         native_status="ready",
         expected_vram_gib=8.0,
+        requirements={"min_gpu_memory_gib": 96, "allow_cpu": False},
     )
 
     payload = native_runner._runner_request(
@@ -81,6 +82,7 @@ def test_runner_request_emits_stable_contract_for_artifact_generation():
     assert isinstance(payload["options"], dict)
     assert payload["options"]["endpoint"] == "/v1/images/generations"
     assert payload["options"]["runner"] == "image_runner"
+    assert payload["options"]["requirements"] == {"min_gpu_memory_gib": 96, "allow_cpu": False}
     assert payload["options"]["size"] == "1024x1024"
     assert isinstance(payload["output_dir"], str)
     assert payload["output_dir"]

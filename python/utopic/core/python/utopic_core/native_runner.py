@@ -121,6 +121,8 @@ def _runner_request(
         options["expected_vram_gib"] = entry.expected_vram_gib
     if entry.expected_ram_gib is not None:
         options["expected_ram_gib"] = entry.expected_ram_gib
+    if entry.requirements:
+        options["requirements"] = dict(entry.requirements)
     _copy_option(request, options, "max_tokens", "max_tokens")
     _copy_option(request, options, "temperature", "temperature")
     _copy_option(request, options, "seed", "seed")

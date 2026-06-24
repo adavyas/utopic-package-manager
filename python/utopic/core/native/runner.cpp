@@ -90,6 +90,14 @@ static float json_fopt(const json & opts, const char * key, const char * env, co
     return e ? (float) atof(e) : def;
 }
 
+static bool json_dopt(const json & obj, const char * key, double & out) {
+    if (!obj.contains(key) || !obj[key].is_number()) {
+        return false;
+    }
+    out = obj[key].get<double>();
+    return out > 0.0;
+}
+
 static string host_backend() {
 #if defined(UTOPIC_BACKEND_NAME)
     return UTOPIC_BACKEND_NAME;
@@ -117,6 +125,85 @@ static json invalid_request(const string & message, const string & field) {
     return error_response("invalid_request", message, {
         {"field", field},
         {"schema_version", "utopic-runner/v1"},
+    });
+}
+
+static json detected_capacity() {
+    const char * raw_memory = getenv("UTOPIC_GPU_MEMORY_GIB");
+    json detected = json::object();
+    if (raw_memory && raw_memory[0]) {
+        const double memory_gib = atof(raw_memory);
+        detected["backend"] = env_any("UTOPIC_RUNTIME_BACKEND") ? env_any("UTOPIC_RUNTIME_BACKEND") : "configured";
+        detected["device"] = env_any("UTOPIC_RUNTIME_DEVICE") ? env_any("UTOPIC_RUNTIME_DEVICE") : "configured runtime";
+        if (memory_gib >= 0.0) {
+            detected["gpu_memory_gib"] = memory_gib;
+        }
+        return detected;
+    }
+    detected["backend"] = env_any("UTOPIC_RUNTIME_BACKEND") ? env_any("UTOPIC_RUNTIME_BACKEND") : "unknown";
+    detected["device"] = env_any("UTOPIC_RUNTIME_DEVICE") ? env_any("UTOPIC_RUNTIME_DEVICE") : "unknown device";
+    return detected;
+}
+
+static string detected_capacity_text(const json & detected) {
+    string text = detected.value("device", "unknown device");
+    const string backend = detected.value("backend", "unknown");
+    if (!backend.empty()) {
+        text += " ";
+        text += backend;
+    }
+    if (detected.contains("gpu_memory_gib") && detected["gpu_memory_gib"].is_number()) {
+        char buf[64];
+        snprintf(buf, sizeof(buf), " with %.3g GiB GPU memory", detected["gpu_memory_gib"].get<double>());
+        text += buf;
+    }
+    return text;
+}
+
+static json capacity_preflight_error(const json & root, const string & runner_name) {
+    const json opts = root.value("options", json::object());
+    const json requirements = opts.value("requirements", json::object());
+    if (!requirements.is_object()) {
+        return json();
+    }
+    double minimum = 0.0;
+    if (!json_dopt(requirements, "min_gpu_memory_gib", minimum)) {
+        return json();
+    }
+    const bool allow_cpu = !requirements.contains("allow_cpu") || !requirements["allow_cpu"].is_boolean()
+        || requirements["allow_cpu"].get<bool>();
+    const json detected = detected_capacity();
+    const bool has_memory = detected.contains("gpu_memory_gib") && detected["gpu_memory_gib"].is_number();
+    const bool has_enough_gpu = has_memory && detected["gpu_memory_gib"].get<double>() >= minimum;
+    if (has_enough_gpu) {
+        return json();
+    }
+    if (allow_cpu && detected.value("backend", "") == "cpu") {
+        return json();
+    }
+
+    char message[256];
+    snprintf(
+        message,
+        sizeof(message),
+        "model %s requires at least %.3g GiB GPU memory; detected %s. This model is too large for this host.",
+        root.value("model", "").c_str(),
+        minimum,
+        detected_capacity_text(detected).c_str());
+    return error_response("oom", message, {
+        {"task", root.value("task", "")},
+        {"model", root.value("model", "")},
+        {"modality", opts.value("modality", root.value("task", ""))},
+        {"engine", opts.value("engine", "")},
+        {"runtime", opts.value("runtime", "")},
+        {"runner", opts.value("runner", runner_name)},
+        {"native_status", opts.value("native_status", "")},
+        {"supported_backends", opts.value("supported_backends", json::array())},
+        {"expected_vram_gib", opts.value("expected_vram_gib", json())},
+        {"expected_ram_gib", opts.value("expected_ram_gib", json())},
+        {"requirements", requirements},
+        {"required_gpu_memory_gib", minimum},
+        {"detected", detected},
     });
 }
 
@@ -333,6 +420,11 @@ int main(int argc, char ** argv) {
     if (!validate_request_contract(root, response)) {
         printf("%s\n", response.dump().c_str());
         return 2;
+    }
+    response = capacity_preflight_error(root, runner_name);
+    if (!response.is_null()) {
+        printf("%s\n", response.dump().c_str());
+        return 1;
     }
     try {
         const string task = root.value("task", "");
