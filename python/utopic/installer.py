@@ -128,7 +128,11 @@ def default_native_dir() -> Path:
         return Path(configured).expanduser()
     if PACKAGED_NATIVE_DIR.exists():
         return PACKAGED_NATIVE_DIR
-    return source_root() / "Utopic" / "native"
+    raise RuntimeError(
+        "Packaged Utopic native source was not found: "
+        f"{PACKAGED_NATIVE_DIR}. Reinstall the utopic package, or pass "
+        "--native-dir/UTOPIC_NATIVE_DIR for an explicit maintainer source tree."
+    )
 
 
 def default_llama_dir() -> Path:
@@ -909,18 +913,8 @@ def setup(argv: Optional[Sequence[str]] = None) -> int:
 
     if args.native_dir or os.environ.get("UTOPIC_NATIVE_DIR"):
         print(f"Using external Utopic source at {native_dir}")
-    elif native_dir == PACKAGED_NATIVE_DIR:
-        print(f"Using packaged Utopic source at {native_dir}")
     else:
-        native_checkout_dir = native_dir.parent if native_dir.name == "native" else native_dir
-        print(f"Managing Utopic source at {native_checkout_dir}")
-        _clone_or_checkout(
-            os.environ.get("UTOPIC_NATIVE_REPO", UTOPIC_NATIVE_REPO),
-            os.environ.get("UTOPIC_NATIVE_REF", UTOPIC_NATIVE_REF),
-            native_checkout_dir,
-            dry_run=dry_run,
-        )
-        native_dir = native_checkout_dir / "native"
+        print(f"Using packaged Utopic source at {native_dir}")
 
     native_build_dir = _build_utopic(
         native_dir,

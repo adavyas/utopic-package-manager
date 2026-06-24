@@ -1004,6 +1004,38 @@ def test_setup_rejects_invalid_cuda_graphs_environment_cleanly(monkeypatch, caps
     assert "UTOPIC_CUDA_GRAPHS must be one of" in capsys.readouterr().err
 
 
+def test_setup_does_not_clone_missing_packaged_native_source(monkeypatch, tmp_path):
+    decision = installer.BackendDecision(
+        backend="cpu",
+        reason="Requested by --backend cpu",
+        device="CPU",
+    )
+    missing_packaged_native = tmp_path / "site" / "utopic" / "core" / "native"
+
+    monkeypatch.setattr(installer, "PACKAGED_NATIVE_DIR", missing_packaged_native)
+    monkeypatch.setattr(installer, "_resolve_backend", lambda requested, arch: decision)
+    monkeypatch.setattr(installer, "_print_backend_decision", lambda decision, requested: None)
+    monkeypatch.setattr(
+        installer,
+        "_clone_or_checkout",
+        lambda *_args, **_kwargs: pytest.fail("setup should not clone Utopic native source"),
+    )
+
+    with pytest.raises(RuntimeError) as exc_info:
+        installer.setup(
+            [
+                "--dry-run",
+                "--backend",
+                "cpu",
+                "--llama-dir",
+                str(tmp_path / "src" / "llama.cpp"),
+            ]
+        )
+
+    assert "Packaged Utopic native source was not found" in str(exc_info.value)
+    assert "--native-dir" in str(exc_info.value)
+
+
 def test_setup_force_clears_stale_build_cache_before_rebuild(monkeypatch, tmp_path):
     bin_dir = tmp_path / "bin"
     build_root = tmp_path / "build"
