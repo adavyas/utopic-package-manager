@@ -385,6 +385,8 @@ def test_bundled_chat_models_command_shows_chat_models_only(fake_openai_server, 
     assert "Available chat models:" in completed.stdout
     assert "diffusiongemma-26b-a4b-q4" in completed.stdout
     assert "DiffusionGemma 26B-A4B IT Q4_K_M" in completed.stdout
+    assert "Default chat model" in completed.stdout
+    assert "backends: metal, cuda, cpu; VRAM 24 GiB, RAM 32 GiB" in completed.stdout
     assert "cosmos3-super" not in completed.stdout
     assert "image / planned_native / planned / utopic-runner" not in completed.stdout
     assert requests == []

@@ -305,10 +305,7 @@ def _choose_model_arg(args: Sequence[str]) -> Optional[str]:
 
     print("\nAvailable chat models:")
     for index, entry in enumerate(catalog, start=1):
-        marker = "*" if entry.recommended else " "
-        status = "downloaded" if models.is_model_downloaded(entry) else "not downloaded"
-        print(f"{index}. {marker} {entry.id} ({entry.size}, {status})")
-        print(f"   {entry.name}")
+        _print_chat_model_entry(index, entry)
 
     try:
         answer = input(f"\nChoose a model [{recommended.id}]: ").strip()
@@ -328,6 +325,39 @@ def _choose_model_arg(args: Sequence[str]) -> Optional[str]:
 
 def _is_chat_model(entry: object) -> bool:
     return getattr(entry, "modality", "text") == "text" and getattr(entry, "runtime", "native") == "native"
+
+
+def _model_backends(entry: object) -> str:
+    backends = getattr(entry, "supported_backends", None) or ("metal", "cuda", "cpu")
+    return ", ".join(str(backend) for backend in backends)
+
+
+def _format_gib(value: object) -> str:
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value)
+
+
+def _model_memory(entry: object) -> str:
+    parts = []
+    expected_vram = getattr(entry, "expected_vram_gib", None)
+    expected_ram = getattr(entry, "expected_ram_gib", None)
+    if expected_vram is not None:
+        parts.append(f"VRAM {_format_gib(expected_vram)} GiB")
+    if expected_ram is not None:
+        parts.append(f"RAM {_format_gib(expected_ram)} GiB")
+    return ", ".join(parts) if parts else "memory TBD"
+
+
+def _print_chat_model_entry(index: int, entry: object) -> None:
+    marker = "*" if getattr(entry, "recommended", False) else " "
+    status = "downloaded" if models.is_model_downloaded(entry) else "not downloaded"
+    print(f"{index}. {marker} {entry.id} ({entry.size}, {status})")
+    print(f"   {entry.name}")
+    description = getattr(entry, "description", "")
+    if description:
+        print(f"   {description}")
+    print(f"   backends: {_model_backends(entry)}; {_model_memory(entry)}")
 
 
 def _chat_model_catalog() -> list[object]:
@@ -578,10 +608,7 @@ def _print_python_chat_models() -> None:
         return
     print("\nAvailable chat models:")
     for index, entry in enumerate(entries, start=1):
-        marker = "*" if entry.recommended else " "
-        status = "downloaded" if models.is_model_downloaded(entry) else "not downloaded"
-        print(f"{index}. {marker} {entry.id} ({entry.size}, {status})")
-        print(f"   {entry.name}")
+        _print_chat_model_entry(index, entry)
 
 
 def _print_python_chat_endpoints(base_url: str) -> None:

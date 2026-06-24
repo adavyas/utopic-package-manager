@@ -331,9 +331,10 @@ function printModelCatalog(catalog, options) {
         const downloaded = isModelDownloaded(entry) ? "downloaded" : "not downloaded";
         console.log(`${index + 1}. ${marker} ${entry.id} (${entry.size}, ${downloaded})`);
         console.log(`   ${entry.name}`);
+        console.log(`   ${entry.description}`);
+        console.log(`   backends: ${modelBackends(entry)}; ${modelMemory(entry)}`);
         if (!options.chatOnly) {
             console.log(`   ${modelModality(entry)} / ${modelRuntime(entry)} / ${modelNativeStatus(entry)} / ${modelRunner(entry)}`);
-            console.log(`   backends: ${modelBackends(entry)}; ${modelMemory(entry)}`);
         }
     });
 }

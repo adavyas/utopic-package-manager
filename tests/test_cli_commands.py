@@ -387,6 +387,9 @@ def test_python_chat_fallback_supports_catalog_and_endpoint_commands(monkeypatch
         native_status="ready",
         runner="utopic-runner",
         supported_backends=("metal", "cuda", "cpu"),
+        expected_vram_gib=24,
+        expected_ram_gib=32,
+        description="Best local DiffusionGemma chat model for unified-memory Macs and CUDA workstations.",
         recommended=True,
     )
     image_entry = SimpleNamespace(
@@ -415,6 +418,8 @@ def test_python_chat_fallback_supports_catalog_and_endpoint_commands(monkeypatch
     assert "/models       Show native text chat models." in captured.out
     assert "diffusiongemma-26b-a4b-q4" in captured.out
     assert "DiffusionGemma 26B Q4" in captured.out
+    assert "Best local DiffusionGemma chat model" in captured.out
+    assert "backends: metal, cuda, cpu; VRAM 24 GiB, RAM 32 GiB" in captured.out
     assert "qwen-image" not in captured.out
     assert "Chat completions: http://127.0.0.1:8910/v1/chat/completions" in captured.out
     assert "Models: http://127.0.0.1:8910/v1/models" in captured.out
@@ -450,6 +455,9 @@ def test_chat_python_fallback_prompts_for_model_when_interactive(monkeypatch, tm
             size="15.65 GiB",
             recommended=True,
             description="Recommended local chat model.",
+            supported_backends=("metal", "cuda", "cpu"),
+            expected_vram_gib=24,
+            expected_ram_gib=32,
         ),
         models.ModelEntry(
             id="diffusiongemma-4b-q4",
@@ -460,6 +468,9 @@ def test_chat_python_fallback_prompts_for_model_when_interactive(monkeypatch, tm
             size="3.2 GiB",
             recommended=False,
             description="Smaller local chat model.",
+            supported_backends=("metal", "cuda", "cpu"),
+            expected_vram_gib=8,
+            expected_ram_gib=16,
         ),
         models.ModelEntry(
             id="qwen-image",
@@ -499,7 +510,11 @@ def test_chat_python_fallback_prompts_for_model_when_interactive(monkeypatch, tm
     captured = capsys.readouterr()
     assert "Available chat models:" in captured.out
     assert "1. * diffusiongemma-26b-a4b-q4 (15.65 GiB, not downloaded)" in captured.out
+    assert "Recommended local chat model." in captured.out
+    assert "backends: metal, cuda, cpu; VRAM 24 GiB, RAM 32 GiB" in captured.out
     assert "2.   diffusiongemma-4b-q4 (3.2 GiB, not downloaded)" in captured.out
+    assert "Smaller local chat model." in captured.out
+    assert "backends: metal, cuda, cpu; VRAM 8 GiB, RAM 16 GiB" in captured.out
     assert "qwen-image" not in captured.out
     assert selected_models == ["diffusiongemma-4b-q4"]
     assert commands[0][:3] == ["utopic", "run", "diffusiongemma-4b-q4"]
