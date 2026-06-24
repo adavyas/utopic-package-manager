@@ -559,6 +559,34 @@ def test_build_utopic_clears_stale_cmake_cache_when_package_cmake_source_changes
     assert commands[0][:5] == ["cmake", "-B", build_dir, "-S", new_cmake]
 
 
+def test_build_llama_clears_stale_cmake_cache_when_source_changes(monkeypatch, tmp_path):
+    old_source = tmp_path / "old" / "llama.cpp"
+    llama_dir = tmp_path / "src" / "llama.cpp"
+    build_dir = llama_dir / "build"
+    old_source.mkdir(parents=True)
+    build_dir.mkdir(parents=True)
+    (build_dir / "CMakeCache.txt").write_text(
+        f"CMAKE_HOME_DIRECTORY:INTERNAL={old_source}\n",
+        encoding="utf-8",
+    )
+    stale_marker = build_dir / "stale-object.o"
+    stale_marker.write_text("old build output", encoding="utf-8")
+
+    commands = []
+    monkeypatch.setattr(installer, "_run", lambda command, **kwargs: commands.append(command))
+
+    installer._build_llama(
+        llama_dir,
+        backend="cpu",
+        cuda_architectures=None,
+        jobs=None,
+        dry_run=False,
+    )
+
+    assert not stale_marker.exists()
+    assert commands[0][:5] == ["cmake", "-B", build_dir, "-S", llama_dir]
+
+
 def test_prepare_cmake_build_dir_unlinks_stale_symlinked_cache_without_touching_target(tmp_path):
     old_source = tmp_path / "old-source"
     new_source = tmp_path / "new-source"

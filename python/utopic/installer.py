@@ -712,6 +712,7 @@ def _build_llama(
     dry_run: bool,
     cuda_graphs: Optional[str] = None,
 ) -> None:
+    _prepare_cmake_build_dir(llama_dir / "build", llama_dir, dry_run=dry_run)
     command = ["cmake", "-B", llama_dir / "build", "-S", llama_dir, *LLAMA_CMAKE_FLAGS]
     if backend == "cpu":
         command.extend(["-DGGML_CUDA=OFF", "-DGGML_METAL=OFF"])
