@@ -1195,11 +1195,13 @@ def _native_runner_to_chat_completion(entry: models.ModelEntry, payload: dict[st
     reasoning = payload.get("reasoning")
     if isinstance(reasoning, str) and reasoning:
         message["reasoning_content"] = reasoning
+    run_id = payload.get("run_id") if isinstance(payload.get("run_id"), str) and payload.get("run_id") else uuid.uuid4().hex
     return {
-        "id": f"chatcmpl-runner-{uuid.uuid4().hex}",
+        "id": f"chatcmpl-runner-{run_id}",
         "object": "chat.completion",
         "created": int(time.time()),
         "model": entry.id,
+        "progress_url": payload.get("progress_url") if isinstance(payload.get("progress_url"), str) else None,
         "choices": [
             {
                 "index": 0,
@@ -1214,10 +1216,13 @@ def _native_runner_to_chat_completion(entry: models.ModelEntry, payload: dict[st
         },
         "metadata": {
             "runtime": "native-runner",
+            "run_id": run_id,
             "engine": entry.engine,
             "backend": payload.get("backend"),
             "device": payload.get("device"),
             "metrics": metrics,
+            "output_dir": payload.get("output_dir") if isinstance(payload.get("output_dir"), str) else None,
+            "progress_path": payload.get("progress_path") if isinstance(payload.get("progress_path"), str) else None,
         },
     }
 
@@ -1266,11 +1271,13 @@ def _native_chat_payload_to_response(entry: models.ModelEntry, payload: dict[str
     text = _chat_completion_text(payload)
     chat_id = payload.get("id") if isinstance(payload.get("id"), str) else uuid.uuid4().hex
     created = payload.get("created") if isinstance(payload.get("created"), int) else int(time.time())
+    metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
     return {
         "id": f"resp_{chat_id}",
         "object": "response",
         "created_at": created,
         "model": entry.id,
+        "progress_url": payload.get("progress_url") if isinstance(payload.get("progress_url"), str) else None,
         "output": [
             {
                 "type": "message",
@@ -1283,6 +1290,9 @@ def _native_chat_payload_to_response(entry: models.ModelEntry, payload: dict[str
             "source_object": payload.get("object"),
             "runtime": "native-runner",
             "engine": entry.engine,
+            "run_id": metadata.get("run_id") if isinstance(metadata.get("run_id"), str) else None,
+            "output_dir": metadata.get("output_dir") if isinstance(metadata.get("output_dir"), str) else None,
+            "progress_path": metadata.get("progress_path") if isinstance(metadata.get("progress_path"), str) else None,
         },
     }
 

@@ -232,6 +232,7 @@ def test_gateway_native_text_falls_back_to_runner_without_server(monkeypatch, tm
         size="1 MiB",
         recommended=True,
         description="unit",
+        endpoints=("/v1/chat/completions", "/v1/responses"),
     )
     monkeypatch.setattr(gateway.models, "get_model", lambda model_id: entry if model_id == entry.id else None)
     monkeypatch.setattr(gateway.models, "list_models", lambda: [entry])
@@ -244,6 +245,10 @@ def test_gateway_native_text_falls_back_to_runner_without_server(monkeypatch, tm
         return {
             "ok": True,
             "type": "text",
+            "run_id": "run_native_chat",
+            "output_dir": "/tmp/utopic/run_native_chat/outputs",
+            "progress_path": "/tmp/utopic/run_native_chat/progress.jsonl",
+            "progress_url": "/v1/utopic/runs/run_native_chat/events",
             "text": "hello from runner",
             "artifacts": [],
             "backend": "metal",
@@ -266,9 +271,14 @@ def test_gateway_native_text_falls_back_to_runner_without_server(monkeypatch, tm
 
     payload = json.loads(body)
     assert status == 200
+    assert payload["id"] == "chatcmpl-runner-run_native_chat"
+    assert payload["progress_url"] == "/v1/utopic/runs/run_native_chat/events"
     assert payload["choices"][0]["message"]["content"] == "hello from runner"
     assert payload["usage"] == {"prompt_tokens": 3, "completion_tokens": 4, "total_tokens": 7}
     assert payload["metadata"]["runtime"] == "native-runner"
+    assert payload["metadata"]["run_id"] == "run_native_chat"
+    assert payload["metadata"]["output_dir"] == "/tmp/utopic/run_native_chat/outputs"
+    assert payload["metadata"]["progress_path"] == "/tmp/utopic/run_native_chat/progress.jsonl"
     assert payload["metadata"]["device"] == "Apple M4 Pro"
     assert captured["entry"] is entry
     assert captured["request"]["messages"][0]["content"] == "hi"
@@ -302,6 +312,59 @@ def test_gateway_raw_gguf_model_uses_runner(monkeypatch, tmp_path):
     assert captured["entry"].id == str(model_path)
     assert captured["entry"].path == model_path
     assert captured["request"]["messages"][0]["content"] == "hi"
+
+
+def test_gateway_responses_for_native_text_preserves_runner_metadata(monkeypatch, tmp_path):
+    model_path = tmp_path / "model.gguf"
+    model_path.write_text("fake", encoding="utf-8")
+    entry = gateway.models.ModelEntry(
+        id="unit-text",
+        name="Unit Text",
+        family="unit",
+        filename="model.gguf",
+        url="https://example.invalid/model.gguf",
+        size="1 MiB",
+        recommended=True,
+        description="unit",
+        endpoints=("/v1/chat/completions", "/v1/responses"),
+    )
+    monkeypatch.setattr(gateway.models, "get_model", lambda model_id: entry if model_id == entry.id else None)
+    monkeypatch.setattr(type(entry), "path", property(lambda self: model_path))
+
+    def fake_chat_completion(runner_entry, request):
+        return {
+            "ok": True,
+            "type": "text",
+            "run_id": "run_native_response",
+            "output_dir": "/tmp/utopic/run_native_response/outputs",
+            "progress_path": "/tmp/utopic/run_native_response/progress.jsonl",
+            "progress_url": "/v1/utopic/runs/run_native_response/events",
+            "text": "hello as response",
+            "artifacts": [],
+            "backend": "metal",
+            "metrics": {"prompt_tokens": 2, "answer_tokens": 3},
+        }
+
+    monkeypatch.setattr(gateway.native_runner, "chat_completion", fake_chat_completion)
+
+    status, _headers, body = gateway.handle_openai_request(
+        "POST",
+        "/v1/responses",
+        {
+            "model": entry.id,
+            "input": [{"role": "user", "content": [{"type": "input_text", "text": "hi"}]}],
+        },
+        native_base_url=None,
+    )
+
+    payload = json.loads(body)
+    assert status == 200
+    assert payload["id"] == "resp_chatcmpl-runner-run_native_response"
+    assert payload["output_text"] == "hello as response"
+    assert payload["progress_url"] == "/v1/utopic/runs/run_native_response/events"
+    assert payload["metadata"]["run_id"] == "run_native_response"
+    assert payload["metadata"]["output_dir"] == "/tmp/utopic/run_native_response/outputs"
+    assert payload["metadata"]["progress_path"] == "/tmp/utopic/run_native_response/progress.jsonl"
 
 
 def test_gateway_active_text_model_alias_uses_runner(monkeypatch, tmp_path):
