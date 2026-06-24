@@ -44,8 +44,8 @@ def _invoke_runner(
         runner = _native.binary_path(binary_name)
     except RuntimeError as exc:
         if binary_unavailable_payload is not None:
-            return binary_unavailable_payload
-        return _error("backend_unavailable", str(exc), {"binary": binary_name})
+            return _attach_run_metadata(binary_unavailable_payload, runner_request)
+        return _attach_run_metadata(_error("backend_unavailable", str(exc), {"binary": binary_name}), runner_request)
 
     with tempfile.TemporaryDirectory(prefix="utopic-runner-") as tmp:
         request_path = Path(tmp) / "request.json"
@@ -61,41 +61,50 @@ def _invoke_runner(
                 env=_runner_environment(),
             )
         except subprocess.TimeoutExpired:
-            return _error(
-                "runner_failed",
-                f"native runner timed out after {_runner_timeout_seconds()} seconds",
-                {"model": runner_request.get("model")},
+            return _attach_run_metadata(
+                _error(
+                    "runner_failed",
+                    f"native runner timed out after {_runner_timeout_seconds()} seconds",
+                    {"model": runner_request.get("model")},
+                ),
+                runner_request,
             )
 
     try:
         payload = _load_runner_stdout(completed.stdout)
     except ValueError as exc:
-        return _error(
-            "runner_failed",
-            f"native runner returned invalid JSON: {exc}",
-            {"stdout": completed.stdout[-4000:], "stderr": completed.stderr[-4000:]},
+        return _attach_run_metadata(
+            _error(
+                "runner_failed",
+                f"native runner returned invalid JSON: {exc}",
+                {"stdout": completed.stdout[-4000:], "stderr": completed.stderr[-4000:]},
+            ),
+            runner_request,
         )
 
     if not isinstance(payload, dict):
-        return _error("runner_failed", "native runner returned a non-object response")
+        return _attach_run_metadata(_error("runner_failed", "native runner returned a non-object response"), runner_request)
     if completed.returncode != 0 and payload.get("ok") is not False:
-        return _error(
-            "runner_failed",
-            f"native runner exited with status {completed.returncode}",
-            {"stderr": completed.stderr[-4000:]},
+        return _attach_run_metadata(
+            _error(
+                "runner_failed",
+                f"native runner exited with status {completed.returncode}",
+                {"stderr": completed.stderr[-4000:]},
+            ),
+            runner_request,
         )
     if payload.get("ok") is False:
-        return payload
+        return _attach_run_metadata(payload, runner_request)
     invalid_response = _validate_success_response(payload)
     if invalid_response is not None:
-        return invalid_response
+        return _attach_run_metadata(invalid_response, runner_request)
 
     metrics = payload.get("metrics")
     if not isinstance(metrics, dict):
         metrics = {}
     metrics.setdefault("wall_ms", round((time.time() - started) * 1000.0, 3))
     payload["metrics"] = metrics
-    return payload
+    return _attach_run_metadata(payload, runner_request)
 
 
 def _runner_request(
@@ -226,6 +235,34 @@ def _validate_success_response(payload: dict[str, Any]) -> dict[str, Any] | None
             {"invalid": invalid, "schema_version": SCHEMA_VERSION},
         )
     return None
+
+
+def _attach_run_metadata(payload: dict[str, Any], runner_request: dict[str, Any]) -> dict[str, Any]:
+    run_id = runner_request.get("run_id")
+    output_dir = runner_request.get("output_dir")
+    progress_path = runner_request.get("progress_path")
+    if isinstance(run_id, str) and run_id:
+        payload.setdefault("run_id", run_id)
+        payload.setdefault("progress_url", f"/v1/utopic/runs/{run_id}/events")
+    if isinstance(output_dir, str) and output_dir:
+        payload.setdefault("output_dir", output_dir)
+    if isinstance(progress_path, str) and progress_path:
+        payload.setdefault("progress_path", progress_path)
+
+    error = payload.get("error")
+    if isinstance(error, dict):
+        detail = error.get("detail")
+        if not isinstance(detail, dict):
+            detail = {}
+            error["detail"] = detail
+        if isinstance(run_id, str) and run_id:
+            detail.setdefault("run_id", run_id)
+            detail.setdefault("progress_url", f"/v1/utopic/runs/{run_id}/events")
+        if isinstance(output_dir, str) and output_dir:
+            detail.setdefault("output_dir", output_dir)
+        if isinstance(progress_path, str) and progress_path:
+            detail.setdefault("progress_path", progress_path)
+    return payload
 
 
 def native_readiness_error(entry: models.ModelEntry) -> dict[str, Any]:

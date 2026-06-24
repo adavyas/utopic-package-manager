@@ -424,6 +424,68 @@ def test_generation_passes_installed_runtime_env(monkeypatch, tmp_path):
     assert captured["env"]["UTOPIC_RUNTIME_DEVICE"] == "Apple M4 Pro"
 
 
+def test_runner_error_payload_exposes_run_progress_metadata(monkeypatch, tmp_path):
+    runs_dir = tmp_path / "runs"
+    runner_path = tmp_path / "utopic-runner"
+    runner_path.write_text("runner", encoding="utf-8")
+    entry = models.ModelEntry(
+        id="unit-image",
+        name="Unit Image",
+        family="unit",
+        filename="unit-image",
+        url="https://example.invalid/unit-image",
+        size="1 GiB",
+        recommended=False,
+        description="unit",
+        modality="image",
+        engine="native-image",
+        runtime="planned_native",
+        endpoints=("/v1/images/generations",),
+        outputs=("image/png",),
+        supported_backends=("metal", "cuda"),
+        runner="utopic-runner",
+        native_status="planned",
+    )
+    captured = {}
+    monkeypatch.setenv("UTOPIC_RUNS_DIR", str(runs_dir))
+    monkeypatch.setattr(native_runner._native, "binary_path", lambda _name: runner_path)
+
+    def fake_run(command, **kwargs):
+        request_path = Path(command[2])
+        captured["request"] = json.loads(request_path.read_text(encoding="utf-8"))
+        return subprocess.CompletedProcess(
+            command,
+            1,
+            stdout=json.dumps(
+                {
+                    "ok": False,
+                    "error": {
+                        "code": "unsupported_model",
+                        "message": "native runner task is not implemented yet",
+                        "detail": {"task": "image", "model": entry.id},
+                    },
+                }
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr(native_runner.subprocess, "run", fake_run)
+
+    payload = native_runner.generation(
+        entry,
+        "/v1/images/generations",
+        {"model": entry.id, "prompt": "a native image"},
+    )
+
+    assert payload["ok"] is False
+    assert payload["run_id"] == captured["request"]["run_id"]
+    assert payload["output_dir"] == captured["request"]["output_dir"]
+    assert payload["progress_path"] == captured["request"]["progress_path"]
+    assert payload["progress_url"] == f"/v1/utopic/runs/{captured['request']['run_id']}/events"
+    assert payload["error"]["detail"]["run_id"] == captured["request"]["run_id"]
+    assert payload["error"]["detail"]["progress_url"] == payload["progress_url"]
+
+
 def test_generation_reports_missing_catalog_runner_binary_as_setup_error(monkeypatch):
     entry = models.ModelEntry(
         id="unit-image",
