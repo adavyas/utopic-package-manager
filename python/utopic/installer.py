@@ -26,12 +26,14 @@ LLAMA_FETCH_REF = "refs/pull/24423/head"
 BIN_NAMES = (
     "utopic",
     "utopic_runner",
+    "utopic_image_runner",
     "utopic_server",
     "utopic_mcp",
     "utopic_acp",
 )
 BIN_ALIASES: Mapping[str, str] = {
     "utopic-runner": "utopic_runner",
+    "utopic-image-runner": "utopic_image_runner",
 }
 INSTALL_METADATA_NAME = "install.json"
 INSTALL_METADATA_SCHEMA_VERSION = 5

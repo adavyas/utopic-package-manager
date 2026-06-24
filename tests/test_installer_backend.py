@@ -392,7 +392,7 @@ def test_runner_binary_is_owned_by_package_build():
     assert '#include "runner_tasks.h"' in native
 
 
-def test_modality_runner_binaries_are_not_package_build_outputs():
+def test_image_runner_binary_is_owned_by_package_build():
     cmake = (
         Path(__file__).resolve().parents[1]
         / "python"
@@ -402,11 +402,14 @@ def test_modality_runner_binaries_are_not_package_build_outputs():
     ).read_text(encoding="utf-8")
 
     assert "function(add_utopic_json_runner target_name)" in cmake
-    assert "${UTOPIC_NATIVE_SOURCE_DIR}/runner.cpp" in cmake
-    assert "${UTOPIC_NATIVE_SOURCE_DIR}/runner_tasks.cpp" in cmake
-    for name in ("image_runner", "tts_runner", "music_runner", "video_runner", "misc_runner"):
+    assert "utopic_image_runner" in installer.BIN_NAMES
+    assert installer.BIN_ALIASES["utopic-image-runner"] == "utopic_image_runner"
+    assert "add_utopic_image_runner(utopic_image_runner)" in cmake
+    assert "${UTOPIC_NATIVE_SOURCE_DIR}/image_runner.cpp" in cmake
+    assert "${UTOPIC_NATIVE_SOURCE_DIR}/artifact_runner_common.cpp" in cmake
+    for name in ("utopic_tts_runner", "utopic_music_runner", "utopic_video_runner", "utopic_misc_runner"):
         assert name not in installer.BIN_NAMES
-        assert f"add_utopic_json_runner({name})" not in cmake
+        assert name not in cmake
 
 
 def test_managed_source_checkout_recovers_non_git_cache(monkeypatch, tmp_path):

@@ -99,6 +99,18 @@ endfunction()
 # JSON runner: one-shot native execution contract used by the Python MCP/CLI.
 add_utopic_json_runner(utopic_runner)
 
+function(add_utopic_image_runner target_name)
+  add_executable(${target_name}
+    "${UTOPIC_NATIVE_SOURCE_DIR}/image_runner.cpp"
+    "${UTOPIC_NATIVE_SOURCE_DIR}/artifact_runner_common.cpp")
+  target_include_directories(${target_name} PRIVATE ${UTOPIC_INCLUDES})
+  target_compile_definitions(${target_name} PRIVATE UTOPIC_BACKEND_NAME="${UTOPIC_BACKEND_NAME}")
+  set_utopic_binary_rpath(${target_name})
+endfunction()
+
+# Image runner: native artifact execution boundary for text-to-image requests.
+add_utopic_image_runner(utopic_image_runner)
+
 # Server: resident model, OpenAI-compatible /v1/chat/completions
 # cpp-httplib is split-mode (.h + .cpp); compile its impl TU in (same as llama.cpp's server lib).
 add_executable(utopic_server
