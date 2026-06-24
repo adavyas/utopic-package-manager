@@ -48,6 +48,24 @@ static bool flag_set(int argc, char ** argv, const char * flag) {
     return false;
 }
 
+static string executable_name(const char * path) {
+    if (!path || !path[0]) {
+        return "utopic_runner";
+    }
+    string name(path);
+    const size_t slash = name.find_last_of("/\\");
+    if (slash != string::npos) {
+        name = name.substr(slash + 1);
+    }
+#ifdef _WIN32
+    const string suffix = ".exe";
+    if (name.size() > suffix.size() && name.substr(name.size() - suffix.size()) == suffix) {
+        name.resize(name.size() - suffix.size());
+    }
+#endif
+    return name.empty() ? "utopic_runner" : name;
+}
+
 static const char * env_any(const char * preferred, const char * legacy = nullptr) {
     const char * v = preferred ? getenv(preferred) : nullptr;
     if (v) {
@@ -288,6 +306,7 @@ static json run_chat(const json & root) {
 
 int main(int argc, char ** argv) {
     llama_log_set([](ggml_log_level, const char * text, void *) { fputs(text, stderr); }, nullptr);
+    const string runner_name = executable_name(argc > 0 ? argv[0] : nullptr);
 
     if (flag_set(argc, argv, "--help") || flag_set(argc, argv, "-h")) {
         fprintf(stderr, "usage: %s --json-request request.json\n", argv[0]);
@@ -327,7 +346,7 @@ int main(int argc, char ** argv) {
                 {"modality", opts.value("modality", task)},
                 {"engine", opts.value("engine", "")},
                 {"runtime", opts.value("runtime", "")},
-                {"runner", opts.value("runner", "")},
+                {"runner", opts.value("runner", runner_name)},
                 {"native_status", opts.value("native_status", "")},
                 {"supported_backends", opts.value("supported_backends", json::array())},
                 {"expected_vram_gib", opts.value("expected_vram_gib", json())},
