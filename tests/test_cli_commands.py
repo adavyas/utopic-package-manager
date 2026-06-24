@@ -1381,7 +1381,7 @@ def test_cli_run_allows_server_flags_before_positional_model(monkeypatch):
     ]
 
 
-def test_cli_run_bridge_model_starts_gateway_without_native_server(monkeypatch, capsys):
+def test_cli_run_planned_artifact_model_starts_gateway_without_native_text_server(monkeypatch, capsys):
     calls = []
     entry = models.ModelEntry(
         id="qwen-image",
@@ -1394,16 +1394,16 @@ def test_cli_run_bridge_model_starts_gateway_without_native_server(monkeypatch, 
         description="Image model",
         modality="image",
         engine="diffusers",
-        runtime="bridge",
+        runtime="planned_native",
         hardware=("mac-48gb", "gb10", "cuda"),
         endpoints=("/v1/images/generations", "/v1/responses"),
         outputs=("image/png",),
         repo="Qwen/Qwen-Image",
     )
 
-    monkeypatch.setattr(cli, "_ensure_setup", lambda enabled=True, binary_name="utopic": pytest.fail("bridge run should not build native binaries"))
-    monkeypatch.setattr(cli._native, "binary_path", lambda name: pytest.fail("bridge run should not inspect native binaries"))
-    monkeypatch.setattr(cli, "_run_server", lambda *args: pytest.fail("bridge run should not start native server"))
+    monkeypatch.setattr(cli, "_ensure_setup", lambda enabled=True, binary_name="utopic": pytest.fail("artifact gateway run should not build text server binaries"))
+    monkeypatch.setattr(cli._native, "binary_path", lambda name: pytest.fail("artifact gateway run should not inspect text server binaries"))
+    monkeypatch.setattr(cli, "_run_server", lambda *args: pytest.fail("artifact gateway run should not start native text server"))
     monkeypatch.setattr(cli.models, "get_model", lambda model_id: entry if model_id == "qwen-image" else None)
     monkeypatch.setattr(cli.models, "pull_model", lambda model_id: calls.append(("pull", model_id)) or Path("/models/qwen-image"))
     monkeypatch.setattr(
@@ -2183,7 +2183,7 @@ def test_model_list_reports_wrong_catalog_field_type(monkeypatch, tmp_path, caps
     assert "Traceback" not in captured.err
 
 
-def test_model_list_rejects_bridge_catalog_entry_with_unknown_engine(monkeypatch, tmp_path, capsys):
+def test_model_list_rejects_catalog_bridge_runtime(monkeypatch, tmp_path, capsys):
     catalog = tmp_path / "models.json"
     catalog.write_text(
         """
@@ -2197,7 +2197,7 @@ def test_model_list_rejects_bridge_catalog_entry_with_unknown_engine(monkeypatch
     "repo": "example/unknown-bridge",
     "size": "1 B",
     "recommended": false,
-    "description": "Unknown bridge engine",
+    "description": "Bridge runtime is not a production model runtime",
     "modality": "image",
     "engine": "not-a-real-engine",
     "runtime": "bridge",
@@ -2215,7 +2215,7 @@ def test_model_list_rejects_bridge_catalog_entry_with_unknown_engine(monkeypatch
 
     captured = capsys.readouterr()
     assert "utopic models: Invalid model catalog entry 0" in captured.err
-    assert "unknown experimental bridge engine: not-a-real-engine" in captured.err
+    assert "runtime must be one of ['native', 'planned_native']" in captured.err
     assert "Traceback" not in captured.err
 
 
@@ -2883,7 +2883,7 @@ def test_models_pull_all_rejects_extra_model_argument(capsys):
     assert "utopic models: pull accepts either a model alias or --all, not both" in captured.err
 
 
-def test_models_check_reports_ready_planned_model_with_experimental_bridge(monkeypatch, tmp_path, capsys):
+def test_models_check_reports_pulled_planned_model_as_native_runner_not_ready(monkeypatch, tmp_path, capsys):
     catalog = tmp_path / "models.json"
     models_dir = tmp_path / "models"
     catalog.write_text(
@@ -2914,36 +2914,23 @@ def test_models_check_reports_ready_planned_model_with_experimental_bridge(monke
     monkeypatch.setenv("UTOPIC_MODELS_DIR", str(models_dir))
     monkeypatch.setenv("UTOPIC_EXPERIMENTAL_BRIDGE", "1")
     models.pull_model("qwen-image")
-    monkeypatch.setattr(
-        models.bridge,
-        "_check_adapter",
-        lambda adapter: {
-            "schema_version": "utopic-bridge/v1",
-            "engine": adapter.engine,
-            "status": "ready",
-            "ready": True,
-            "packages": list(adapter.packages),
-            "missing": [],
-            "install_hint": adapter.install_hint,
-            "description": adapter.description,
-        },
-    )
 
-    assert models.main(["check", "qwen-image"]) == 0
+    assert models.main(["check", "qwen-image"]) == 1
 
     payload = json.loads(capsys.readouterr().out)
     assert payload["id"] == "qwen-image"
     assert payload["runtime"] == "planned_native"
-    assert payload["status"] == "ready"
-    assert payload["ready"] is True
+    assert payload["status"] == "native_runner_not_ready"
+    assert payload["ready"] is False
     assert payload["cache"]["prepared"] is True
     assert payload["cache"]["path"] == str(models_dir / "qwen-image")
-    assert payload["experimental_bridge"]["engine"] == "diffusers"
-    assert payload["experimental_bridge"]["status"] == "ready"
-    assert payload["experimental_bridge"]["ready"] is True
+    assert "experimental_bridge" not in payload
+    assert payload["next_steps"] == [
+        "image_runner for image is cataloged but not native-ready yet"
+    ]
 
 
-def test_models_check_reports_bridge_dependency_gap(monkeypatch, tmp_path, capsys):
+def test_models_check_reports_planned_native_runner_gap(monkeypatch, tmp_path, capsys):
     catalog = tmp_path / "models.json"
     models_dir = tmp_path / "models"
     catalog.write_text(
@@ -2973,36 +2960,16 @@ def test_models_check_reports_bridge_dependency_gap(monkeypatch, tmp_path, capsy
     monkeypatch.setenv("UTOPIC_MODELS_CATALOG", str(catalog))
     monkeypatch.setenv("UTOPIC_MODELS_DIR", str(models_dir))
     monkeypatch.setenv("UTOPIC_EXPERIMENTAL_BRIDGE", "1")
-    monkeypatch.setattr(
-        models.bridge,
-        "_check_adapter",
-        lambda adapter: {
-            "schema_version": "utopic-bridge/v1",
-            "engine": adapter.engine,
-            "status": "missing_dependencies",
-            "ready": False,
-            "packages": list(adapter.packages),
-            "missing": ["kokoro"],
-            "install_hint": adapter.install_hint,
-            "description": adapter.description,
-        },
-    )
 
     assert models.main(["check", "kokoro-82m"]) == 1
 
     payload = json.loads(capsys.readouterr().out)
-    assert payload["status"] == "not_ready"
+    assert payload["status"] == "native_runner_not_ready"
     assert payload["ready"] is False
     assert payload["cache"]["prepared"] is False
-    assert payload["experimental_bridge"]["status"] == "missing_dependencies"
-    assert payload["experimental_bridge"]["missing"] == ["kokoro"]
+    assert "experimental_bridge" not in payload
     assert payload["next_steps"] == [
-        "utopic models pull kokoro-82m",
-        (
-            'pip install "utopic[tts]" && python -m pip install '
-            "https://github.com/explosion/spacy-models/releases/download/"
-            "en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl"
-        ),
+        "tts_runner for tts is cataloged but not native-ready yet"
     ]
 
 
@@ -3056,20 +3023,6 @@ def test_models_check_all_reports_every_model_and_fails_when_any_not_ready(monke
     model_file = models_dir / "diffusiongemma.gguf"
     model_file.parent.mkdir(parents=True)
     model_file.write_bytes(b"model")
-    monkeypatch.setattr(
-        models.bridge,
-        "_check_adapter",
-        lambda adapter: {
-            "schema_version": "utopic-bridge/v1",
-            "engine": adapter.engine,
-            "status": "missing_dependencies",
-            "ready": False,
-            "packages": list(adapter.packages),
-            "missing": ["kokoro"],
-            "install_hint": adapter.install_hint,
-            "description": adapter.description,
-        },
-    )
 
     assert models.main(["check", "--all"]) == 1
 
@@ -3084,12 +3037,7 @@ def test_models_check_all_reports_every_model_and_fails_when_any_not_ready(monke
     assert payload["data"][0]["ready"] is True
     assert payload["data"][1]["ready"] is False
     assert payload["data"][1]["next_steps"] == [
-        "utopic models pull kokoro-82m",
-        (
-            'pip install "utopic[tts]" && python -m pip install '
-            "https://github.com/explosion/spacy-models/releases/download/"
-            "en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl"
-        ),
+        "tts_runner for tts is cataloged but not native-ready yet"
     ]
 
 

@@ -182,7 +182,7 @@ future C++ engines will use.
 Large planned native models can declare runtime requirements in the catalog. For
 example, `cosmos3-super` is discoverable through `utopic models list`,
 `/v1/models`, and MCP, but requests fail fast with
-`bridge_model_oom_preflight` on hosts below its GPU-memory requirement instead
+`native_runner_oom_preflight` on hosts below its GPU-memory requirement instead
 of trying to load the model and crashing inside CUDA, Metal, or Python runtime
 code.
 

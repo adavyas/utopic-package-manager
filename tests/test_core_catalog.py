@@ -62,22 +62,21 @@ def test_planned_model_payload_hides_experimental_bridge_metadata_by_default(mon
     assert "experimental_bridge" not in payload
 
 
-def test_planned_model_payload_shows_experimental_bridge_metadata_when_enabled(monkeypatch):
+def test_planned_model_payload_stays_native_readiness_only_when_experimental_bridge_is_enabled(monkeypatch):
     monkeypatch.setenv("UTOPIC_EXPERIMENTAL_BRIDGE", "1")
     entry = next(entry for entry in models.list_models() if entry.runtime == "planned_native")
 
     payload = gateway._model_payload(entry)
 
     assert "bridge" not in payload
-    assert payload["experimental_bridge"]["engine"] == entry.engine
-    assert payload["experimental_bridge"]["environment_variable"].startswith("UTOPIC_BRIDGE_")
+    assert "experimental_bridge" not in payload
 
 
 def test_planned_model_cache_metadata_hides_bridge_command_by_default(monkeypatch):
     monkeypatch.delenv("UTOPIC_EXPERIMENTAL_BRIDGE", raising=False)
     entry = next(entry for entry in models.list_models() if entry.runtime == "planned_native")
 
-    payload = models._bridge_model_metadata(entry)
+    payload = models._planned_model_metadata(entry)
 
     assert payload["runner"] == entry.runner
     assert payload["native_status"] == entry.native_status

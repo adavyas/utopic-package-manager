@@ -48,16 +48,7 @@ def test_gateway_models_endpoint_exposes_multimodal_runtime_metadata(monkeypatch
     assert by_id["qwen-image"]["repo"] == "Qwen/Qwen-Image"
     assert by_id["qwen-image"]["url"] == "https://huggingface.co/Qwen/Qwen-Image"
     assert "/v1/images/generations" in by_id["qwen-image"]["endpoints"]
-    assert by_id["qwen-image"]["experimental_bridge"] == {
-        "schema_version": "utopic-bridge/v1",
-        "engine": "diffusers",
-        "command": "utopic-bridge diffusers",
-        "environment_variable": "UTOPIC_BRIDGE_DIFFUSERS_COMMAND",
-        "install_hint": 'pip install "utopic[image]"',
-        "input": "prompt",
-        "outputs": ["image/png"],
-        "progress_events": ["queued", "loading", "generating", "completed", "failed"],
-    }
+    assert "experimental_bridge" not in by_id["qwen-image"]
     assert by_id["krea-2-raw"]["modality"] == "image"
     assert by_id["krea-2-raw"]["engine"] == "diffusers"
     assert by_id["krea-2-raw"]["repo"] == "krea/Krea-2-Raw"
@@ -71,10 +62,10 @@ def test_gateway_models_endpoint_exposes_multimodal_runtime_metadata(monkeypatch
     assert by_id["zuna"]["runtime"] == "planned_native"
     assert by_id["zuna"]["repo"] == "Zyphra/ZUNA"
     assert "/v1/utopic/misc/generations" in by_id["zuna"]["endpoints"]
-    assert by_id["zuna"]["experimental_bridge"]["input"] == "artifact"
+    assert "experimental_bridge" not in by_id["zuna"]
 
 
-def test_gateway_models_endpoint_exposes_bridge_activation_for_all_planned_models(monkeypatch):
+def test_gateway_models_endpoint_keeps_planned_models_native_only(monkeypatch):
     monkeypatch.setenv("UTOPIC_EXPERIMENTAL_BRIDGE", "1")
 
     status, payload = decode(gateway.handle_openai_request("GET", "/v1/models", None))
@@ -99,20 +90,16 @@ def test_gateway_models_endpoint_exposes_bridge_activation_for_all_planned_model
         "zuna",
     }
     for item in planned_models:
-        assert item["experimental_bridge"]["schema_version"] == "utopic-bridge/v1"
-        assert item["experimental_bridge"]["engine"] == item["engine"]
-        assert item["experimental_bridge"]["command"] == f"utopic-bridge {item['engine']}"
-        assert item["experimental_bridge"]["environment_variable"].startswith("UTOPIC_BRIDGE_")
-        assert item["experimental_bridge"]["install_hint"] or item["engine"] == "artifact"
-        assert item["experimental_bridge"]["input"] in {"prompt", "input", "artifact"}
-        assert item["experimental_bridge"]["outputs"] == item["outputs"]
+        assert item["runtime"] == "planned_native"
+        assert item["native_status"] == "planned"
+        assert item["runner"].endswith("_runner")
+        assert "experimental_bridge" not in item
 
     by_id = {item["id"]: item for item in planned_models}
     assert by_id["ltx-video"]["repo"] == "Lightricks/LTX-Video"
-    assert by_id["ltx-video"]["experimental_bridge"]["command"] == "utopic-bridge ltx"
-    assert by_id["ltx-video"]["experimental_bridge"]["environment_variable"] == "UTOPIC_BRIDGE_LTX_COMMAND"
-    assert by_id["cosmos3-super"]["experimental_bridge"]["command"] == "utopic-bridge cosmos"
-    assert by_id["cosmos3-super"]["experimental_bridge"]["environment_variable"] == "UTOPIC_BRIDGE_COSMOS_COMMAND"
+    assert by_id["ltx-video"]["runner"] == "video_runner"
+    assert by_id["cosmos3-super"]["runner"] == "image_runner"
+    assert by_id["cosmos3-super"]["requirements"]["min_gpu_memory_gib"] == 96
 
 
 def test_gateway_cosmos_returns_native_runner_oom_preflight(monkeypatch):

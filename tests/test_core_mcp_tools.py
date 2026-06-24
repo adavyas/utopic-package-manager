@@ -413,7 +413,7 @@ def test_gateway_native_base_url_still_takes_priority_over_runner(monkeypatch, t
     assert json.loads(body)["choices"][0]["message"]["content"] == "from server"
 
 
-def test_gateway_bridge_generation_reports_native_runner_not_ready(monkeypatch):
+def test_gateway_planned_generation_reports_native_runner_not_ready(monkeypatch):
     entry = gateway.models.ModelEntry(
         id="unit-image",
         name="Unit Image",
@@ -425,7 +425,7 @@ def test_gateway_bridge_generation_reports_native_runner_not_ready(monkeypatch):
         description="unit",
         modality="image",
         engine="diffusers",
-        runtime="bridge",
+        runtime="planned_native",
         endpoints=("/v1/images/generations",),
         outputs=("image",),
     )
@@ -479,7 +479,7 @@ def test_gateway_ignores_bridge_command_without_experimental_gate(monkeypatch):
         description="unit",
         modality="image",
         engine="diffusers",
-        runtime="bridge",
+        runtime="planned_native",
         endpoints=("/v1/images/generations",),
         outputs=("image",),
     )
@@ -527,7 +527,7 @@ def test_gateway_does_not_run_bridge_command_on_production_routes(monkeypatch):
         description="unit",
         modality="image",
         engine="diffusers",
-        runtime="bridge",
+        runtime="planned_native",
         endpoints=("/v1/images/generations",),
         outputs=("image",),
     )
@@ -577,7 +577,7 @@ def test_gateway_mcp_generate_speech_is_canonical_tts_tool(monkeypatch):
         description="unit",
         modality="tts",
         engine="kokoro",
-        runtime="bridge",
+        runtime="planned_native",
         endpoints=("/v1/audio/speech",),
         outputs=("audio/wav",),
     )

@@ -12,7 +12,6 @@ from pathlib import Path
 from typing import Optional, Sequence
 
 from . import __version__
-from . import bridge
 from . import installer
 
 
@@ -86,13 +85,13 @@ class LocalTextEntry:
 
 
 VALID_MODALITIES = {"text", "image", "tts", "music", "video", "misc"}
-VALID_RUNTIMES = {"native", "planned_native", "bridge"}
+VALID_RUNTIMES = {"native", "planned_native"}
 VALID_NATIVE_STATUSES = {"ready", "planned", "experimental", "unsupported_on_device"}
 VALID_BACKENDS = {"metal", "cuda", "cpu"}
 
 
 def _uses_metadata_cache(entry: ModelEntry) -> bool:
-    return entry.modality != "text" and entry.runtime in {"planned_native", "bridge"}
+    return entry.modality != "text" and entry.runtime == "planned_native"
 
 
 def _safe_model_filename(entry: ModelEntry) -> str:
@@ -205,9 +204,6 @@ def _validate_catalog_entry(item: object, index: int) -> ModelEntry:
         raise RuntimeError(f"Invalid model catalog entry {index}: only native runtime models can be native_status=ready")
     if runtime == "native" and modality == "text" and not item["filename"].lower().endswith(".gguf"):
         raise RuntimeError(f"Invalid model catalog entry {index}: native text models must use a GGUF filename")
-    if runtime in {"planned_native", "bridge"} and engine not in bridge.ADAPTERS:
-        raise RuntimeError(f"Invalid model catalog entry {index}: unknown experimental bridge engine: {engine}")
-
     return ModelEntry(
         id=item["id"],
         name=item["name"],
@@ -358,19 +354,7 @@ def _remove_path(path: Path) -> None:
         path.unlink()
 
 
-def _bridge_command_env_var(entry: ModelEntry) -> str:
-    normalized = "".join(char if char.isalnum() else "_" for char in entry.engine.upper()).strip("_")
-    return f"UTOPIC_BRIDGE_{normalized}_COMMAND"
-
-
-def _bridge_input_key(entry: ModelEntry) -> str:
-    if entry.modality == "misc":
-        return "artifact"
-    return "input" if entry.modality == "tts" else "prompt"
-
-
-def _bridge_model_metadata(entry: ModelEntry) -> dict[str, object]:
-    adapter = bridge.ADAPTERS.get(entry.engine)
+def _planned_model_metadata(entry: ModelEntry) -> dict[str, object]:
     payload: dict[str, object] = {
         "endpoints": list(entry.endpoints),
         "engine": entry.engine,
@@ -392,14 +376,6 @@ def _bridge_model_metadata(entry: ModelEntry) -> dict[str, object]:
         payload["expected_ram_gib"] = entry.expected_ram_gib
     if entry.requirements:
         payload["requirements"] = entry.requirements
-    if _experimental_bridge_enabled():
-        payload["experimental_bridge"] = {
-            "command": f"utopic-bridge {entry.engine}",
-            "environment_variable": _bridge_command_env_var(entry),
-            "input": _bridge_input_key(entry),
-            "install_hint": adapter.install_hint if adapter is not None else "",
-            "schema_version": bridge.SCHEMA_VERSION,
-        }
     return payload
 
 
@@ -415,7 +391,7 @@ def pull_model(model_id: str, *, force: bool = False) -> Path:
             return destination
         destination.mkdir(parents=True, exist_ok=True)
         (destination / "utopic-model.json").write_text(
-            json.dumps(_bridge_model_metadata(entry), indent=2, sort_keys=True) + "\n",
+            json.dumps(_planned_model_metadata(entry), indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )
         return destination
@@ -525,55 +501,7 @@ def _native_model_check(entry: ModelEntry) -> dict[str, object]:
     }
 
 
-def _bridge_model_check(entry: ModelEntry) -> dict[str, object]:
-    if not _experimental_bridge_enabled():
-        return {
-            "id": entry.id,
-            "name": entry.name,
-            "runtime": entry.runtime,
-            "modality": entry.modality,
-            "engine": entry.engine,
-            "runner": entry.runner,
-            "native_status": entry.native_status,
-            "supported_backends": list(entry.supported_backends),
-            "expected_vram_gib": entry.expected_vram_gib,
-            "expected_ram_gib": entry.expected_ram_gib,
-            "status": "native_runner_not_ready",
-            "ready": False,
-            "requirements": entry.requirements or {},
-            "cache": {
-                "path": str(entry.path),
-                "prepared": is_model_downloaded(entry),
-                "metadata_path": str(entry.path / "utopic-model.json"),
-            },
-            "next_steps": [
-                f"{entry.runner} for {entry.modality} is cataloged but not native-ready yet"
-            ],
-        }
-
-    prepared = is_model_downloaded(entry)
-    adapter = bridge.ADAPTERS.get(entry.engine)
-    if adapter is None:
-        bridge_check: dict[str, object] = {
-            "schema_version": bridge.SCHEMA_VERSION,
-            "engine": entry.engine,
-            "status": "unknown_engine",
-            "ready": False,
-            "packages": [],
-            "missing": [],
-            "install_hint": "",
-            "description": "",
-        }
-    else:
-        bridge_check = bridge._check_adapter(adapter)
-    bridge_ready = bool(bridge_check.get("ready"))
-    ready = prepared and bridge_ready
-    next_steps: list[str] = []
-    if not prepared:
-        next_steps.append(f"utopic models pull {entry.id}")
-    install_hint = bridge_check.get("install_hint")
-    if not bridge_ready and isinstance(install_hint, str) and install_hint:
-        next_steps.append(install_hint)
+def _planned_model_check(entry: ModelEntry) -> dict[str, object]:
     return {
         "id": entry.id,
         "name": entry.name,
@@ -585,22 +513,18 @@ def _bridge_model_check(entry: ModelEntry) -> dict[str, object]:
         "supported_backends": list(entry.supported_backends),
         "expected_vram_gib": entry.expected_vram_gib,
         "expected_ram_gib": entry.expected_ram_gib,
-        "status": "ready" if ready else "not_ready",
-        "ready": ready,
+        "status": "native_runner_not_ready",
+        "ready": False,
         "requirements": entry.requirements or {},
         "cache": {
             "path": str(entry.path),
-            "prepared": prepared,
+            "prepared": is_model_downloaded(entry),
             "metadata_path": str(entry.path / "utopic-model.json"),
         },
-        "experimental_bridge": bridge_check,
-        "next_steps": next_steps,
+        "next_steps": [
+            f"{entry.runner} for {entry.modality} is cataloged but not native-ready yet"
+        ],
     }
-
-
-def _experimental_bridge_enabled() -> bool:
-    value = os.environ.get("UTOPIC_EXPERIMENTAL_BRIDGE", "")
-    return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def model_check(model_id: str) -> dict[str, object]:
@@ -608,7 +532,7 @@ def model_check(model_id: str) -> dict[str, object]:
     if entry is None:
         raise RuntimeError(f"Unknown Utopic model '{model_id}'.")
     if _uses_metadata_cache(entry):
-        return _bridge_model_check(entry)
+        return _planned_model_check(entry)
     return _native_model_check(entry)
 
 

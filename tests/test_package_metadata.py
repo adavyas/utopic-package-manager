@@ -568,7 +568,7 @@ def test_model_catalog_declares_runtime_schema_for_every_entry():
         "outputs",
     }
     valid_modalities = {"text", "image", "tts", "music", "video", "misc"}
-    valid_runtimes = {"native", "planned_native", "bridge"}
+    valid_runtimes = {"native", "planned_native"}
     valid_native_statuses = {"ready", "planned", "experimental", "unsupported_on_device"}
     valid_backends = {"metal", "cuda", "cpu"}
 

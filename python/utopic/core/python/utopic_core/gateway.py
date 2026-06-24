@@ -11,7 +11,7 @@ from typing import Any, Optional
 import urllib.error
 import urllib.request
 
-from . import __version__, bridge, installer, models, native_runner
+from . import __version__, installer, models, native_runner
 
 
 JSON_HEADERS = {"content-type": "application/json"}
@@ -370,7 +370,7 @@ def handle_openai_request(
         )
     runtime_request = _normalize_request_for_runtime(path, entry, request)
     if _is_artifact_runtime(entry):
-        preflight = _bridge_runtime_preflight(entry)
+        preflight = _native_runtime_preflight(entry)
         if preflight is not None:
             return preflight
         runner_payload = native_runner.generation(entry, path, runtime_request)
@@ -567,7 +567,7 @@ def _default_model_for_endpoint(path: str) -> str:
     return models.default_model().id
 
 
-def _bridge_runtime_preflight(entry: models.ModelEntry) -> Optional[tuple[int, dict[str, str], bytes]]:
+def _native_runtime_preflight(entry: models.ModelEntry) -> Optional[tuple[int, dict[str, str], bytes]]:
     requirements = entry.requirements or {}
     minimum = requirements.get("min_gpu_memory_gib")
     allow_cpu = requirements.get("allow_cpu", True)
@@ -742,11 +742,6 @@ def _image_generation_data(artifacts: list[dict[str, Any]], request: dict[str, A
             continue
         data.append({"b64_json": encoded})
     return data
-
-
-def _bridge_command_env_var(entry: models.ModelEntry) -> str:
-    normalized = "".join(char if char.isalnum() else "_" for char in entry.engine.upper()).strip("_")
-    return f"UTOPIC_BRIDGE_{normalized}_COMMAND"
 
 
 def _normalize_request_for_runtime(
@@ -1180,32 +1175,11 @@ def _model_payload(entry: models.ModelEntry) -> dict[str, Any]:
         "url": entry.url,
         "description": entry.description,
     }
-    if _is_artifact_runtime(entry) and entry.runtime != "native" and _experimental_bridge_enabled():
-        payload["experimental_bridge"] = _bridge_model_payload(entry)
     return payload
 
 
 def _is_artifact_runtime(entry: models.ModelEntry) -> bool:
-    return entry.modality != "text" and entry.runtime in {"native", "planned_native", "bridge"}
-
-
-def _bridge_model_payload(entry: models.ModelEntry) -> dict[str, Any]:
-    adapter = bridge.ADAPTERS.get(entry.engine)
-    return {
-        "schema_version": bridge.SCHEMA_VERSION,
-        "engine": entry.engine,
-        "command": f"utopic-bridge {entry.engine}",
-        "environment_variable": _bridge_command_env_var(entry),
-        "install_hint": adapter.install_hint if adapter is not None else "",
-        "input": _input_key_for_modality(entry.modality),
-        "outputs": list(entry.outputs),
-        "progress_events": ["queued", "loading", "generating", "completed", "failed"],
-    }
-
-
-def _experimental_bridge_enabled() -> bool:
-    value = os.environ.get("UTOPIC_EXPERIMENTAL_BRIDGE", "")
-    return value.strip().lower() in {"1", "true", "yes", "on"}
+    return entry.modality != "text" and entry.runtime in {"native", "planned_native"}
 
 
 def _json(status: int, payload: dict[str, Any]) -> tuple[int, dict[str, str], bytes]:

@@ -1,5 +1,5 @@
 # Package-managed build of Utopic against a package-managed llama.cpp build.
-# The Utopic repo owns native source. This package owns the CMake project and
+# The package owns the vendored native source snapshot and CMake project, then
 # passes UTOPIC_NATIVE_SOURCE_DIR plus UTOPIC_LLAMACPP_DIR during setup.
 cmake_minimum_required(VERSION 3.18)
 project(utopic CXX C)
@@ -10,7 +10,7 @@ set(UTOPIC_BACKEND_NAME "auto" CACHE STRING "Backend selected by package-managed
 if(DEFINED UTOPIC_NATIVE_SOURCE_DIR)
   get_filename_component(UTOPIC_NATIVE_SOURCE_DIR "${UTOPIC_NATIVE_SOURCE_DIR}" ABSOLUTE)
 else()
-  message(FATAL_ERROR "UTOPIC_NATIVE_SOURCE_DIR is required. Run `utopic setup` for the package-managed build, or pass -DUTOPIC_NATIVE_SOURCE_DIR=/path/to/Utopic/native when developing the package installer.")
+  message(FATAL_ERROR "UTOPIC_NATIVE_SOURCE_DIR is required. Run `utopic setup` for the package-managed build, or pass -DUTOPIC_NATIVE_SOURCE_DIR=/path/to/package/native when developing the package installer.")
 endif()
 if(NOT EXISTS "${UTOPIC_NATIVE_SOURCE_DIR}/main.cpp")
   message(FATAL_ERROR "UTOPIC_NATIVE_SOURCE_DIR does not look like a Utopic native source directory: ${UTOPIC_NATIVE_SOURCE_DIR}")

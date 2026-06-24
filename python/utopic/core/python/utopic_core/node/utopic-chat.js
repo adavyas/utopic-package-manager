@@ -275,7 +275,7 @@ function validateCatalogEntry(item, index) {
     if (entry.modality !== undefined && !["text", "image", "tts", "music", "video", "misc"].includes(entry.modality)) {
         throw new Error(`Invalid model catalog entry ${index}: modality is not supported`);
     }
-    if (entry.runtime !== undefined && !["native", "planned_native", "bridge"].includes(entry.runtime)) {
+    if (entry.runtime !== undefined && !["native", "planned_native"].includes(entry.runtime)) {
         throw new Error(`Invalid model catalog entry ${index}: runtime is not supported`);
     }
     if (entry.native_status !== undefined &&
@@ -317,7 +317,7 @@ function isNativeTextModel(entry) {
     return modelModality(entry) === "text" && modelRuntime(entry) === "native";
 }
 function usesMetadataCache(entry) {
-    return modelModality(entry) !== "text" && ["planned_native", "bridge"].includes(modelRuntime(entry));
+    return modelModality(entry) !== "text" && modelRuntime(entry) === "planned_native";
 }
 function printModelCatalog(catalog, options) {
     const visible = options.chatOnly ? catalog.filter(isNativeTextModel) : catalog;
