@@ -35,6 +35,9 @@ BIN_NAMES = (
     "utopic_mcp",
     "utopic_acp",
 )
+BIN_ALIASES: Mapping[str, str] = {
+    "utopic-runner": "utopic_runner",
+}
 INSTALL_METADATA_NAME = "install.json"
 INSTALL_METADATA_SCHEMA_VERSION = 4
 INSTALL_METADATA_MATCH_KEYS = (
@@ -618,9 +621,17 @@ def _binary_suffix() -> str:
     return ".exe" if os.name == "nt" else ""
 
 
+def _installed_binary_names(binary_names: Sequence[str]) -> tuple[str, ...]:
+    names = list(binary_names)
+    for alias, target in BIN_ALIASES.items():
+        if target in names and alias not in names:
+            names.append(alias)
+    return tuple(names)
+
+
 def native_installation_is_current(binary_names: Sequence[str] = BIN_NAMES) -> bool:
     suffix = _binary_suffix()
-    for name in binary_names:
+    for name in _installed_binary_names(binary_names):
         binary = bin_dir() / f"{name}{suffix}"
         if not binary.is_file() or not os.access(binary, os.X_OK):
             return False
@@ -841,6 +852,16 @@ def _install_binaries(build_dir: Path) -> None:
         if not src.exists():
             raise RuntimeError(f"Expected Utopic build output was not found: {src}")
         dest = dest_dir / src.name
+        shutil.copy2(src, dest)
+        dest.chmod(0o755)
+        if platform.system() == "Darwin":
+            _run(["codesign", "--force", "--sign", "-", dest])
+
+    for alias, target in BIN_ALIASES.items():
+        src = dest_dir / f"{target}{suffix}"
+        if not src.exists():
+            raise RuntimeError(f"Expected Utopic installed binary was not found: {src}")
+        dest = dest_dir / f"{alias}{suffix}"
         shutil.copy2(src, dest)
         dest.chmod(0o755)
         if platform.system() == "Darwin":

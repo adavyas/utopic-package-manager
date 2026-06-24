@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -290,10 +291,44 @@ def test_install_binaries_ad_hoc_signs_macos_executables(monkeypatch, tmp_path):
 
     installer._install_binaries(build_dir)
 
+    signed_names = [*installer.BIN_NAMES, *installer.BIN_ALIASES]
     assert commands == [
         ["codesign", "--force", "--sign", "-", dest_dir / name]
-        for name in installer.BIN_NAMES
+        for name in signed_names
     ]
+
+
+def test_install_binaries_installs_stable_runner_alias(monkeypatch, tmp_path):
+    build_dir = tmp_path / "build"
+    build_dir.mkdir()
+    for name in installer.BIN_NAMES:
+        _write_executable(build_dir / name)
+    dest_dir = tmp_path / "bin"
+
+    monkeypatch.setattr(installer, "bin_dir", lambda: dest_dir)
+    monkeypatch.setattr(installer.platform, "system", lambda: "Linux")
+
+    installer._install_binaries(build_dir)
+
+    alias = dest_dir / "utopic-runner"
+    assert alias.is_file()
+    assert os.access(alias, os.X_OK)
+    assert alias.read_text(encoding="utf-8") == (dest_dir / "utopic_runner").read_text(encoding="utf-8")
+
+
+def test_native_installation_requires_stable_runner_alias(monkeypatch, tmp_path):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    for name in installer.BIN_NAMES:
+        _write_executable(bin_dir / name)
+
+    metadata = {"backend": "metal", "device": "Apple GPU"}
+    monkeypatch.setattr(installer, "bin_dir", lambda: bin_dir)
+    monkeypatch.setattr(installer, "_read_install_metadata", lambda: metadata)
+    monkeypatch.setattr(installer, "_metadata_runtime_libs_exist", lambda _metadata: True)
+    monkeypatch.setattr(installer, "_install_metadata", lambda *args, **kwargs: metadata)
+
+    assert not installer.native_installation_is_current(installer.BIN_NAMES)
 
 
 def test_install_runtime_libs_copies_llama_shared_libraries_to_install_lib_dir(monkeypatch, tmp_path):

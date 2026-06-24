@@ -2,7 +2,7 @@
 // This is intentionally one-shot: Python owns orchestration/debuggability, while
 // this binary owns native model loading and generation.
 //
-//   ./utopic_runner --json-request request.json
+//   ./utopic-runner --json-request request.json
 //
 // Request:
 //   {"schema_version":"utopic-runner/v1","task":"chat","model":"catalog-id",

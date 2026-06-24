@@ -388,7 +388,7 @@ jobs:
                   print(completed.stderr, file=sys.stderr)
                   sys.exit(completed.returncode)
 
-              runner_binary = native_home / "bin" / ("utopic_runner.exe" if os.name == "nt" else "utopic_runner")
+              runner_binary = native_home / "bin" / ("utopic-runner.exe" if os.name == "nt" else "utopic-runner")
               native_runner_smoke = Path.cwd() / "tests/test_native_runner_binary_smoke.py"
               subprocess.run([str(python), "-m", "pip", "install", "pytest"], check=True)
               completed = subprocess.run(
