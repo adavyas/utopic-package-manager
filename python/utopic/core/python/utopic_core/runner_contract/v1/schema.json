@@ -33,7 +33,102 @@
       "type": "object"
     },
     "options": {
-      "type": "object"
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "endpoint": {
+          "type": "string",
+          "minLength": 1
+        },
+        "modality": {
+          "enum": ["text", "image", "tts", "music", "video", "misc"]
+        },
+        "engine": {
+          "type": "string",
+          "minLength": 1
+        },
+        "runtime": {
+          "enum": ["native", "planned_native"]
+        },
+        "runner": {
+          "type": "string",
+          "minLength": 1
+        },
+        "native_status": {
+          "enum": ["ready", "planned", "experimental", "unsupported_on_device"]
+        },
+        "outputs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "supported_backends": {
+          "type": "array",
+          "items": {
+            "enum": ["metal", "cuda", "cpu"]
+          }
+        },
+        "model_cache_path": {
+          "type": "string"
+        },
+        "model_path": {
+          "type": "string"
+        },
+        "expected_vram_gib": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "expected_ram_gib": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "requirements": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "min_gpu_memory_gib": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "preferred_gpu_memory_gib": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "min_ram_gib": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "preferred_ram_gib": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "allow_cpu": {
+              "type": "boolean"
+            }
+          }
+        },
+        "oom_policy": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "action": {
+              "const": "fail_before_runner"
+            },
+            "min_gpu_memory_gib": {
+              "type": ["number", "null"],
+              "exclusiveMinimum": 0
+            },
+            "min_ram_gib": {
+              "type": ["number", "null"],
+              "exclusiveMinimum": 0
+            },
+            "allow_cpu": {
+              "type": ["boolean", "null"]
+            }
+          }
+        }
+      }
     },
     "output_dir": {
       "type": "string",

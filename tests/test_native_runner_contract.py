@@ -39,6 +39,18 @@ def test_runner_contract_schema_and_fixtures_are_packaged():
     assert set(schema["required"]) == set(chat)
     assert chat["schema_version"] == native_runner.SCHEMA_VERSION
     assert chat["task"] in schema["properties"]["task"]["enum"]
+    option_schema = schema["properties"]["options"]
+    option_properties = option_schema["properties"]
+    assert option_schema["additionalProperties"] is True
+    assert option_properties["requirements"]["type"] == "object"
+    assert option_properties["requirements"]["properties"]["min_gpu_memory_gib"]["type"] == "number"
+    assert option_properties["requirements"]["properties"]["allow_cpu"]["type"] == "boolean"
+    assert option_properties["oom_policy"]["type"] == "object"
+    assert option_properties["oom_policy"]["properties"]["action"]["const"] == "fail_before_runner"
+    assert option_properties["oom_policy"]["properties"]["min_gpu_memory_gib"]["type"] == ["number", "null"]
+    assert option_properties["oom_policy"]["properties"]["allow_cpu"]["type"] == ["boolean", "null"]
+    assert chat["options"]["requirements"]["allow_cpu"] is True
+    assert chat["options"]["oom_policy"]["action"] == "fail_before_runner"
 
 
 def test_runner_request_emits_stable_contract_for_chat(tmp_path):
