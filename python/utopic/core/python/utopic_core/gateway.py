@@ -412,6 +412,8 @@ def handle_mcp_request(
     request: dict[str, Any],
     *,
     native_base_url: Optional[str] = None,
+    active_text_model_path: Optional[Path] = None,
+    active_text_model_id: str = "utopic",
 ) -> tuple[int, dict[str, str], bytes]:
     method = request.get("method")
     request_id = request.get("id")
@@ -442,7 +444,17 @@ def handle_mcp_request(
         params = request.get("params") if isinstance(request.get("params"), dict) else {}
         name = params.get("name")
         arguments = params.get("arguments") if isinstance(params.get("arguments"), dict) else {}
-        return _json(200, _mcp_tool_call(request_id, str(name), arguments, native_base_url=native_base_url))
+        return _json(
+            200,
+            _mcp_tool_call(
+                request_id,
+                str(name),
+                arguments,
+                native_base_url=native_base_url,
+                active_text_model_path=active_text_model_path,
+                active_text_model_id=active_text_model_id,
+            ),
+        )
     return _json(
         200,
         {
@@ -459,6 +471,8 @@ def _mcp_tool_call(
     arguments: dict[str, Any],
     *,
     native_base_url: Optional[str],
+    active_text_model_path: Optional[Path],
+    active_text_model_id: str,
 ) -> dict[str, Any]:
     if name == "utopic_models_list":
         content = json.dumps([_model_payload(entry) for entry in models.list_models()], indent=2)
@@ -515,6 +529,8 @@ def _mcp_tool_call(
         endpoint,
         arguments,
         native_base_url=native_base_url,
+        active_text_model_path=active_text_model_path,
+        active_text_model_id=active_text_model_id,
     )
     payload = json.loads(body.decode("utf-8"))
     return _mcp_text_result(request_id, json.dumps(payload, sort_keys=True), is_error=status >= 400)
@@ -1441,7 +1457,14 @@ class GatewayHandler(BaseHTTPRequestHandler):
             self._send(*_json(400, {"error": {"message": "invalid JSON", "code": "invalid_json"}}))
             return
         if self.path == "/mcp":
-            self._send(*handle_mcp_request(body, native_base_url=self.native_base_url))
+            self._send(
+                *handle_mcp_request(
+                    body,
+                    native_base_url=self.native_base_url,
+                    active_text_model_path=self.active_text_model_path,
+                    active_text_model_id=self.active_text_model_id,
+                )
+            )
             return
         self._send(
             *handle_openai_request(

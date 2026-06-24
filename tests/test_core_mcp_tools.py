@@ -233,6 +233,45 @@ def test_gateway_active_text_model_alias_uses_runner(monkeypatch, tmp_path):
     assert captured["entry"].path == model_path
 
 
+def test_gateway_mcp_chat_active_text_model_alias_uses_runner(monkeypatch, tmp_path):
+    model_path = tmp_path / "active-mcp.gguf"
+    model_path.write_text("model", encoding="utf-8")
+    captured = {}
+
+    monkeypatch.setattr(gateway.models, "get_model", lambda model_id: None)
+
+    def fake_chat_completion(runner_entry, request):
+        captured["entry"] = runner_entry
+        captured["request"] = request
+        return {"ok": True, "type": "text", "text": "active mcp model works", "metrics": {}}
+
+    monkeypatch.setattr(gateway.native_runner, "chat_completion", fake_chat_completion)
+
+    status, _headers, body = gateway.handle_mcp_request(
+        {
+            "jsonrpc": "2.0",
+            "id": 8,
+            "method": "tools/call",
+            "params": {
+                "name": "utopic_chat",
+                "arguments": {"model": "utopic", "prompt": "hi"},
+            },
+        },
+        native_base_url=None,
+        active_text_model_path=model_path,
+    )
+
+    payload = json.loads(body)
+    content = json.loads(payload["result"]["content"][0]["text"])
+    assert status == 200
+    assert payload["id"] == 8
+    assert payload["result"]["isError"] is False
+    assert content["choices"][0]["message"]["content"] == "active mcp model works"
+    assert captured["entry"].id == "utopic"
+    assert captured["entry"].path == model_path
+    assert captured["request"]["messages"][0]["content"] == "hi"
+
+
 def test_gateway_native_base_url_still_takes_priority_over_runner(monkeypatch, tmp_path):
     entry = gateway.models.ModelEntry(
         id="unit-text",
