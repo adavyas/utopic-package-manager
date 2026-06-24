@@ -697,7 +697,7 @@ def test_native_installation_is_not_current_when_auto_best_backend_changes(monke
     assert installer.native_installation_is_current(("utopic_server",)) is False
 
 
-def test_native_installation_keeps_auto_metal_cache_without_reprobing(monkeypatch, tmp_path):
+def test_native_installation_reprobes_auto_metal_cache(monkeypatch, tmp_path):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     _write_executable(bin_dir / "utopic_server")
@@ -716,20 +716,33 @@ def test_native_installation_keeps_auto_metal_cache_without_reprobing(monkeypatc
         llama_dir=installer.default_llama_dir(),
         native_dir=installer.default_native_dir(),
     )
-    monkeypatch.setattr(installer, "_resolve_backend", lambda requested, arch: pytest.fail("should not reprobe metal cache"))
+    calls = []
+
+    def fake_resolve(requested, arch):
+        calls.append((requested, arch))
+        return decision
+
+    monkeypatch.setattr(installer, "_resolve_backend", fake_resolve)
 
     assert installer.native_installation_is_current(("utopic_server",)) is True
+    assert calls == [("auto", None)]
 
 
-def test_native_installation_keeps_auto_cuda_cache_without_requiring_compiler(monkeypatch, tmp_path):
+def test_native_installation_is_not_current_when_auto_cuda_backend_drift(monkeypatch, tmp_path):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    _write_executable(bin_dir / "utopic_server")
+    for name in ("utopic_server", "utopic-runner"):
+        _write_executable(bin_dir / name)
     decision = installer.BackendDecision(
         backend="cuda",
         reason="old",
         device="CUDA arch 80",
         cuda_architectures="80",
+    )
+    new_decision = installer.BackendDecision(
+        backend="cpu",
+        reason="No usable Metal device or CUDA compiler found",
+        device="CPU",
     )
 
     monkeypatch.setattr(installer, "bin_dir", lambda: bin_dir)
@@ -741,9 +754,9 @@ def test_native_installation_keeps_auto_cuda_cache_without_requiring_compiler(mo
         llama_dir=installer.default_llama_dir(),
         native_dir=installer.default_native_dir(),
     )
-    monkeypatch.setattr(installer, "_resolve_backend", lambda requested, arch: pytest.fail("should not require CUDA build tools for a CUDA runtime cache"))
+    monkeypatch.setattr(installer, "_resolve_backend", lambda requested, arch: new_decision)
 
-    assert installer.native_installation_is_current(("utopic_server",)) is True
+    assert installer.native_installation_is_current(("utopic_server",)) is False
 
 
 def test_native_installation_is_not_current_when_explicit_backend_changes(monkeypatch, tmp_path):
