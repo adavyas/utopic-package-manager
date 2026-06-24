@@ -5,9 +5,9 @@
 //   ./utopic-runner --json-request request.json
 //
 // Request:
-//   {"schema_version":"utopic-runner/v1","task":"chat","model":"catalog-id",
+//   {"schema_version":"utopic-runner/v1","run_id":"run_...","task":"chat","model":"catalog-id",
 //    "input":{"prompt":"..."},"options":{"model_path":"model.gguf"},
-//    "output_dir":"/tmp/utopic-run"}
+//    "output_dir":"/tmp/utopic/run_.../outputs","progress_path":"/tmp/utopic/run_.../progress.jsonl"}
 //
 // Response:
 //   {"ok":true,"type":"text","text":"...","artifacts":[],"metrics":{...},"backend":"metal"}
@@ -29,6 +29,8 @@ using json = nlohmann::json;
 using std::pair;
 using std::string;
 using std::vector;
+
+static const char * RUNNER_SCHEMA_VERSION = "utopic-runner/v1";
 
 static const char * arg(int argc, char ** argv, const char * flag, const char * def) {
     for (int i = 1; i < argc - 1; ++i) {
@@ -175,18 +177,20 @@ static json error_response(const string & code, const string & message, const js
 }
 
 struct runner_request {
+    string run_id;
     string task;
     string model;
     json input;
     json options;
     string output_dir;
+    string progress_path;
     string runner;
 };
 
 static json contract_error(const string & message, const string & field) {
     return error_response("runner_failed", message, {
         {"field", field},
-        {"schema_version", "utopic-runner/v1"},
+        {"schema_version", RUNNER_SCHEMA_VERSION},
     });
 }
 
@@ -302,15 +306,17 @@ static bool read_json_file(const char * path, json & out, string & error) {
 }
 
 static bool validate_request_contract(const json & root, json & response) {
-    if (root.contains("schema_version")) {
-        if (!root["schema_version"].is_string()) {
-            response = contract_error("schema_version must be utopic-runner/v1", "schema_version");
-            return false;
-        }
-        if (root["schema_version"].get<string>() != "utopic-runner/v1") {
-            response = contract_error("unsupported schema_version", "schema_version");
-            return false;
-        }
+    if (!root.contains("schema_version") || !root["schema_version"].is_string() || root["schema_version"].get<string>().empty()) {
+        response = contract_error("schema_version is required", "schema_version");
+        return false;
+    }
+    if (root["schema_version"].get<string>() != RUNNER_SCHEMA_VERSION) {
+        response = contract_error("unsupported schema_version", "schema_version");
+        return false;
+    }
+    if (!root.contains("run_id") || !root["run_id"].is_string() || root["run_id"].get<string>().empty()) {
+        response = contract_error("run_id is required", "run_id");
+        return false;
     }
     if (!root.contains("task") || !root["task"].is_string() || root["task"].get<string>().empty()) {
         response = contract_error("task is required", "task");
@@ -337,16 +343,22 @@ static bool validate_request_contract(const json & root, json & response) {
         response = contract_error("output_dir is required", "output_dir");
         return false;
     }
+    if (!root.contains("progress_path") || !root["progress_path"].is_string() || root["progress_path"].get<string>().empty()) {
+        response = contract_error("progress_path is required", "progress_path");
+        return false;
+    }
     return true;
 }
 
 static runner_request make_runner_request(const json & root, const string & runner_name) {
     return {
+        root.value("run_id", ""),
         root.value("task", ""),
         root.value("model", ""),
         root.value("input", json::object()),
         root.value("options", json::object()),
         root.value("output_dir", ""),
+        root.value("progress_path", ""),
         runner_name,
     };
 }

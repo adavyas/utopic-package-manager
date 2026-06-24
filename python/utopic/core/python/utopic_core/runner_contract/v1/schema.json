@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://utopic.dev/schemas/utopic-runner/v1/request.schema.json",
+  "title": "Utopic native runner request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "run_id",
+    "task",
+    "model",
+    "input",
+    "options",
+    "output_dir",
+    "progress_path"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "utopic-runner/v1"
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "task": {
+      "enum": ["chat", "image", "tts", "music", "video", "misc"]
+    },
+    "model": {
+      "type": "string",
+      "minLength": 1
+    },
+    "input": {
+      "type": "object"
+    },
+    "options": {
+      "type": "object"
+    },
+    "output_dir": {
+      "type": "string",
+      "minLength": 1
+    },
+    "progress_path": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

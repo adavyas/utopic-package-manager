@@ -147,13 +147,16 @@ def _runner_request(
     _copy_option(request, options, "voice", "voice")
     _copy_option(request, options, "duration", "duration")
 
+    run_id, output_dir, progress_path = _allocate_run_layout()
     return {
         "schema_version": SCHEMA_VERSION,
+        "run_id": run_id,
         "task": task,
         "model": entry.id,
         "input": runner_input,
         "options": options,
-        "output_dir": str(_allocate_output_dir()),
+        "output_dir": str(output_dir),
+        "progress_path": str(progress_path),
     }
 
 
@@ -291,12 +294,14 @@ def _runs_dir() -> Path:
         return Path(tempfile.gettempdir()) / "utopic" / "runs"
 
 
-def _allocate_output_dir() -> Path:
+def _allocate_run_layout() -> tuple[str, Path, Path]:
     root = _runs_dir()
     root.mkdir(parents=True, exist_ok=True)
-    output_dir = root / ("run_" + uuid.uuid4().hex)
-    output_dir.mkdir()
-    return output_dir
+    run_id = "run_" + uuid.uuid4().hex
+    run_dir = root / run_id
+    output_dir = run_dir / "outputs"
+    output_dir.mkdir(parents=True)
+    return run_id, output_dir, run_dir / "progress.jsonl"
 
 
 def _runner_timeout_seconds() -> int:

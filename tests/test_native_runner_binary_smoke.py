@@ -59,6 +59,19 @@ def _last_json(stdout: str) -> dict[str, object]:
     raise AssertionError("native runner wrote no JSON response")
 
 
+def _contract_request(tmp_path: Path, payload: dict[str, object]) -> dict[str, object]:
+    request: dict[str, object] = {
+        "schema_version": "utopic-runner/v1",
+        "run_id": "run_unit",
+        "input": {},
+        "options": {},
+        "output_dir": str(tmp_path / "outputs"),
+        "progress_path": str(tmp_path / "progress.jsonl"),
+    }
+    request.update(payload)
+    return request
+
+
 def test_native_runner_rejects_malformed_json(tmp_path):
     request_path = tmp_path / "bad-request.json"
     request_path.write_text("{not json", encoding="utf-8")
@@ -72,16 +85,18 @@ def test_native_runner_rejects_malformed_json(tmp_path):
     assert "invalid JSON request" in payload["error"]["message"]
 
 
-def test_native_runner_accepts_contract_without_schema_version(tmp_path):
+def test_native_runner_rejects_contract_without_schema_version(tmp_path):
     request_path = tmp_path / "without-schema-version.json"
     request_path.write_text(
         json.dumps(
             {
+                "run_id": "run_unit",
                 "task": "chat",
                 "model": "unit-text",
                 "input": {"prompt": "hello"},
                 "options": {},
                 "output_dir": str(tmp_path),
+                "progress_path": str(tmp_path / "progress.jsonl"),
             }
         ),
         encoding="utf-8",
@@ -92,8 +107,9 @@ def test_native_runner_accepts_contract_without_schema_version(tmp_path):
 
     assert completed.returncode != 0
     assert payload["ok"] is False
-    assert payload["error"]["code"] == "missing_model"
-    assert payload["error"]["message"] == "options.model_path is required for native chat"
+    assert payload["error"]["code"] == "runner_failed"
+    assert payload["error"]["message"] == "schema_version is required"
+    assert payload["error"]["detail"]["field"] == "schema_version"
 
 
 @pytest.mark.parametrize(
@@ -102,11 +118,13 @@ def test_native_runner_accepts_contract_without_schema_version(tmp_path):
         (
             {
                 "schema_version": "utopic-runner/v0",
+                "run_id": "run_unit",
                 "task": "chat",
                 "model": "unit-text",
                 "input": {"prompt": "hello"},
                 "options": {},
                 "output_dir": ".",
+                "progress_path": "./progress.jsonl",
             },
             "schema_version",
             "unsupported schema_version",
@@ -114,10 +132,12 @@ def test_native_runner_accepts_contract_without_schema_version(tmp_path):
         (
             {
                 "schema_version": "utopic-runner/v1",
+                "run_id": "run_unit",
                 "model": "unit-text",
                 "input": {"prompt": "hello"},
                 "options": {},
                 "output_dir": ".",
+                "progress_path": "./progress.jsonl",
             },
             "task",
             "task is required",
@@ -125,10 +145,12 @@ def test_native_runner_accepts_contract_without_schema_version(tmp_path):
         (
             {
                 "schema_version": "utopic-runner/v1",
+                "run_id": "run_unit",
                 "task": "chat",
                 "input": {"prompt": "hello"},
                 "options": {},
                 "output_dir": ".",
+                "progress_path": "./progress.jsonl",
             },
             "model",
             "model is required",
@@ -138,9 +160,24 @@ def test_native_runner_accepts_contract_without_schema_version(tmp_path):
                 "schema_version": "utopic-runner/v1",
                 "task": "chat",
                 "model": "unit-text",
+                "input": {"prompt": "hello"},
+                "options": {},
+                "output_dir": ".",
+                "progress_path": "./progress.jsonl",
+            },
+            "run_id",
+            "run_id is required",
+        ),
+        (
+            {
+                "schema_version": "utopic-runner/v1",
+                "run_id": "run_unit",
+                "task": "chat",
+                "model": "unit-text",
                 "input": "hello",
                 "options": {},
                 "output_dir": ".",
+                "progress_path": "./progress.jsonl",
             },
             "input",
             "input must be an object",
@@ -148,11 +185,13 @@ def test_native_runner_accepts_contract_without_schema_version(tmp_path):
         (
             {
                 "schema_version": "utopic-runner/v1",
+                "run_id": "run_unit",
                 "task": "chat",
                 "model": "unit-text",
                 "input": {"prompt": "hello"},
                 "options": [],
                 "output_dir": ".",
+                "progress_path": "./progress.jsonl",
             },
             "options",
             "options must be an object",
@@ -160,13 +199,28 @@ def test_native_runner_accepts_contract_without_schema_version(tmp_path):
         (
             {
                 "schema_version": "utopic-runner/v1",
+                "run_id": "run_unit",
                 "task": "chat",
                 "model": "unit-text",
                 "input": {"prompt": "hello"},
                 "options": {},
+                "progress_path": "./progress.jsonl",
             },
             "output_dir",
             "output_dir is required",
+        ),
+        (
+            {
+                "schema_version": "utopic-runner/v1",
+                "run_id": "run_unit",
+                "task": "chat",
+                "model": "unit-text",
+                "input": {"prompt": "hello"},
+                "options": {},
+                "output_dir": ".",
+            },
+            "progress_path",
+            "progress_path is required",
         ),
     ],
 )
@@ -189,14 +243,15 @@ def test_native_runner_reports_missing_model_path_for_chat(tmp_path):
     request_path = tmp_path / "missing-model-path.json"
     request_path.write_text(
         json.dumps(
-            {
-                "schema_version": "utopic-runner/v1",
-                "task": "chat",
-                "model": "unit-text",
-                "input": {"prompt": "hello"},
-                "options": {},
-                "output_dir": str(tmp_path),
-            }
+            _contract_request(
+                tmp_path,
+                {
+                    "task": "chat",
+                    "model": "unit-text",
+                    "input": {"prompt": "hello"},
+                    "options": {},
+                },
+            )
         ),
         encoding="utf-8",
     )
@@ -214,13 +269,15 @@ def test_native_runner_rejects_unknown_task(tmp_path):
     request_path = tmp_path / "unknown-task.json"
     request_path.write_text(
         json.dumps(
-            {
-                "task": "not-a-task",
-                "model": "unit-model",
-                "input": {"prompt": "hello"},
-                "options": {},
-                "output_dir": str(tmp_path),
-            }
+            _contract_request(
+                tmp_path,
+                {
+                    "task": "not-a-task",
+                    "model": "unit-model",
+                    "input": {"prompt": "hello"},
+                    "options": {},
+                },
+            )
         ),
         encoding="utf-8",
     )
@@ -239,22 +296,24 @@ def test_native_runner_reports_planned_non_text_task_readiness(tmp_path):
     request_path = tmp_path / "planned-image.json"
     request_path.write_text(
         json.dumps(
-            {
-                "task": "image",
-                "model": "unit-image",
-                "input": {"prompt": "a red cube"},
-                "options": {
-                    "modality": "image",
-                    "engine": "diffusers",
-                    "runtime": "planned_native",
-                    "runner": "utopic-runner",
-                    "native_status": "planned",
-                    "supported_backends": ["metal", "cuda"],
-                    "expected_vram_gib": 8.0,
-                    "expected_ram_gib": 16.0,
+            _contract_request(
+                tmp_path,
+                {
+                    "task": "image",
+                    "model": "unit-image",
+                    "input": {"prompt": "a red cube"},
+                    "options": {
+                        "modality": "image",
+                        "engine": "diffusers",
+                        "runtime": "planned_native",
+                        "runner": "utopic-runner",
+                        "native_status": "planned",
+                        "supported_backends": ["metal", "cuda"],
+                        "expected_vram_gib": 8.0,
+                        "expected_ram_gib": 16.0,
+                    },
                 },
-                "output_dir": str(tmp_path),
-            }
+            )
         ),
         encoding="utf-8",
     )
@@ -282,20 +341,22 @@ def test_modality_runner_entrypoint_reports_planned_readiness(tmp_path):
     request_path = tmp_path / "planned-image.json"
     request_path.write_text(
         json.dumps(
-            {
-                "task": "image",
-                "model": "unit-image",
-                "input": {"prompt": "a red cube"},
-                "options": {
-                    "modality": "image",
-                    "engine": "diffusers",
-                    "runtime": "planned_native",
-                    "runner": "utopic-runner",
-                    "native_status": "planned",
-                    "supported_backends": ["metal", "cuda"],
+            _contract_request(
+                tmp_path,
+                {
+                    "task": "image",
+                    "model": "unit-image",
+                    "input": {"prompt": "a red cube"},
+                    "options": {
+                        "modality": "image",
+                        "engine": "diffusers",
+                        "runtime": "planned_native",
+                        "runner": "utopic-runner",
+                        "native_status": "planned",
+                        "supported_backends": ["metal", "cuda"],
+                    },
                 },
-                "output_dir": str(tmp_path),
-            }
+            )
         ),
         encoding="utf-8",
     )
@@ -314,19 +375,21 @@ def test_modality_runner_readiness_includes_detected_runtime(tmp_path):
     request_path = tmp_path / "planned-image-detected-runtime.json"
     request_path.write_text(
         json.dumps(
-            {
-                "task": "image",
-                "model": "unit-image",
-                "input": {"prompt": "a red cube"},
-                "options": {
-                    "modality": "image",
-                    "engine": "diffusers",
-                    "runtime": "planned_native",
-                    "native_status": "planned",
-                    "supported_backends": ["metal", "cuda"],
+            _contract_request(
+                tmp_path,
+                {
+                    "task": "image",
+                    "model": "unit-image",
+                    "input": {"prompt": "a red cube"},
+                    "options": {
+                        "modality": "image",
+                        "engine": "diffusers",
+                        "runtime": "planned_native",
+                        "native_status": "planned",
+                        "supported_backends": ["metal", "cuda"],
+                    },
                 },
-                "output_dir": str(tmp_path),
-            }
+            )
         ),
         encoding="utf-8",
     )
@@ -355,19 +418,21 @@ def test_modality_runner_entrypoint_reports_its_own_name_without_runner_option(t
     request_path = tmp_path / "planned-image-no-runner-option.json"
     request_path.write_text(
         json.dumps(
-            {
-                "task": "image",
-                "model": "unit-image",
-                "input": {"prompt": "a red cube"},
-                "options": {
-                    "modality": "image",
-                    "engine": "diffusers",
-                    "runtime": "planned_native",
-                    "native_status": "planned",
-                    "supported_backends": ["metal", "cuda"],
+            _contract_request(
+                tmp_path,
+                {
+                    "task": "image",
+                    "model": "unit-image",
+                    "input": {"prompt": "a red cube"},
+                    "options": {
+                        "modality": "image",
+                        "engine": "diffusers",
+                        "runtime": "planned_native",
+                        "native_status": "planned",
+                        "supported_backends": ["metal", "cuda"],
+                    },
                 },
-                "output_dir": str(tmp_path),
-            }
+            )
         ),
         encoding="utf-8",
     )
@@ -386,25 +451,27 @@ def test_native_runner_reports_oom_preflight_before_planned_readiness(tmp_path):
     request_path = tmp_path / "too-large-image.json"
     request_path.write_text(
         json.dumps(
-            {
-                "task": "image",
-                "model": "cosmos3-super",
-                "input": {"prompt": "a red cube"},
-                "options": {
-                    "modality": "image",
-                    "engine": "cosmos",
-                    "runtime": "planned_native",
-                    "runner": "utopic-runner",
-                    "native_status": "planned",
-                    "supported_backends": ["cuda"],
-                    "expected_vram_gib": 96.0,
-                    "requirements": {
-                        "min_gpu_memory_gib": 96,
-                        "allow_cpu": False,
+            _contract_request(
+                tmp_path,
+                {
+                    "task": "image",
+                    "model": "cosmos3-super",
+                    "input": {"prompt": "a red cube"},
+                    "options": {
+                        "modality": "image",
+                        "engine": "cosmos",
+                        "runtime": "planned_native",
+                        "runner": "utopic-runner",
+                        "native_status": "planned",
+                        "supported_backends": ["cuda"],
+                        "expected_vram_gib": 96.0,
+                        "requirements": {
+                            "min_gpu_memory_gib": 96,
+                            "allow_cpu": False,
+                        },
                     },
                 },
-                "output_dir": str(tmp_path),
-            }
+            )
         ),
         encoding="utf-8",
     )
@@ -438,14 +505,15 @@ def test_native_runner_reports_unloadable_model_cleanly(tmp_path):
     request_path = tmp_path / "missing-model.json"
     request_path.write_text(
         json.dumps(
-            {
-                "schema_version": "utopic-runner/v1",
-                "task": "chat",
-                "model": "unit-text",
-                "input": {"prompt": "hello"},
-                "options": {"model_path": str(missing_model)},
-                "output_dir": str(tmp_path),
-            }
+            _contract_request(
+                tmp_path,
+                {
+                    "task": "chat",
+                    "model": "unit-text",
+                    "input": {"prompt": "hello"},
+                    "options": {"model_path": str(missing_model)},
+                },
+            )
         ),
         encoding="utf-8",
     )
@@ -465,22 +533,23 @@ def test_native_runner_reports_unsupported_modality_with_readiness_detail(tmp_pa
     request_path = tmp_path / "image-request.json"
     request_path.write_text(
         json.dumps(
-            {
-                "schema_version": "utopic-runner/v1",
-                "task": "image",
-                "model": "unit-image",
-                "input": {"prompt": "a red cube"},
-                "options": {
-                    "modality": "image",
-                    "engine": "diffusers",
-                    "runtime": "planned_native",
-                    "runner": "utopic-runner",
-                    "native_status": "planned",
-                    "supported_backends": ["metal", "cuda"],
-                    "expected_vram_gib": 8.0,
+            _contract_request(
+                tmp_path,
+                {
+                    "task": "image",
+                    "model": "unit-image",
+                    "input": {"prompt": "a red cube"},
+                    "options": {
+                        "modality": "image",
+                        "engine": "diffusers",
+                        "runtime": "planned_native",
+                        "runner": "utopic-runner",
+                        "native_status": "planned",
+                        "supported_backends": ["metal", "cuda"],
+                        "expected_vram_gib": 8.0,
+                    },
                 },
-                "output_dir": str(tmp_path),
-            }
+            )
         ),
         encoding="utf-8",
     )

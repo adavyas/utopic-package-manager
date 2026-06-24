@@ -8,6 +8,37 @@ from utopic.core_loader import load_core_module
 
 native_runner = load_core_module("native_runner", installer_api=installer)
 models = load_core_module("models", installer_api=installer)
+CONTRACT = Path(native_runner.__file__).parent / "runner_contract" / "v1"
+
+
+def _load_fixture(name: str) -> dict[str, object]:
+    payload = json.loads((CONTRACT / name).read_text(encoding="utf-8"))
+    assert isinstance(payload, dict)
+    return payload
+
+
+def _normalize_runner_request(payload: dict[str, object]) -> dict[str, object]:
+    normalized = dict(payload)
+    normalized["run_id"] = "$RUN_ID"
+    normalized["output_dir"] = "$OUTPUT_DIR"
+    normalized["progress_path"] = "$PROGRESS_PATH"
+    options = dict(normalized.get("options") or {})
+    if "model_cache_path" in options:
+        options["model_cache_path"] = "$MODEL_PATH"
+    if "model_path" in options:
+        options["model_path"] = "$MODEL_PATH"
+    normalized["options"] = options
+    return normalized
+
+
+def test_runner_contract_schema_and_fixtures_are_packaged():
+    schema = _load_fixture("schema.json")
+    chat = _load_fixture("chat_request.json")
+
+    assert schema["properties"]["schema_version"]["const"] == native_runner.SCHEMA_VERSION
+    assert set(schema["required"]) == set(chat)
+    assert chat["schema_version"] == native_runner.SCHEMA_VERSION
+    assert chat["task"] in schema["properties"]["task"]["enum"]
 
 
 def test_runner_request_emits_stable_contract_for_chat(tmp_path):
@@ -34,7 +65,16 @@ def test_runner_request_emits_stable_contract_for_chat(tmp_path):
         {"max_tokens": 16},
     )
 
-    assert set(payload) == {"schema_version", "task", "model", "input", "options", "output_dir"}
+    assert set(payload) == {
+        "schema_version",
+        "run_id",
+        "task",
+        "model",
+        "input",
+        "options",
+        "output_dir",
+        "progress_path",
+    }
     assert payload["schema_version"] == "utopic-runner/v1"
     assert payload["task"] == "chat"
     assert payload["model"] == "unit-text"
@@ -43,6 +83,33 @@ def test_runner_request_emits_stable_contract_for_chat(tmp_path):
     assert payload["options"]["max_tokens"] == 16
     assert isinstance(payload["output_dir"], str)
     assert payload["output_dir"]
+
+
+def test_runner_request_matches_versioned_chat_fixture():
+    entry = models.ModelEntry(
+        id="unit-text",
+        name="Unit Text",
+        family="unit",
+        filename="unit-text.gguf",
+        url="https://example.invalid/unit-text.gguf",
+        size="1 GiB",
+        recommended=True,
+        description="unit",
+        modality="text",
+        engine="native-text",
+        runtime="native",
+        runner="utopic-runner",
+        native_status="ready",
+    )
+
+    payload = native_runner._runner_request(
+        entry,
+        "chat",
+        {"messages": [{"role": "user", "content": "hello"}]},
+        {"max_tokens": 16},
+    )
+
+    assert _normalize_runner_request(payload) == _load_fixture("chat_request.json")
 
 
 def test_runner_request_emits_stable_contract_for_artifact_generation():
@@ -75,7 +142,16 @@ def test_runner_request_emits_stable_contract_for_artifact_generation():
         endpoint="/v1/images/generations",
     )
 
-    assert set(payload) == {"schema_version", "task", "model", "input", "options", "output_dir"}
+    assert set(payload) == {
+        "schema_version",
+        "run_id",
+        "task",
+        "model",
+        "input",
+        "options",
+        "output_dir",
+        "progress_path",
+    }
     assert payload["schema_version"] == "utopic-runner/v1"
     assert payload["task"] == "image"
     assert payload["model"] == "unit-image"
@@ -114,10 +190,44 @@ def test_runner_request_allocates_unique_output_dir_per_invocation(monkeypatch, 
     first_output = Path(first["output_dir"])
     second_output = Path(second["output_dir"])
     assert first_output != second_output
-    assert first_output.parent == runs_dir
-    assert second_output.parent == runs_dir
+    assert first_output.name == "outputs"
+    assert second_output.name == "outputs"
+    assert first_output.parent.parent == runs_dir
+    assert second_output.parent.parent == runs_dir
     assert first_output.is_dir()
     assert second_output.is_dir()
+
+
+def test_runner_request_allocates_versioned_run_layout(monkeypatch, tmp_path):
+    runs_dir = tmp_path / "runs"
+    entry = models.ModelEntry(
+        id="unit-image",
+        name="Unit Image",
+        family="unit",
+        filename="unit-image",
+        url="https://example.invalid/unit-image",
+        size="1 GiB",
+        recommended=False,
+        description="unit",
+        modality="image",
+        engine="native-image",
+        runtime="native",
+        endpoints=("/v1/images/generations",),
+        outputs=("image/png",),
+        supported_backends=("metal", "cuda"),
+        runner="utopic-runner",
+        native_status="ready",
+    )
+    monkeypatch.setenv("UTOPIC_RUNS_DIR", str(runs_dir))
+
+    payload = native_runner._runner_request(entry, "image", {"prompt": "a native image"}, {})
+
+    assert isinstance(payload["run_id"], str)
+    assert payload["run_id"]
+    assert payload["output_dir"] == str(runs_dir / payload["run_id"] / "outputs")
+    assert payload["progress_path"] == str(runs_dir / payload["run_id"] / "progress.jsonl")
+    assert Path(payload["output_dir"]).is_dir()
+    assert Path(payload["progress_path"]).parent.is_dir()
 
 
 def test_generation_uses_catalog_runner_binary(monkeypatch, tmp_path):

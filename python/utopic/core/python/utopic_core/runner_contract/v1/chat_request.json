@@ -1,0 +1,35 @@
+{
+  "schema_version": "utopic-runner/v1",
+  "run_id": "$RUN_ID",
+  "task": "chat",
+  "model": "unit-text",
+  "input": {
+    "messages": [
+      {
+        "role": "user",
+        "content": "hello"
+      }
+    ]
+  },
+  "options": {
+    "endpoint": "/v1/chat/completions",
+    "modality": "text",
+    "engine": "native-text",
+    "runtime": "native",
+    "runner": "utopic-runner",
+    "native_status": "ready",
+    "outputs": [
+      "text"
+    ],
+    "supported_backends": [
+      "metal",
+      "cuda",
+      "cpu"
+    ],
+    "model_cache_path": "$MODEL_PATH",
+    "model_path": "$MODEL_PATH",
+    "max_tokens": 16
+  },
+  "output_dir": "$OUTPUT_DIR",
+  "progress_path": "$PROGRESS_PATH"
+}
