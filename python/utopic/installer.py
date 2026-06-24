@@ -22,6 +22,7 @@ UTOPIC_NATIVE_REPO = "https://github.com/adavyas/utopic.git"
 UTOPIC_NATIVE_REF = "7e554b1d4f1b1dc9955eac1813781eec9b69fd68"
 LLAMA_REPO = "https://github.com/ggml-org/llama.cpp.git"
 LLAMA_REF = "ef5e2dcce"
+LLAMA_FETCH_REF = "refs/pull/24423/head"
 BIN_NAMES = ("utopic", "utopic_runner", "utopic_server", "utopic_mcp", "utopic_acp")
 INSTALL_METADATA_NAME = "install.json"
 INSTALL_METADATA_SCHEMA_VERSION = 3
@@ -31,6 +32,7 @@ INSTALL_METADATA_MATCH_KEYS = (
     "cuda_graphs",
     "llama_repo",
     "llama_ref",
+    "llama_fetch_ref",
     "native_repo",
     "native_ref",
     "llama_dir",
@@ -159,7 +161,24 @@ def _git_origin_url(dest: Path) -> Optional[str]:
     return origin or None
 
 
-def _clone_or_checkout(repo: str, ref: str, dest: Path, *, dry_run: bool, reset: bool = False) -> None:
+def _llama_fetch_ref(llama_ref: str) -> Optional[str]:
+    configured = os.environ.get("UTOPIC_LLAMA_FETCH_REF")
+    if configured is not None:
+        return configured or None
+    if llama_ref == LLAMA_REF:
+        return LLAMA_FETCH_REF
+    return None
+
+
+def _clone_or_checkout(
+    repo: str,
+    ref: str,
+    dest: Path,
+    *,
+    dry_run: bool,
+    reset: bool = False,
+    fetch_ref: Optional[str] = None,
+) -> None:
     dest_exists = dest.exists()
     if dest.exists() and not (dest / ".git").exists():
         print(f"+ remove invalid source checkout {dest}")
@@ -186,6 +205,8 @@ def _clone_or_checkout(repo: str, ref: str, dest: Path, *, dry_run: bool, reset:
         _run(["git", "clone", repo, dest], dry_run=dry_run)
 
     checkout_ref = ref
+    if fetch_ref:
+        _run(["git", "fetch", "origin", fetch_ref], cwd=dest, dry_run=dry_run)
     if ref.startswith("refs/"):
         _run(["git", "fetch", "origin", ref], cwd=dest, dry_run=dry_run)
         checkout_ref = "FETCH_HEAD"
@@ -462,6 +483,7 @@ def _install_metadata(
         "cuda_graphs": cuda_graphs,
         "llama_repo": os.environ.get("UTOPIC_LLAMA_REPO", LLAMA_REPO),
         "llama_ref": os.environ.get("UTOPIC_LLAMA_REF", LLAMA_REF),
+        "llama_fetch_ref": _llama_fetch_ref(os.environ.get("UTOPIC_LLAMA_REF", LLAMA_REF)),
         "native_repo": os.environ.get("UTOPIC_NATIVE_REPO", UTOPIC_NATIVE_REPO),
         "native_ref": os.environ.get("UTOPIC_NATIVE_REF", UTOPIC_NATIVE_REF),
         "llama_dir": str(_normalize_path(llama_dir)),
@@ -832,13 +854,15 @@ def setup(argv: Optional[Sequence[str]] = None) -> int:
     if args.llama_dir or os.environ.get("UTOPIC_LLAMACPP_DIR"):
         print(f"Using maintainer-provided native dependency source at {llama_dir}")
     else:
+        llama_ref = os.environ.get("UTOPIC_LLAMA_REF", LLAMA_REF)
         print(f"Managing native dependency source at {llama_dir}")
         _clone_or_checkout(
             os.environ.get("UTOPIC_LLAMA_REPO", LLAMA_REPO),
-            os.environ.get("UTOPIC_LLAMA_REF", LLAMA_REF),
+            llama_ref,
             llama_dir,
             dry_run=dry_run,
             reset=True,
+            fetch_ref=_llama_fetch_ref(llama_ref),
         )
 
     if not dry_run:

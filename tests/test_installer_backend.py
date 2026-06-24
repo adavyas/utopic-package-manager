@@ -434,8 +434,30 @@ def test_managed_source_checkout_repairs_wrong_origin_url(monkeypatch, tmp_path)
     assert commands[4] == ["git", "reset", "--hard", "FETCH_HEAD"]
 
 
+def test_managed_source_checkout_fetches_source_ref_for_pinned_commit(monkeypatch, tmp_path):
+    dest = tmp_path / "src" / "llama.cpp"
+    commands = []
+
+    monkeypatch.setattr(installer, "_run", lambda command, **kwargs: commands.append(command))
+
+    installer._clone_or_checkout(
+        "https://example.test/llama.cpp.git",
+        installer.LLAMA_REF,
+        dest,
+        dry_run=True,
+        reset=True,
+        fetch_ref=installer.LLAMA_FETCH_REF,
+    )
+
+    assert commands[0] == ["git", "clone", "https://example.test/llama.cpp.git", dest]
+    assert commands[1] == ["git", "fetch", "origin", "refs/pull/24423/head"]
+    assert commands[2] == ["git", "checkout", "ef5e2dcce"]
+    assert commands[3] == ["git", "reset", "--hard", "ef5e2dcce"]
+
+
 def test_default_llama_ref_is_pinned_for_reproducible_native_builds():
     assert installer.LLAMA_REF == "ef5e2dcce"
+    assert installer.LLAMA_FETCH_REF == "refs/pull/24423/head"
     assert not installer.LLAMA_REF.startswith("refs/")
 
 

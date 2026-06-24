@@ -453,6 +453,30 @@ def test_chat_python_fallback_delegates_to_utopic_run_after_model_resolution(mon
     assert commands[0] == ["utopic", "run", "remote-model", "--no-setup"]
 
 
+def test_chat_python_fallback_uses_utopic_alias_for_existing_server_without_model(monkeypatch):
+    calls = []
+
+    monkeypatch.setattr(
+        chat,
+        "_python_chat_loop",
+        lambda base_url, args, fallback_reason="Node.js was not found", model=None: calls.append(
+            (base_url, list(args), fallback_reason, model)
+        )
+        or 0,
+    )
+
+    assert chat._python_fallback_launch(["--server", "http://127.0.0.1:8910"]) == 0
+
+    assert calls == [
+        (
+            "http://127.0.0.1:8910",
+            ["--server", "http://127.0.0.1:8910"],
+            "Node.js was not found",
+            "utopic",
+        )
+    ]
+
+
 def test_chat_launch_uses_python_fallback_when_node_is_too_old(monkeypatch, tmp_path):
     script = tmp_path / "utopic-chat.js"
     script.write_text("console.log('chat')\n", encoding="utf-8")

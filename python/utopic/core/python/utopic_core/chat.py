@@ -481,7 +481,8 @@ def _python_chat_loop(
 ) -> int:
     max_tokens = int(_value_after(args, "--max-tokens", "512"))
     temperature = float(_value_after(args, "--temperature", "0"))
-    model_id = model or _chat_model_id(_model_arg(args))
+    model_arg = _model_arg(args)
+    model_id = model or (_chat_model_id(model_arg) if model_arg else "utopic")
     messages: list[dict[str, str]] = [{"role": "system", "content": DEFAULT_SYSTEM_PROMPT}]
 
     print(f"utopic chat: {fallback_reason}; using the built-in Python chat fallback.")
@@ -539,18 +540,22 @@ def _python_fallback_launch(
     args = list(argv)
 
     selected_model = _choose_model_arg(args)
-    chat_model = _chat_model_id(selected_model)
 
-    def chat_loop(base_url: str) -> int:
+    def chat_loop(base_url: str, chat_model: str) -> int:
         if fallback_reason == "Node.js was not found":
             return _python_chat_loop(base_url, args, model=chat_model)
         return _python_chat_loop(base_url, args, fallback_reason, model=chat_model)
 
     existing_server = _server_base_url(args)
     if existing_server:
-        return chat_loop(existing_server)
+        return chat_loop(
+            existing_server,
+            _chat_model_id(selected_model) if selected_model else "utopic",
+        )
 
     models.ensure_model(selected_model)
+    run_model = selected_model or models.default_model().id
+    chat_model = _chat_model_id(run_model)
     base_url = _local_server_base(args)
     log_dir = installer.cache_root() / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -558,7 +563,7 @@ def _python_fallback_launch(
     command = [
         os.environ.get("UTOPIC_CLI", "utopic"),
         "run",
-        selected_model or chat_model,
+        run_model,
         *_server_args(args),
         "--no-setup",
     ]
@@ -568,7 +573,7 @@ def _python_fallback_launch(
         process = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT)
     try:
         _wait_for_health(process, _server_health_url(base_url), log_path)
-        return chat_loop(base_url)
+        return chat_loop(base_url, chat_model)
     finally:
         if process.poll() is None:
             process.terminate()
