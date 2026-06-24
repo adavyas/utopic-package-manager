@@ -47,12 +47,12 @@ def test_chat_launch_sets_runtime_paths_and_executes_node(monkeypatch, tmp_path)
     assert captured["check"] is True
 
 
-def test_chat_launch_skips_setup_when_server_binary_exists(monkeypatch, tmp_path):
+def test_chat_launch_skips_setup_when_runner_binary_exists(monkeypatch, tmp_path):
     script = tmp_path / "utopic-chat.js"
     script.write_text("console.log('chat')\n", encoding="utf-8")
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    (bin_dir / "utopic_server").write_text("binary", encoding="utf-8")
+    (bin_dir / "utopic_runner").write_text("binary", encoding="utf-8")
     setup_calls = []
 
     monkeypatch.setattr(chat, "_chat_script", lambda: script)
@@ -68,12 +68,12 @@ def test_chat_launch_skips_setup_when_server_binary_exists(monkeypatch, tmp_path
     assert setup_calls == []
 
 
-def test_chat_launch_runs_setup_when_server_cache_is_stale(monkeypatch, tmp_path):
+def test_chat_launch_runs_setup_when_runner_cache_is_stale(monkeypatch, tmp_path):
     script = tmp_path / "utopic-chat.js"
     script.write_text("console.log('chat')\n", encoding="utf-8")
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    (bin_dir / "utopic_server").write_text("binary", encoding="utf-8")
+    (bin_dir / "utopic_runner").write_text("binary", encoding="utf-8")
     captured = {}
 
     monkeypatch.setattr(chat, "_chat_script", lambda: script)
@@ -254,16 +254,11 @@ def test_chat_launch_python_fallback_runs_setup_for_local_server_when_node_is_mi
     assert fallback_calls == [["dream-7b-q4", "--port", "8999"]]
 
 
-def test_chat_python_fallback_starts_local_server_and_cleans_up(monkeypatch, tmp_path):
+def test_chat_python_fallback_starts_runner_gateway_and_cleans_up(monkeypatch, tmp_path):
     commands = []
     health_calls = []
-    bin_dir = tmp_path / "bin"
     log_dir = tmp_path / "cache" / "logs"
     process_state = {"terminated": False, "waited": False}
-    server_binary = bin_dir / ("utopic_server.exe" if chat.sys.platform == "win32" else "utopic_server")
-    bin_dir.mkdir()
-    server_binary.write_text("#!/bin/sh\n", encoding="utf-8")
-    server_binary.chmod(0o755)
 
     class FakeProcess:
         def poll(self):
@@ -280,7 +275,6 @@ def test_chat_python_fallback_starts_local_server_and_cleans_up(monkeypatch, tmp
         return FakeProcess()
 
     monkeypatch.setattr(chat.models, "ensure_model", lambda model: tmp_path / "models" / f"{model}.gguf")
-    monkeypatch.setattr(chat.installer, "bin_dir", lambda: bin_dir)
     monkeypatch.setattr(chat.installer, "cache_root", lambda: tmp_path / "cache")
     monkeypatch.setattr(chat.subprocess, "Popen", fake_popen)
     monkeypatch.setattr(
@@ -288,7 +282,7 @@ def test_chat_python_fallback_starts_local_server_and_cleans_up(monkeypatch, tmp
         "_wait_for_health",
         lambda process, health_url, log_path: health_calls.append((health_url, log_path)),
     )
-    monkeypatch.setattr(chat, "_python_chat_loop", lambda base_url, args: 0)
+    monkeypatch.setattr(chat, "_python_chat_loop", lambda base_url, args, fallback_reason="Node.js was not found", model=None: 0)
 
     assert chat._python_fallback_launch(
         ["dream-7b-q4", "--port", "8999", "--max-tokens", "7", "-ngl", "99"]
@@ -297,13 +291,14 @@ def test_chat_python_fallback_starts_local_server_and_cleans_up(monkeypatch, tmp
     assert commands == [
         (
             [
-                str(server_binary),
-                "-m",
-                str(tmp_path / "models" / "dream-7b-q4.gguf"),
+                "utopic",
+                "run",
+                "dream-7b-q4",
                 "--port",
                 "8999",
                 "-ngl",
                 "99",
+                "--no-setup",
             ],
             str(log_dir / "utopic-chat-server.log"),
             chat.subprocess.STDOUT,
@@ -318,13 +313,6 @@ def test_chat_python_fallback_starts_local_server_and_cleans_up(monkeypatch, tmp
 def test_chat_python_fallback_prompts_for_model_when_interactive(monkeypatch, tmp_path, capsys):
     selected_models = []
     commands = []
-    bin_dir = tmp_path / "bin"
-    server_binary = bin_dir / (
-        "utopic_server.exe" if chat.sys.platform == "win32" else "utopic_server"
-    )
-    bin_dir.mkdir()
-    server_binary.write_text("#!/bin/sh\n", encoding="utf-8")
-    server_binary.chmod(0o755)
 
     class InteractiveStdin:
         def isatty(self):
@@ -371,7 +359,6 @@ def test_chat_python_fallback_prompts_for_model_when_interactive(monkeypatch, tm
         "ensure_model",
         lambda model: selected_models.append(model) or tmp_path / "models" / f"{model}.gguf",
     )
-    monkeypatch.setattr(chat.installer, "bin_dir", lambda: bin_dir)
     monkeypatch.setattr(chat.installer, "cache_root", lambda: tmp_path / "cache")
     monkeypatch.setattr(
         chat.subprocess,
@@ -379,7 +366,7 @@ def test_chat_python_fallback_prompts_for_model_when_interactive(monkeypatch, tm
         lambda command, stdout, stderr: commands.append(list(command)) or FakeProcess(),
     )
     monkeypatch.setattr(chat, "_wait_for_health", lambda process, health_url, log_path: None)
-    monkeypatch.setattr(chat, "_python_chat_loop", lambda base_url, args: 0)
+    monkeypatch.setattr(chat, "_python_chat_loop", lambda base_url, args, fallback_reason="Node.js was not found", model=None: 0)
 
     assert chat._python_fallback_launch([]) == 0
 
@@ -388,7 +375,8 @@ def test_chat_python_fallback_prompts_for_model_when_interactive(monkeypatch, tm
     assert "1. * dream-7b-q4 (4.4 GB, not downloaded)" in captured.out
     assert "2.   llada-8b-q4 (4.8 GB, not downloaded)" in captured.out
     assert selected_models == ["llada-8b-q4"]
-    assert commands[0][2] == str(tmp_path / "models" / "llada-8b-q4.gguf")
+    assert commands[0][:3] == ["utopic", "run", "llada-8b-q4"]
+    assert "--no-setup" in commands[0]
 
 
 def test_chat_python_fallback_uses_recommended_model_on_prompt_eof(monkeypatch):
@@ -419,17 +407,32 @@ def test_chat_python_fallback_uses_recommended_model_on_prompt_eof(monkeypatch):
     assert chat._choose_model_arg([]) == "dream-7b-q4"
 
 
-def test_chat_python_fallback_checks_server_binary_before_model_resolution(monkeypatch, tmp_path):
+def test_chat_python_fallback_delegates_to_utopic_run_after_model_resolution(monkeypatch, tmp_path):
     model_calls = []
+    commands = []
 
-    monkeypatch.setattr(chat.installer, "bin_dir", lambda: tmp_path / "missing-bin")
     monkeypatch.setattr(chat.installer, "cache_root", lambda: tmp_path / "cache")
     monkeypatch.setattr(chat.models, "ensure_model", lambda model: model_calls.append(model) or tmp_path / "model.gguf")
+    monkeypatch.setattr(
+        chat.subprocess,
+        "Popen",
+        lambda command, stdout, stderr: commands.append(list(command)) or type(
+            "FakeProcess",
+            (),
+            {
+                "poll": lambda self: None,
+                "terminate": lambda self: None,
+                "wait": lambda self, timeout=None: None,
+            },
+        )(),
+    )
+    monkeypatch.setattr(chat, "_wait_for_health", lambda process, health_url, log_path: None)
+    monkeypatch.setattr(chat, "_python_chat_loop", lambda base_url, args, fallback_reason="Node.js was not found", model=None: 0)
 
-    with pytest.raises(RuntimeError, match="Utopic native binaries are missing"):
-        chat._python_fallback_launch(["remote-model"])
+    assert chat._python_fallback_launch(["remote-model"]) == 0
 
-    assert model_calls == []
+    assert model_calls == ["remote-model"]
+    assert commands[0] == ["utopic", "run", "remote-model", "--no-setup"]
 
 
 def test_chat_launch_uses_python_fallback_when_node_is_too_old(monkeypatch, tmp_path):
@@ -1197,26 +1200,22 @@ def test_cli_doctor_help_does_not_probe_environment(monkeypatch, capsys):
     assert captured.err == ""
 
 
-def test_cli_run_without_prompt_starts_openai_server(monkeypatch):
+def test_cli_run_without_prompt_starts_runner_gateway(monkeypatch):
     calls = []
 
     monkeypatch.setattr(cli, "_ensure_setup", lambda enabled=True, binary_name="utopic": calls.append(("setup", enabled, binary_name)))
-    _stub_server_binary(monkeypatch)
-    monkeypatch.setattr(cli.models, "ensure_model", lambda value=None: Path("/models/dream.gguf"))
-    monkeypatch.setattr(
-        cli,
-        "_run_server",
-        lambda model_path, server_args, host, port, native_port: calls.append(
-            ("server", model_path, list(server_args), host, port, native_port)
-        )
-        or 0,
-    )
+    monkeypatch.setattr(cli._native, "binary_path", lambda name: calls.append(("binary", name)) or Path(f"/fake/bin/{name}"))
+    monkeypatch.setattr(cli.models, "ensure_model", lambda value=None: calls.append(("model", value)) or Path("/models/dream.gguf"))
+    monkeypatch.setattr(cli, "_run_server", lambda *args: pytest.fail("should not start utopic_server"))
+    monkeypatch.setattr(cli, "_run_gateway_only", lambda host, port, entry=None: calls.append(("gateway", host, port, entry)) or 0)
 
     assert cli.main(["run", "dream-7b-q4", "--port", "8999", "-ngl", "99"]) == 0
 
     assert calls == [
-        ("setup", True, "utopic_server"),
-        ("server", "/models/dream.gguf", ["-ngl", "99"], "127.0.0.1", "8999", "9000"),
+        ("setup", True, "utopic_runner"),
+        ("binary", "utopic_runner"),
+        ("model", "dream-7b-q4"),
+        ("gateway", "127.0.0.1", "8999", None),
     ]
 
 
@@ -1224,22 +1223,18 @@ def test_cli_run_allows_server_flags_before_positional_model(monkeypatch):
     calls = []
 
     monkeypatch.setattr(cli, "_ensure_setup", lambda enabled=True, binary_name="utopic": calls.append(("setup", enabled, binary_name)))
-    _stub_server_binary(monkeypatch)
-    monkeypatch.setattr(cli.models, "ensure_model", lambda value=None: Path(f"/models/{value}.gguf"))
-    monkeypatch.setattr(
-        cli,
-        "_run_server",
-        lambda model_path, server_args, host, port, native_port: calls.append(
-            ("server", model_path, list(server_args), host, port, native_port)
-        )
-        or 0,
-    )
+    monkeypatch.setattr(cli._native, "binary_path", lambda name: calls.append(("binary", name)) or Path(f"/fake/bin/{name}"))
+    monkeypatch.setattr(cli.models, "ensure_model", lambda value=None: calls.append(("model", value)) or Path(f"/models/{value}.gguf"))
+    monkeypatch.setattr(cli, "_run_server", lambda *args: pytest.fail("should not start utopic_server"))
+    monkeypatch.setattr(cli, "_run_gateway_only", lambda host, port, entry=None: calls.append(("gateway", host, port, entry)) or 0)
 
     assert cli.main(["run", "--port", "8999", "-ngl", "99", "dream-7b-q4"]) == 0
 
     assert calls == [
-        ("setup", True, "utopic_server"),
-        ("server", "/models/dream-7b-q4.gguf", ["-ngl", "99"], "127.0.0.1", "8999", "9000"),
+        ("setup", True, "utopic_runner"),
+        ("binary", "utopic_runner"),
+        ("model", "dream-7b-q4"),
+        ("gateway", "127.0.0.1", "8999", None),
     ]
 
 
@@ -1586,45 +1581,35 @@ def test_cli_run_normalizes_wildcard_host_for_client_url(monkeypatch):
     calls = []
 
     monkeypatch.setattr(cli, "_ensure_setup", lambda enabled=True, binary_name="utopic": None)
-    _stub_server_binary(monkeypatch)
+    monkeypatch.setattr(cli._native, "binary_path", lambda name: Path(f"/fake/bin/{name}"))
     monkeypatch.setattr(cli.models, "ensure_model", lambda value=None: Path("/models/dream.gguf"))
-    monkeypatch.setattr(
-        cli,
-        "_run_server",
-        lambda model_path, server_args, host, port, native_port: calls.append(
-            ("server", model_path, list(server_args), host, port, native_port)
-        )
-        or 0,
-    )
+    monkeypatch.setattr(cli, "_run_server", lambda *args: pytest.fail("should not start utopic_server"))
+    monkeypatch.setattr(cli, "_run_gateway_only", lambda host, port, entry=None: calls.append(("gateway", host, port, entry)) or 0)
 
     assert cli.main(["run", "dream-7b-q4", "--host", "0.0.0.0", "--port", "8999"]) == 0
     assert calls == [
-        ("server", "/models/dream.gguf", [], "0.0.0.0", "8999", "9000")
+        ("gateway", "0.0.0.0", "8999", None)
     ]
     assert cli._server_url("0.0.0.0", "8999") == "http://127.0.0.1:8999/v1/chat/completions"
     assert cli._server_health_url("::", "8999") == "http://127.0.0.1:8999/health"
 
 
-def test_cli_run_without_arguments_uses_default_model_and_starts_server(monkeypatch):
+def test_cli_run_without_arguments_uses_default_model_and_starts_runner_gateway(monkeypatch):
     calls = []
 
     monkeypatch.setattr(cli, "_ensure_setup", lambda enabled=True, binary_name="utopic": calls.append(("setup", enabled, binary_name)))
-    _stub_server_binary(monkeypatch)
-    monkeypatch.setattr(cli.models, "ensure_model", lambda value=None: Path("/models/default.gguf"))
-    monkeypatch.setattr(
-        cli,
-        "_run_server",
-        lambda model_path, server_args, host, port, native_port: calls.append(
-            ("server", model_path, list(server_args), host, port, native_port)
-        )
-        or 0,
-    )
+    monkeypatch.setattr(cli._native, "binary_path", lambda name: calls.append(("binary", name)) or Path(f"/fake/bin/{name}"))
+    monkeypatch.setattr(cli.models, "ensure_model", lambda value=None: calls.append(("model", value)) or Path("/models/default.gguf"))
+    monkeypatch.setattr(cli, "_run_server", lambda *args: pytest.fail("should not start utopic_server"))
+    monkeypatch.setattr(cli, "_run_gateway_only", lambda host, port, entry=None: calls.append(("gateway", host, port, entry)) or 0)
 
     assert cli.main(["run"]) == 0
 
     assert calls == [
-        ("setup", True, "utopic_server"),
-        ("server", "/models/default.gguf", [], "127.0.0.1", "8910", "8911"),
+        ("setup", True, "utopic_runner"),
+        ("binary", "utopic_runner"),
+        ("model", None),
+        ("gateway", "127.0.0.1", "8910", None),
     ]
 
 
@@ -1632,21 +1617,15 @@ def test_cli_run_allows_explicit_native_backend_port(monkeypatch):
     calls = []
 
     monkeypatch.setattr(cli, "_ensure_setup", lambda enabled=True, binary_name="utopic": None)
-    _stub_server_binary(monkeypatch)
+    monkeypatch.setattr(cli._native, "binary_path", lambda name: Path(f"/fake/bin/{name}"))
     monkeypatch.setattr(cli.models, "ensure_model", lambda value=None: Path("/models/default.gguf"))
-    monkeypatch.setattr(
-        cli,
-        "_run_server",
-        lambda model_path, server_args, host, port, native_port: calls.append(
-            ("server", model_path, list(server_args), host, port, native_port)
-        )
-        or 0,
-    )
+    monkeypatch.setattr(cli, "_run_server", lambda *args: pytest.fail("should not start utopic_server"))
+    monkeypatch.setattr(cli, "_run_gateway_only", lambda host, port, entry=None: calls.append(("gateway", host, port, entry)) or 0)
 
     assert cli.main(["run", "--port", "8999", "--native-port", "9900", "--ctx-size", "2048"]) == 0
 
     assert calls == [
-        ("server", "/models/default.gguf", ["--ctx-size", "2048"], "127.0.0.1", "8999", "9900"),
+        ("gateway", "127.0.0.1", "8999", None),
     ]
 
 
@@ -1701,7 +1680,7 @@ def test_run_server_starts_native_server_then_gateway(monkeypatch, capsys):
     assert "Native text server: http://127.0.0.1:9900" in captured.out
 
 
-def test_cli_run_server_reports_missing_binary_without_traceback(monkeypatch, capsys):
+def test_cli_run_runner_reports_missing_binary_without_traceback(monkeypatch, capsys):
     monkeypatch.setattr(cli, "_ensure_setup", lambda enabled=True, binary_name="utopic": None)
     monkeypatch.setattr(cli.models, "ensure_model", lambda value=None: Path("/models/default.gguf"))
     monkeypatch.setattr(
@@ -1716,12 +1695,12 @@ def test_cli_run_server_reports_missing_binary_without_traceback(monkeypatch, ca
     assert "utopic run: native binary missing" in captured.err
 
 
-def test_cli_run_no_setup_checks_server_binary_before_default_model_download(monkeypatch, capsys):
+def test_cli_run_no_setup_checks_runner_binary_before_default_model_download(monkeypatch, capsys):
     monkeypatch.setattr(cli, "_ensure_setup", lambda enabled=True, binary_name="utopic": None)
     monkeypatch.setattr(
         cli.models,
         "ensure_model",
-        lambda value=None: pytest.fail("should not download a model when the server binary is missing"),
+        lambda value=None: pytest.fail("should not download a model when the runner binary is missing"),
     )
     monkeypatch.setattr(
         cli._native,

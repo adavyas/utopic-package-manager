@@ -432,16 +432,25 @@ def _wait_for_health(process: subprocess.Popen, health_url: str, log_path: Path,
     raise RuntimeError(f"timed out waiting for {health_url}; see {log_path}")
 
 
+def _chat_model_id(value: Optional[str]) -> str:
+    if value and models.get_model(value) is not None:
+        return value
+    if value is None:
+        return models.default_model().id
+    return "utopic"
+
+
 def _request_chat_completion(
     base_url: str,
     messages: list[dict[str, str]],
     *,
+    model: str,
     max_tokens: int,
     temperature: float,
 ) -> str:
     payload = json.dumps(
         {
-            "model": "utopic",
+            "model": model,
             "messages": messages,
             "max_tokens": max_tokens,
             "temperature": temperature,
@@ -468,9 +477,11 @@ def _python_chat_loop(
     base_url: str,
     args: Sequence[str],
     fallback_reason: str = "Node.js was not found",
+    model: Optional[str] = None,
 ) -> int:
     max_tokens = int(_value_after(args, "--max-tokens", "512"))
     temperature = float(_value_after(args, "--temperature", "0"))
+    model_id = model or _chat_model_id(_model_arg(args))
     messages: list[dict[str, str]] = [{"role": "system", "content": DEFAULT_SYSTEM_PROMPT}]
 
     print(f"utopic chat: {fallback_reason}; using the built-in Python chat fallback.")
@@ -510,6 +521,7 @@ def _python_chat_loop(
             answer = _request_chat_completion(
                 base_url,
                 messages,
+                model=model_id,
                 max_tokens=max_tokens,
                 temperature=temperature,
             )
@@ -526,26 +538,29 @@ def _python_fallback_launch(
 ) -> int:
     args = list(argv)
 
+    selected_model = _choose_model_arg(args)
+    chat_model = _chat_model_id(selected_model)
+
     def chat_loop(base_url: str) -> int:
         if fallback_reason == "Node.js was not found":
-            return _python_chat_loop(base_url, args)
-        return _python_chat_loop(base_url, args, fallback_reason)
+            return _python_chat_loop(base_url, args, model=chat_model)
+        return _python_chat_loop(base_url, args, fallback_reason, model=chat_model)
 
     existing_server = _server_base_url(args)
     if existing_server:
         return chat_loop(existing_server)
 
-    server_binary = _server_binary()
-    model_path = models.ensure_model(_choose_model_arg(args))
+    models.ensure_model(selected_model)
     base_url = _local_server_base(args)
     log_dir = installer.cache_root() / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     log_path = log_dir / "utopic-chat-server.log"
     command = [
-        str(server_binary),
-        "-m",
-        str(model_path),
+        os.environ.get("UTOPIC_CLI", "utopic"),
+        "run",
+        selected_model or chat_model,
         *_server_args(args),
+        "--no-setup",
     ]
     print(f"Starting Utopic server: {base_url}")
     print(f"Server log: {log_path}")
@@ -577,7 +592,7 @@ def launch(argv: Optional[Sequence[str]] = None) -> int:
         _validate_value_args(args)
         _validate_server_url_arg(args)
         if shutil.which("node") is None:
-            if _wants_setup(args) and not installer.native_installation_is_current(("utopic_server",)):
+            if _wants_setup(args) and not installer.native_installation_is_current(("utopic_runner",)):
                 try:
                     code = installer.setup([])
                 except subprocess.CalledProcessError as exc:
@@ -592,7 +607,7 @@ def launch(argv: Optional[Sequence[str]] = None) -> int:
         try:
             command = _node_command(args)
         except NodeUnavailable as exc:
-            if _wants_setup(args) and not installer.native_installation_is_current(("utopic_server",)):
+            if _wants_setup(args) and not installer.native_installation_is_current(("utopic_runner",)):
                 try:
                     code = installer.setup([])
                 except subprocess.CalledProcessError as setup_exc:
@@ -604,7 +619,7 @@ def launch(argv: Optional[Sequence[str]] = None) -> int:
                 if code != 0:
                     return code
             return _python_fallback_launch(args, fallback_reason=str(exc))
-        if _wants_setup(args) and not installer.native_installation_is_current(("utopic_server",)):
+        if _wants_setup(args) and not installer.native_installation_is_current(("utopic_runner",)):
             try:
                 code = installer.setup([])
             except subprocess.CalledProcessError as exc:

@@ -47,6 +47,7 @@ Examples:
 function parseArgs(argv) {
     const options = {
         model: null,
+        requestModel: "utopic",
         server: null,
         host: "127.0.0.1",
         port: "8910",
@@ -167,11 +168,11 @@ function modelsDir() {
 function binDir() {
     return configuredPath("UTOPIC_BIN_DIR", path.join(cacheRoot(), "bin"));
 }
-function serverBinary() {
-    return path.join(binDir(), process.platform === "win32" ? "utopic_server.exe" : "utopic_server");
+function runnerBinary() {
+    return path.join(binDir(), process.platform === "win32" ? "utopic_runner.exe" : "utopic_runner");
 }
-function requireServerBinary() {
-    const binary = serverBinary();
+function requireRunnerBinary() {
+    const binary = runnerBinary();
     if (!fs.existsSync(binary))
         throw new Error("Utopic native binaries are missing. Run `utopic setup`, then retry.");
     return binary;
@@ -456,6 +457,16 @@ async function resolveModel(value, beforeDownload) {
     console.log(entry.url);
     return download(entry.url, destination, 10, entry.bytes);
 }
+async function resolveChatModel(value, beforeDownload) {
+    if (value && isLikelyPath(value)) {
+        const resolvedPath = await resolveModel(value, beforeDownload);
+        return { runModel: resolvedPath, requestModel: "utopic", resolvedPath };
+    }
+    const catalog = readCatalog();
+    const modelId = value ?? await chooseModel(catalog);
+    const resolvedPath = await resolveModel(modelId, beforeDownload);
+    return { runModel: modelId, requestModel: modelId, resolvedPath };
+}
 function download(url, destination, redirectsRemaining = 10, expectedBytes) {
     fs.mkdirSync(path.dirname(destination), { recursive: true });
     const partial = `${destination}.partial`;
@@ -585,17 +596,19 @@ function waitForHealth(baseUrl, timeoutMs, shouldStop) {
         attempt();
     });
 }
-async function startServer(options, modelPath, binary) {
+async function startServer(options, runModel) {
     const baseUrl = `http://${clientHost(options.host)}:${options.port}`;
     const logPath = serverLogPath();
     fs.mkdirSync(path.dirname(logPath), { recursive: true });
     const log = fs.openSync(logPath, "a");
-    const child = (0, node_child_process_1.spawn)(binary, [
-        "-m", modelPath,
+    const child = (0, node_child_process_1.spawn)(process.env.UTOPIC_CLI ?? "utopic", [
+        "run",
+        runModel,
         "--host", options.host,
         "--port", options.port,
         "-ngl", options.ngl,
         "--ctx-size", options.ctxSize,
+        "--no-setup",
     ], { stdio: ["ignore", log, log], detached: false });
     let waitingForHealth = true;
     const earlyExit = new Promise((_, reject) => {
@@ -606,7 +619,7 @@ async function startServer(options, modelPath, binary) {
         child.once("exit", (code, signal) => {
             if (waitingForHealth) {
                 const status = code === null ? `signal ${signal}` : `code ${code}`;
-                reject(new Error(`utopic-server exited before it became healthy (${status}). Logs: ${logPath}`));
+                reject(new Error(`utopic run exited before it became healthy (${status}). Logs: ${logPath}`));
             }
         });
     });
@@ -815,7 +828,7 @@ async function chatLoop(baseUrl, options) {
         messages.push({ role: "user", content: input });
         try {
             const body = {
-                model: "utopic",
+                model: options.requestModel,
                 messages,
                 max_tokens: options.maxTokens,
                 temperature: options.temperature,
@@ -862,13 +875,15 @@ async function main() {
     let baseUrl = options.server;
     try {
         if (!baseUrl) {
-            let serverBinaryPath = null;
-            const ensureServerBinary = () => {
-                serverBinaryPath ?? (serverBinaryPath = requireServerBinary());
-                return serverBinaryPath;
+            let runnerBinaryPath = null;
+            const ensureRunnerBinary = () => {
+                runnerBinaryPath ?? (runnerBinaryPath = requireRunnerBinary());
+                return runnerBinaryPath;
             };
-            const modelPath = await resolveModel(options.model, ensureServerBinary);
-            const started = await startServer(options, modelPath, ensureServerBinary());
+            const selected = await resolveChatModel(options.model, ensureRunnerBinary);
+            ensureRunnerBinary();
+            options.requestModel = selected.requestModel;
+            const started = await startServer(options, selected.runModel);
             baseUrl = started.baseUrl;
             child = started.child;
         }

@@ -1026,11 +1026,10 @@ def _run(argv: Sequence[str]) -> int:
                 models.pull_model(entry.id)
                 return _run_gateway_only(host, port, entry)
 
-        _ensure_setup(setup_enabled, "utopic_server")
-        _native.binary_path("utopic_server")
-        model_path = models.ensure_model(model_arg)
-        native_port = _value_after(server_args, "--native-port", _default_native_port(port))
-        return _run_server(str(model_path), _native_server_args(server_args), host, port, native_port)
+        _ensure_setup(setup_enabled, "utopic_runner")
+        _native.binary_path("utopic_runner")
+        models.ensure_model(model_arg)
+        return _run_gateway_only(host, port)
     except RuntimeError as exc:
         print(f"utopic run: {exc}", file=sys.stderr)
         return 1

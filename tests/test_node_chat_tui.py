@@ -1028,6 +1028,7 @@ def test_bundled_chat_reports_truncated_model_download(tmp_path):
             env={
                 **os.environ,
                 "UTOPIC_BIN_DIR": str(bin_dir),
+                "UTOPIC_CLI": str(bin_dir / "utopic"),
                 "UTOPIC_MODELS_CATALOG": str(catalog),
                 "UTOPIC_MODELS_DIR": str(models_dir),
             },
@@ -1076,6 +1077,7 @@ def test_bundled_chat_rejects_invalid_model_download_content_length(tmp_path):
             env={
                 **os.environ,
                 "UTOPIC_BIN_DIR": str(bin_dir),
+                "UTOPIC_CLI": str(bin_dir / "utopic"),
                 "UTOPIC_MODELS_CATALOG": str(catalog),
                 "UTOPIC_MODELS_DIR": str(models_dir),
             },
@@ -1124,6 +1126,7 @@ def test_bundled_chat_rejects_empty_model_download(tmp_path):
             env={
                 **os.environ,
                 "UTOPIC_BIN_DIR": str(bin_dir),
+                "UTOPIC_CLI": str(bin_dir / "utopic"),
                 "UTOPIC_MODELS_CATALOG": str(catalog),
                 "UTOPIC_MODELS_DIR": str(models_dir),
             },
@@ -1149,9 +1152,16 @@ def reserve_local_port():
     return port
 
 
+def write_fake_runner(bin_dir):
+    fake_runner = bin_dir / "utopic_runner"
+    fake_runner.write_text("#!/bin/sh\n", encoding="utf-8")
+    fake_runner.chmod(0o755)
+
+
 def write_fake_chat_server(node, bin_dir):
     bin_dir.mkdir(parents=True, exist_ok=True)
-    fake_server = bin_dir / "utopic_server"
+    write_fake_runner(bin_dir)
+    fake_server = bin_dir / "utopic"
     fake_server.write_text(
         f"""#!{node}
 const http = require("node:http");
@@ -1264,6 +1274,7 @@ def test_bundled_chat_checks_server_binary_before_model_download(tmp_path):
         env={
             **os.environ,
             "UTOPIC_BIN_DIR": str(bin_dir),
+                "UTOPIC_CLI": str(bin_dir / "utopic"),
             "UTOPIC_MODELS_CATALOG": str(catalog),
             "UTOPIC_MODELS_DIR": str(models_dir),
         },
@@ -1378,6 +1389,7 @@ def test_bundled_chat_downloads_http_model_catalog_entries(tmp_path):
             env={
                 **os.environ,
                 "UTOPIC_BIN_DIR": str(bin_dir),
+                "UTOPIC_CLI": str(bin_dir / "utopic"),
                 "UTOPIC_MODELS_CATALOG": str(catalog),
                 "UTOPIC_MODELS_DIR": str(models_dir),
             },
@@ -1441,6 +1453,7 @@ def test_bundled_chat_redownloads_incomplete_cached_model(tmp_path):
             env={
                 **os.environ,
                 "UTOPIC_BIN_DIR": str(bin_dir),
+                "UTOPIC_CLI": str(bin_dir / "utopic"),
                 "UTOPIC_MODELS_CATALOG": str(catalog),
                 "UTOPIC_MODELS_DIR": str(models_dir),
             },
@@ -1502,6 +1515,7 @@ def test_bundled_chat_replaces_stale_partial_model_directory(tmp_path):
             env={
                 **os.environ,
                 "UTOPIC_BIN_DIR": str(bin_dir),
+                "UTOPIC_CLI": str(bin_dir / "utopic"),
                 "UTOPIC_MODELS_CATALOG": str(catalog),
                 "UTOPIC_MODELS_DIR": str(models_dir),
             },
@@ -1563,6 +1577,7 @@ def test_bundled_chat_replaces_stale_cached_model_directory(tmp_path):
             env={
                 **os.environ,
                 "UTOPIC_BIN_DIR": str(bin_dir),
+                "UTOPIC_CLI": str(bin_dir / "utopic"),
                 "UTOPIC_MODELS_CATALOG": str(catalog),
                 "UTOPIC_MODELS_DIR": str(models_dir),
             },
@@ -1668,6 +1683,7 @@ def test_bundled_chat_redownloads_zero_byte_cached_model(tmp_path):
             env={
                 **os.environ,
                 "UTOPIC_BIN_DIR": str(bin_dir),
+                "UTOPIC_CLI": str(bin_dir / "utopic"),
                 "UTOPIC_MODELS_CATALOG": str(catalog),
                 "UTOPIC_MODELS_DIR": str(models_dir),
             },
@@ -1716,6 +1732,7 @@ def test_bundled_chat_removes_zero_byte_cached_model_after_redownload_failure(tm
             env={
                 **os.environ,
                 "UTOPIC_BIN_DIR": str(bin_dir),
+                "UTOPIC_CLI": str(bin_dir / "utopic"),
                 "UTOPIC_MODELS_CATALOG": str(catalog),
                 "UTOPIC_MODELS_DIR": str(models_dir),
             },
@@ -1775,6 +1792,7 @@ def test_bundled_chat_follows_relative_model_download_redirects(tmp_path):
             env={
                 **os.environ,
                 "UTOPIC_BIN_DIR": str(bin_dir),
+                "UTOPIC_CLI": str(bin_dir / "utopic"),
                 "UTOPIC_MODELS_CATALOG": str(catalog),
                 "UTOPIC_MODELS_DIR": str(models_dir),
             },
@@ -1822,6 +1840,7 @@ def test_bundled_chat_rejects_model_download_redirect_loops(tmp_path):
             env={
                 **os.environ,
                 "UTOPIC_BIN_DIR": str(bin_dir),
+                "UTOPIC_CLI": str(bin_dir / "utopic"),
                 "UTOPIC_MODELS_CATALOG": str(catalog),
                 "UTOPIC_MODELS_DIR": str(models_dir),
             },
@@ -1847,8 +1866,9 @@ def test_bundled_chat_waits_for_started_server_to_exit(tmp_path):
     model.write_text("fake model", encoding="utf-8")
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
+    write_fake_runner(bin_dir)
     state_file = tmp_path / "server-state.jsonl"
-    fake_server = bin_dir / "utopic_server"
+    fake_server = bin_dir / "utopic"
     fake_server.write_text(
         f"""#!{node}
 const fs = require("node:fs");
@@ -1918,7 +1938,7 @@ process.on("SIGTERM", () => {{
         capture_output=True,
         text=True,
         timeout=15,
-        env={**os.environ, "UTOPIC_BIN_DIR": str(bin_dir)},
+        env={**os.environ, "UTOPIC_BIN_DIR": str(bin_dir), "UTOPIC_CLI": str(bin_dir / "utopic")},
     )
 
     assert "OpenAI-compatible URL:" in completed.stdout
@@ -1935,8 +1955,9 @@ def test_bundled_chat_accepts_uppercase_gguf_local_filename(tmp_path):
     model.write_text("fake model", encoding="utf-8")
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
+    write_fake_runner(bin_dir)
     state_file = tmp_path / "server-state.jsonl"
-    fake_server = bin_dir / "utopic_server"
+    fake_server = bin_dir / "utopic"
     fake_server.write_text(
         f"""#!{node}
 const fs = require("node:fs");
@@ -1992,11 +2013,11 @@ process.on("SIGTERM", () => server.close(() => process.exit(0)));
         text=True,
         timeout=15,
         cwd=tmp_path,
-        env={**os.environ, "UTOPIC_BIN_DIR": str(bin_dir)},
+        env={**os.environ, "UTOPIC_BIN_DIR": str(bin_dir), "UTOPIC_CLI": str(bin_dir / "utopic")},
     )
 
     first_event = json.loads(state_file.read_text(encoding="utf-8").splitlines()[0])
-    assert first_event["argv"][first_event["argv"].index("-m") + 1] == str(model)
+    assert first_event["argv"][2:4] == ["run", str(model)]
 
 
 def test_bundled_chat_expands_home_directory_in_local_model_paths(tmp_path):
@@ -2012,8 +2033,9 @@ def test_bundled_chat_expands_home_directory_in_local_model_paths(tmp_path):
     model.write_text("fake model", encoding="utf-8")
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
+    write_fake_runner(bin_dir)
     state_file = tmp_path / "server-state.jsonl"
-    fake_server = bin_dir / "utopic_server"
+    fake_server = bin_dir / "utopic"
     fake_server.write_text(
         f"""#!{node}
 const fs = require("node:fs");
@@ -2070,11 +2092,11 @@ process.on("SIGTERM", () => server.close(() => process.exit(0)));
         text=True,
         timeout=15,
         cwd=cwd,
-        env={**os.environ, "HOME": str(home), "UTOPIC_BIN_DIR": str(bin_dir)},
+        env={**os.environ, "HOME": str(home), "UTOPIC_BIN_DIR": str(bin_dir), "UTOPIC_CLI": str(bin_dir / "utopic")},
     )
 
     first_event = json.loads(state_file.read_text(encoding="utf-8").splitlines()[0])
-    assert first_event["argv"][first_event["argv"].index("-m") + 1] == str(model)
+    assert first_event["argv"][2:4] == ["run", str(model)]
 
 
 def test_bundled_chat_preserves_equals_in_model_flag_value(tmp_path):
@@ -2086,8 +2108,9 @@ def test_bundled_chat_preserves_equals_in_model_flag_value(tmp_path):
     model.write_text("fake model", encoding="utf-8")
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
+    write_fake_runner(bin_dir)
     state_file = tmp_path / "server-state.jsonl"
-    fake_server = bin_dir / "utopic_server"
+    fake_server = bin_dir / "utopic"
     fake_server.write_text(
         f"""#!{node}
 const fs = require("node:fs");
@@ -2142,11 +2165,11 @@ process.on("SIGTERM", () => server.close(() => process.exit(0)));
         capture_output=True,
         text=True,
         timeout=15,
-        env={**os.environ, "UTOPIC_BIN_DIR": str(bin_dir)},
+        env={**os.environ, "UTOPIC_BIN_DIR": str(bin_dir), "UTOPIC_CLI": str(bin_dir / "utopic")},
     )
 
     first_event = json.loads(state_file.read_text(encoding="utf-8").splitlines()[0])
-    assert first_event["argv"][first_event["argv"].index("-m") + 1] == str(model)
+    assert first_event["argv"][2:4] == ["run", str(model)]
 
 
 def test_bundled_chat_uses_utopic_home_for_server_logs(tmp_path):
@@ -2159,7 +2182,8 @@ def test_bundled_chat_uses_utopic_home_for_server_logs(tmp_path):
     utopic_home = tmp_path / "utopic-home"
     bin_dir = utopic_home / "bin"
     bin_dir.mkdir(parents=True)
-    fake_server = bin_dir / "utopic_server"
+    write_fake_runner(bin_dir)
+    fake_server = bin_dir / "utopic"
     fake_server.write_text(
         f"""#!{node}
 const http = require("node:http");
@@ -2228,7 +2252,8 @@ def test_bundled_chat_expands_utopic_home_for_server_logs(tmp_path):
     model.write_text("fake model", encoding="utf-8")
     bin_dir = utopic_home / "bin"
     bin_dir.mkdir(parents=True)
-    fake_server = bin_dir / "utopic_server"
+    write_fake_runner(bin_dir)
+    fake_server = bin_dir / "utopic"
     fake_server.write_text(
         f"""#!{node}
 const http = require("node:http");
@@ -2285,6 +2310,7 @@ process.on("SIGTERM", () => server.close(() => process.exit(0)));
             "HOME": str(home),
             "UTOPIC_HOME": "~/utopic-home",
             "UTOPIC_BIN_DIR": str(bin_dir),
+                "UTOPIC_CLI": str(bin_dir / "utopic"),
         },
     )
 
