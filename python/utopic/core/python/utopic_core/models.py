@@ -502,6 +502,10 @@ def _native_model_check(entry: ModelEntry) -> dict[str, object]:
 
 
 def _planned_model_check(entry: ModelEntry) -> dict[str, object]:
+    preflight = _model_capacity_preflight(entry)
+    if preflight is not None:
+        return preflight
+
     return {
         "id": entry.id,
         "name": entry.name,
@@ -525,6 +529,92 @@ def _planned_model_check(entry: ModelEntry) -> dict[str, object]:
             f"{entry.runner} for {entry.modality} is cataloged but not native-ready yet"
         ],
     }
+
+
+def _model_capacity_preflight(entry: ModelEntry) -> Optional[dict[str, object]]:
+    requirements = entry.requirements or {}
+    minimum = requirements.get("min_gpu_memory_gib")
+    allow_cpu = requirements.get("allow_cpu", True)
+    if minimum is None and allow_cpu is not False:
+        return None
+    if not isinstance(minimum, (int, float)) or isinstance(minimum, bool):
+        return None
+
+    detected = _detect_runtime_capacity()
+    detected_memory = detected.get("gpu_memory_gib")
+    has_enough_gpu = (
+        isinstance(detected_memory, (int, float))
+        and not isinstance(detected_memory, bool)
+        and detected_memory >= float(minimum)
+    )
+    if has_enough_gpu:
+        return None
+    if allow_cpu is not False and detected.get("backend") == "cpu":
+        return None
+
+    return {
+        "id": entry.id,
+        "name": entry.name,
+        "runtime": entry.runtime,
+        "modality": entry.modality,
+        "engine": entry.engine,
+        "runner": entry.runner,
+        "native_status": entry.native_status,
+        "supported_backends": list(entry.supported_backends),
+        "expected_vram_gib": entry.expected_vram_gib,
+        "expected_ram_gib": entry.expected_ram_gib,
+        "status": "native_runner_oom_preflight",
+        "ready": False,
+        "requirements": requirements,
+        "required_gpu_memory_gib": minimum,
+        "detected": detected,
+        "message": (
+            f"model {entry.id} requires at least {minimum:g} GiB GPU memory; "
+            f"detected {_detected_runtime_text(detected)}. This model is too large for this host."
+        ),
+        "cache": {
+            "path": str(entry.path),
+            "prepared": is_model_downloaded(entry),
+            "metadata_path": str(entry.path / "utopic-model.json"),
+        },
+        "next_steps": [
+            "Use GB10 or high-memory CUDA infrastructure.",
+            "Choose a smaller model from the same modality when available.",
+        ],
+    }
+
+
+def _detect_runtime_capacity() -> dict[str, object]:
+    configured_memory = _float_env("UTOPIC_GPU_MEMORY_GIB")
+    if configured_memory is not None:
+        return {
+            "backend": os.environ.get("UTOPIC_RUNTIME_BACKEND", "configured"),
+            "device": os.environ.get("UTOPIC_RUNTIME_DEVICE", "configured runtime"),
+            "gpu_memory_gib": configured_memory,
+        }
+    return {
+        "backend": os.environ.get("UTOPIC_RUNTIME_BACKEND", "unknown"),
+        "device": os.environ.get("UTOPIC_RUNTIME_DEVICE", "unknown device"),
+    }
+
+
+def _float_env(name: str) -> Optional[float]:
+    raw = os.environ.get(name)
+    if raw is None or raw == "":
+        return None
+    try:
+        value = float(raw)
+    except ValueError:
+        return None
+    return value if value >= 0 else None
+
+
+def _detected_runtime_text(detected: dict[str, object]) -> str:
+    device = detected.get("device") if isinstance(detected.get("device"), str) else "unknown device"
+    memory = detected.get("gpu_memory_gib")
+    if isinstance(memory, (int, float)) and not isinstance(memory, bool):
+        return f"{device} with {memory:.1f} GiB GPU memory"
+    return device
 
 
 def model_check(model_id: str) -> dict[str, object]:

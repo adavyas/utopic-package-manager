@@ -97,6 +97,26 @@ def test_planned_model_check_defaults_to_native_runner_readiness(monkeypatch, tm
     assert payload["runner"] == entry.runner
 
 
+def test_large_planned_model_check_reports_oom_preflight(monkeypatch, tmp_path):
+    monkeypatch.delenv("UTOPIC_EXPERIMENTAL_BRIDGE", raising=False)
+    monkeypatch.setenv("UTOPIC_MODELS_DIR", str(tmp_path))
+    monkeypatch.setenv("UTOPIC_GPU_MEMORY_GIB", "40")
+    monkeypatch.setenv("UTOPIC_RUNTIME_BACKEND", "cuda")
+    monkeypatch.setenv("UTOPIC_RUNTIME_DEVICE", "unit-test-gpu")
+
+    payload = models.model_check("cosmos3-super")
+
+    assert payload["ready"] is False
+    assert payload["status"] == "native_runner_oom_preflight"
+    assert payload["runner"] == "image_runner"
+    assert payload["modality"] == "image"
+    assert payload["required_gpu_memory_gib"] == 96
+    assert payload["detected"]["gpu_memory_gib"] == 40
+    assert payload["detected"]["backend"] == "cuda"
+    assert "too large for this host" in payload["message"]
+    assert payload["next_steps"]
+
+
 def test_core_runtime_does_not_own_package_manager_cmake():
     repo_root = Path(__file__).resolve().parents[1]
 
