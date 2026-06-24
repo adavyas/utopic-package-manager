@@ -104,6 +104,83 @@ def test_runtime_stdio_mcp_lists_all_gateway_tools():
     } <= names
 
 
+def test_mcp_main_defaults_to_full_runtime_gateway(monkeypatch):
+    request = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/list",
+        "params": {},
+    }
+    stdin = io.StringIO(json.dumps(request) + "\n")
+    stdout = io.StringIO()
+
+    monkeypatch.setattr(mcp.sys, "stdin", stdin)
+    monkeypatch.setattr(mcp.sys, "stdout", stdout)
+    monkeypatch.setattr(
+        mcp,
+        "_main",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("native MCP should not start by default")),
+    )
+
+    assert mcp.main([]) == 0
+    response = json.loads(stdout.getvalue())
+    names = {tool["name"] for tool in response["result"]["tools"]}
+    assert "utopic_generate_image" in names
+    assert "utopic_generate_video" in names
+
+
+def test_mcp_main_native_flag_delegates_to_native_binary(monkeypatch):
+    captured = {}
+
+    def fake_native_main(binary_name, argv=None):
+        captured["binary_name"] = binary_name
+        captured["argv"] = list(argv or [])
+
+    monkeypatch.setattr(mcp, "_main", fake_native_main)
+
+    assert mcp.main(["--native", "-m", "model.gguf", "-ngl", "99"]) == 0
+    assert captured == {
+        "binary_name": "utopic_mcp",
+        "argv": ["-m", "model.gguf", "-ngl", "99"],
+    }
+
+
+def test_mcp_main_legacy_native_args_still_delegate(monkeypatch):
+    captured = {}
+
+    def fake_native_main(binary_name, argv=None):
+        captured["binary_name"] = binary_name
+        captured["argv"] = list(argv or [])
+
+    monkeypatch.setattr(mcp, "_main", fake_native_main)
+
+    assert mcp.main(["-m", "model.gguf"]) == 0
+    assert captured == {
+        "binary_name": "utopic_mcp",
+        "argv": ["-m", "model.gguf"],
+    }
+
+
+def test_mcp_main_native_base_url_uses_runtime_gateway(monkeypatch):
+    captured = {}
+
+    def fake_runtime_stdio(stdin, stdout, *, native_base_url):
+        captured["stdin"] = stdin
+        captured["stdout"] = stdout
+        captured["native_base_url"] = native_base_url
+        return 0
+
+    monkeypatch.setattr(mcp, "_runtime_stdio", fake_runtime_stdio)
+    monkeypatch.setattr(
+        mcp,
+        "_main",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("native MCP should not start")),
+    )
+
+    assert mcp.main(["--native-base-url", "http://127.0.0.1:8910"]) == 0
+    assert captured["native_base_url"] == "http://127.0.0.1:8910"
+
+
 def test_runtime_stdio_mcp_model_check_reports_missing_model():
     request = {
         "jsonrpc": "2.0",

@@ -7,18 +7,21 @@ from ._native import main as _main
 from . import gateway
 
 
-HELP = """usage: utopic-mcp [--runtime [--native-base-url URL] | native options]
+HELP = """usage: utopic-mcp [--native native options | --native-base-url URL]
 
 Start the Utopic Model Context Protocol server.
 
 Modes:
   utopic-mcp
+      Start the Python stdio MCP gateway exposing the full local Utopic tool
+      catalog: chat, image, speech, music, video, misc, model list/check/pull.
+
+  utopic-mcp --native [native options]
       Start the native C++ stdio MCP server exposing diffusion_generate for one
       GGUF model. Pass native options such as -m, -ngl, and --ctx-size.
 
-  utopic-mcp --runtime [--native-base-url URL]
-      Start the Python stdio MCP gateway exposing the full local Utopic tool
-      catalog: chat, image, speech, music, video, misc, model list/check/pull.
+  utopic-mcp [--runtime] [--native-base-url URL]
+      Start the Python stdio MCP gateway. --runtime is accepted for older docs.
       Use --native-base-url to forward text calls to a running utopic-server.
 
 Run `utopic setup` first if the native runtime is not installed. Most users
@@ -40,6 +43,27 @@ def _value_after(args: list[str], flag: str) -> Optional[str]:
                 raise RuntimeError(f"expected a value after {flag}")
             return value
     return None
+
+
+def _without_flag(args: list[str], flag: str) -> list[str]:
+    return [arg for arg in args if arg != flag]
+
+
+def _has_legacy_native_args(args: list[str]) -> bool:
+    skip_next = False
+    for arg in args:
+        if skip_next:
+            skip_next = False
+            continue
+        if arg in {"--runtime", "--gateway"}:
+            continue
+        if arg == "--native-base-url":
+            skip_next = True
+            continue
+        if arg.startswith("--native-base-url="):
+            continue
+        return True
+    return False
 
 
 def _runtime_stdio(stdin: TextIO, stdout: TextIO, *, native_base_url: Optional[str]) -> int:
@@ -77,7 +101,15 @@ def main(argv: Optional[list[str]] = None) -> int:
     if any(arg in ("-h", "--help") for arg in args):
         print(HELP)
         return 0
-    if "--runtime" in args or "--gateway" in args:
+    if "--native" in args or _has_legacy_native_args(args):
+        native_args = _without_flag(args, "--native")
+        try:
+            _main("utopic_mcp", native_args)
+            return 0
+        except RuntimeError as exc:
+            print(f"utopic-mcp: {exc}", file=sys.stderr)
+            return 1
+    if "--runtime" in args or "--gateway" in args or not args or any(arg.startswith("--native-base-url") for arg in args):
         try:
             native_base_url = _value_after(args, "--native-base-url")
         except RuntimeError as exc:
@@ -88,9 +120,4 @@ def main(argv: Optional[list[str]] = None) -> int:
             sys.stdout,
             native_base_url=native_base_url,
         )
-    try:
-        _main("utopic_mcp")
-        return 0
-    except RuntimeError as exc:
-        print(f"utopic-mcp: {exc}", file=sys.stderr)
-        return 1
+    return 0

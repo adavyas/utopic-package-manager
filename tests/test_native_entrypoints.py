@@ -85,10 +85,11 @@ def test_server_entrypoint_reports_missing_binary_without_traceback(monkeypatch,
 
 
 def test_mcp_entrypoint_reports_missing_binary_without_traceback(monkeypatch, capsys):
+    monkeypatch.setattr(mcp.sys, "argv", ["utopic-mcp", "--native"])
     monkeypatch.setattr(
         mcp,
         "_main",
-        lambda binary_name: (_ for _ in ()).throw(RuntimeError("native binary missing")),
+        lambda *_args: (_ for _ in ()).throw(RuntimeError("native binary missing")),
     )
 
     assert mcp.main() == 1
