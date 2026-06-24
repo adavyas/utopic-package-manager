@@ -21,7 +21,7 @@ PACKAGED_CMAKE_DIR = PACKAGE_DIR / "cmake"
 UTOPIC_NATIVE_REPO = "https://github.com/adavyas/utopic.git"
 UTOPIC_NATIVE_REF = "7e554b1d4f1b1dc9955eac1813781eec9b69fd68"
 LLAMA_REPO = "https://github.com/ggml-org/llama.cpp.git"
-LLAMA_REF = "ef5e2dcce"
+LLAMA_REF = "ef5e2dcce81881ffad262576d073f25ca6c1ad50"
 LLAMA_FETCH_REF = "refs/pull/24423/head"
 BIN_NAMES = (
     "utopic",

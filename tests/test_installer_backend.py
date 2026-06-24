@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -539,13 +540,14 @@ def test_managed_source_checkout_fetches_source_ref_for_pinned_commit(monkeypatc
 
     assert commands[0] == ["git", "clone", "https://example.test/llama.cpp.git", dest]
     assert commands[1] == ["git", "fetch", "origin", "refs/pull/24423/head"]
-    assert commands[2] == ["git", "checkout", "ef5e2dcce"]
-    assert commands[3] == ["git", "reset", "--hard", "ef5e2dcce"]
+    assert commands[2] == ["git", "checkout", "ef5e2dcce81881ffad262576d073f25ca6c1ad50"]
+    assert commands[3] == ["git", "reset", "--hard", "ef5e2dcce81881ffad262576d073f25ca6c1ad50"]
 
 
 def test_default_llama_ref_is_pinned_for_reproducible_native_builds():
-    assert installer.LLAMA_REF == "ef5e2dcce"
+    assert installer.LLAMA_REF == "ef5e2dcce81881ffad262576d073f25ca6c1ad50"
     assert installer.LLAMA_FETCH_REF == "refs/pull/24423/head"
+    assert re.fullmatch(r"[0-9a-f]{40}", installer.LLAMA_REF)
     assert not installer.LLAMA_REF.startswith("refs/")
 
 
