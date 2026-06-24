@@ -809,7 +809,9 @@ def _generate(argv: Sequence[str]) -> int:
     try:
         request = _generate_request(args)
         model_id = str(request["model"])
-        models.pull_model(model_id)
+        entry = models.get_model(model_id)
+        if entry is not None and entry.native_status == "ready":
+            models.pull_model(model_id)
         status, _headers, body = gateway.handle_openai_request(
             "POST",
             _GENERATE_ENDPOINTS[_canonical_generate_kind(args.kind)],

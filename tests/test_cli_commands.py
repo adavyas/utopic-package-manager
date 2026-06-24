@@ -1413,7 +1413,6 @@ def test_cli_generate_video_high_quality_invokes_gateway_and_copies_artifact(
 
     assert output.read_bytes() == b"mp4"
     assert calls == [
-        ("pull", "wan2.1-t2v-14b"),
         (
             "gateway",
             "POST",
@@ -1432,6 +1431,45 @@ def test_cli_generate_video_high_quality_invokes_gateway_and_copies_artifact(
     captured = capsys.readouterr()
     assert f"Generated video/mp4: {output}" in captured.out
     assert "Progress: /v1/utopic/runs/run_test/events" in captured.out
+
+
+def test_cli_generate_planned_modality_reports_native_readiness_without_pull(monkeypatch, capsys):
+    calls = []
+
+    def fail_pull(model_id):
+        raise AssertionError(f"planned model should not be pulled before readiness error: {model_id}")
+
+    def fake_handle(method, endpoint, body):
+        calls.append(("gateway", method, endpoint, body))
+        return (
+            503,
+            {"content-type": "application/json"},
+            json.dumps(
+                {
+                    "ok": False,
+                    "error": {
+                        "code": "unsupported_model",
+                        "message": "image generation for qwen-image is cataloged but does not have a native C++ runner yet",
+                        "detail": {"native_status": "planned"},
+                    },
+                }
+            ).encode("utf-8"),
+        )
+
+    monkeypatch.setattr(cli.models, "pull_model", fail_pull)
+    monkeypatch.setattr(cli.gateway, "handle_openai_request", fake_handle)
+
+    assert cli.main(["generate", "image", "qwen-image", "-p", "a tiny robot"]) == 1
+
+    assert calls == [
+        (
+            "gateway",
+            "POST",
+            "/v1/images/generations",
+            {"model": "qwen-image", "prompt": "a tiny robot"},
+        )
+    ]
+    assert "does not have a native C++ runner yet" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize(
@@ -1508,7 +1546,6 @@ def test_cli_generate_supports_all_bridge_modalities(monkeypatch, tmp_path, args
     assert cli.main(["generate", *args]) == 0
 
     assert calls == [
-        ("pull", expected["model"]),
         ("gateway", "POST", endpoint, expected),
     ]
 
@@ -1569,7 +1606,6 @@ def test_cli_generate_misc_invokes_gateway_and_copies_artifact(monkeypatch, tmp_
 
     assert output.read_bytes() == b"generated"
     assert calls == [
-        ("pull", "zuna"),
         (
             "gateway",
             "POST",
