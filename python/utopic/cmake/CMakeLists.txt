@@ -25,6 +25,19 @@ set(LLAMA_BIN "${LLAMA_DIR}/build/bin")
 message(STATUS "linking llama.cpp from: ${LLAMA_DIR}")
 message(STATUS "building Utopic native source from: ${UTOPIC_NATIVE_SOURCE_DIR}")
 
+if(APPLE)
+  set(UTOPIC_INSTALL_LIB_RPATH "@loader_path/lib")
+else()
+  set(UTOPIC_INSTALL_LIB_RPATH "$ORIGIN/lib")
+endif()
+set(UTOPIC_BINARY_RPATH "${UTOPIC_INSTALL_LIB_RPATH};${LLAMA_BIN}")
+
+function(set_utopic_binary_rpath target_name)
+  set_target_properties(${target_name} PROPERTIES
+    BUILD_RPATH "${UTOPIC_BINARY_RPATH}"
+    INSTALL_RPATH "${UTOPIC_BINARY_RPATH}")
+endfunction()
+
 file(READ "${LLAMA_DIR}/include/llama.h" LLAMA_PUBLIC_HEADER)
 if(LLAMA_PUBLIC_HEADER MATCHES "llama_diffusion_set_block_decode")
   set(UTOPIC_HAS_BLOCK_DECODE ON)
@@ -66,8 +79,7 @@ target_link_libraries(utopic PRIVATE llama ggml ggml-base)
 if(NOT UTOPIC_HAS_BLOCK_DECODE)
   target_compile_definitions(utopic PRIVATE DG_NO_BLOCK_DECODE)
 endif()
-set_target_properties(utopic PROPERTIES
-  BUILD_RPATH "${LLAMA_BIN}" INSTALL_RPATH "${LLAMA_BIN}")
+set_utopic_binary_rpath(utopic)
 
 function(add_utopic_json_runner target_name)
   add_executable(${target_name}
@@ -80,8 +92,7 @@ function(add_utopic_json_runner target_name)
   if(NOT UTOPIC_HAS_BLOCK_DECODE)
     target_compile_definitions(${target_name} PRIVATE DG_NO_BLOCK_DECODE)
   endif()
-  set_target_properties(${target_name} PROPERTIES
-    BUILD_RPATH "${LLAMA_BIN}" INSTALL_RPATH "${LLAMA_BIN}")
+  set_utopic_binary_rpath(${target_name})
 endfunction()
 
 # JSON runner: one-shot native execution contract used by the Python MCP/CLI.
@@ -100,8 +111,7 @@ target_link_libraries(utopic_server PRIVATE llama ggml ggml-base Threads::Thread
 if(NOT UTOPIC_HAS_BLOCK_DECODE)
   target_compile_definitions(utopic_server PRIVATE DG_NO_BLOCK_DECODE)
 endif()
-set_target_properties(utopic_server PROPERTIES
-  BUILD_RPATH "${LLAMA_BIN}" INSTALL_RPATH "${LLAMA_BIN}")
+set_utopic_binary_rpath(utopic_server)
 
 # MCP server: resident model, stdio JSON-RPC tool for Claude Code / Codex
 add_executable(utopic_mcp
@@ -114,8 +124,7 @@ target_link_libraries(utopic_mcp PRIVATE llama ggml ggml-base Threads::Threads)
 if(NOT UTOPIC_HAS_BLOCK_DECODE)
   target_compile_definitions(utopic_mcp PRIVATE DG_NO_BLOCK_DECODE)
 endif()
-set_target_properties(utopic_mcp PROPERTIES
-  BUILD_RPATH "${LLAMA_BIN}" INSTALL_RPATH "${LLAMA_BIN}")
+set_utopic_binary_rpath(utopic_mcp)
 
 # ACP agent: resident model, stdio JSON-RPC agent for ACP editors (e.g. Zed)
 add_executable(utopic_acp
@@ -128,5 +137,4 @@ target_link_libraries(utopic_acp PRIVATE llama ggml ggml-base Threads::Threads)
 if(NOT UTOPIC_HAS_BLOCK_DECODE)
   target_compile_definitions(utopic_acp PRIVATE DG_NO_BLOCK_DECODE)
 endif()
-set_target_properties(utopic_acp PROPERTIES
-  BUILD_RPATH "${LLAMA_BIN}" INSTALL_RPATH "${LLAMA_BIN}")
+set_utopic_binary_rpath(utopic_acp)

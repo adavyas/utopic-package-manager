@@ -28,6 +28,15 @@ def test_dry_run_quotes_arguments_that_need_shell_escaping(capsys):
     assert capsys.readouterr().out == "+ cmake '-DCMAKE_BUILD_RPATH=/a;/b'\n"
 
 
+def test_package_cmake_embeds_installed_runtime_lib_rpath():
+    cmake = installer.PACKAGED_CMAKE_DIR.joinpath("CMakeLists.txt").read_text(encoding="utf-8")
+
+    assert "@loader_path/lib" in cmake
+    assert "$ORIGIN/lib" in cmake
+    assert "BUILD_RPATH" in cmake
+    assert "UTOPIC_BINARY_RPATH" in cmake
+
+
 def test_auto_backend_prefers_metal_when_available(monkeypatch):
     monkeypatch.setattr(installer, "_detect_metal_device", lambda: "Apple M4 Pro")
     monkeypatch.setattr(installer, "_detect_cuda_architectures", lambda: "80")
