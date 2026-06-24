@@ -31,25 +31,42 @@ static string          g_model_path;
 static int             g_ngl       = 99;
 static int             g_ctx_size  = 2048;
 static int             g_eb_steps  = 24;
+static bool            g_load_failed = false;
+static string          g_load_error;
 
 static std::mutex g_load_mu;
 static bool ensure_loaded() {
     std::lock_guard<std::mutex> lk(g_load_mu);  // background preload + first tool call may race
     if (g_ctx) return true;
+    if (g_load_failed) return false;
     llama_model_params mp = llama_model_default_params();
     mp.n_gpu_layers = g_ngl;
     g_model = llama_model_load_from_file(g_model_path.c_str(), mp);
-    if (!g_model) return false;
+    if (!g_model) {
+        g_load_failed = true;
+        g_load_error = "failed to load model from " + g_model_path;
+        return false;
+    }
     prepare_model_for_context(g_model);
     const int effective_ctx_size = std::max(g_ctx_size, canvas_context_tokens(256, model_canvas_length(g_model)));
     llama_context_params cp = llama_context_default_params();
     cp.n_ctx = cp.n_batch = cp.n_ubatch = effective_ctx_size;
     g_ctx = llama_init_from_model(g_model, cp);
+    if (!g_ctx) {
+        llama_model_free(g_model);
+        g_model = nullptr;
+        g_load_failed = true;
+        g_load_error = "failed to initialize native context; check backend setup, GPU availability, model compatibility, and -ngl/--ctx-size";
+        return false;
+    }
     return g_ctx != nullptr;
 }
 
 static string run_generate(const string & prompt, int max_tokens) {
-    if (!ensure_loaded()) return "error: failed to load model";
+    if (!ensure_loaded()) {
+        if (!g_load_error.empty()) return "error: " + g_load_error;
+        return "error: failed to load model";
+    }
     request req;
     req.prompt     = apply_chat(g_model, { { "user", prompt } });
     req.max_tokens = max_tokens;
@@ -67,14 +84,17 @@ static string run_generate(const string & prompt, int max_tokens) {
 static const json TOOL_SCHEMA = {
     { "name", "diffusion_generate" },
     { "description",
-      "Generate text with a local diffusion LLM (DiffusionGemma). Fast, local, runs offline. Best for "
-      "bounded subtasks you want to offload from the main agent: drafting, summarizing, extraction, "
-      "classification, quick code/text completion. Returns the model's completion." },
+      "Generate text with a local/offline Utopic diffusion GGUF model over stdio MCP. Use this "
+      "for private bounded agent subtasks such as short drafting, summarization, extraction, "
+      "classification, structured rewriting, and quick coding help. The model path is supplied "
+      "when starting utopic-mcp; returns the completion as MCP text content. For multimodal "
+      "image, speech, music, video, misc, catalog, or readiness tools, prefer the HTTP "
+      "utopic-runtime /mcp endpoint." },
     { "inputSchema", {
         { "type", "object" },
         { "properties", {
-            { "prompt",     { { "type", "string" },  { "description", "The prompt to complete." } } },
-            { "max_tokens", { { "type", "integer" }, { "description", "Max output tokens (default 256)." } } } } },
+            { "prompt",     { { "type", "string" },  { "description", "Complete instruction or text task for the local model." } } },
+            { "max_tokens", { { "type", "integer" }, { "description", "Maximum completion tokens. Default: 256. Keep low for responsive agent calls." } } } } },
         { "required", json::array({ "prompt" }) } } }
 };
 

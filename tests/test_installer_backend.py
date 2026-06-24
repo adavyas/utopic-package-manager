@@ -411,6 +411,11 @@ def test_managed_source_checkout_repairs_wrong_origin_url(monkeypatch, tmp_path)
     assert commands[4] == ["git", "reset", "--hard", "FETCH_HEAD"]
 
 
+def test_default_llama_ref_is_pinned_for_reproducible_native_builds():
+    assert installer.LLAMA_REF == "ef5e2dcce"
+    assert not installer.LLAMA_REF.startswith("refs/")
+
+
 def test_build_utopic_uses_package_owned_cmake_with_native_source_variable(monkeypatch, tmp_path):
     cache_root = tmp_path / "cache"
     cmake_dir = tmp_path / "site-packages" / "utopic" / "cmake"

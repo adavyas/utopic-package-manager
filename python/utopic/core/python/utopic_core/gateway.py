@@ -55,61 +55,223 @@ OPENAI_TOOL_BY_ENDPOINT = {
 }
 
 
-def _schema(required: list[str], properties: dict[str, str]) -> dict[str, Any]:
+def _schema(required: list[str], properties: dict[str, str | dict[str, Any]]) -> dict[str, Any]:
+    normalized_properties: dict[str, dict[str, Any]] = {}
+    for key, value in properties.items():
+        if isinstance(value, dict):
+            normalized_properties[key] = value
+        else:
+            normalized_properties[key] = {"type": value}
     return {
         "type": "object",
         "required": required,
-        "properties": {
-            key: {"type": value} for key, value in properties.items()
-        },
+        "properties": normalized_properties,
     }
 
 
 MCP_TOOLS = [
     {
         "name": "utopic_chat",
-        "description": "Generate text with a local Utopic text model.",
-        "inputSchema": _schema(["prompt"], {"model": "string", "prompt": "string"}),
+        "description": (
+            "Generate a text answer locally with Utopic's OpenAI-compatible text runtime. "
+            "Use this when an agent needs private/offline drafting, reasoning, summarization, "
+            "classification, extraction, or coding help from the local DiffusionGemma catalog. "
+            "Returns the raw OpenAI chat-completions JSON as text; call utopic_models_check first "
+            "when you need to confirm the selected model is downloaded and runnable."
+        ),
+        "inputSchema": _schema(
+            ["prompt"],
+            {
+                "model": {
+                    "type": "string",
+                    "description": "Optional catalog id, for example diffusiongemma-26b-a4b-q4. Defaults to the recommended local text model.",
+                },
+                "prompt": {
+                    "type": "string",
+                    "description": "User request to answer. Prefer complete instructions; the gateway converts this into one OpenAI user message.",
+                },
+                "max_tokens": {
+                    "type": "integer",
+                    "description": "Optional response budget for short local answers.",
+                },
+            },
+        ),
     },
     {
         "name": "utopic_generate_image",
-        "description": "Generate an image with a local Utopic image model.",
-        "inputSchema": _schema(["prompt"], {"model": "string", "prompt": "string", "size": "string"}),
+        "description": (
+            "Create an image locally from a text prompt using a Utopic image model such as "
+            "FLUX, Qwen-Image, Krea, or Cosmos when the bridge is installed. Use for private "
+            "local image generation, concept art, product shots, UI assets, and prompt tests. "
+            "Returns OpenAI-compatible image/artifact JSON with local artifact metadata."
+        ),
+        "inputSchema": _schema(
+            ["prompt"],
+            {
+                "model": {
+                    "type": "string",
+                    "description": "Optional image model id, for example flux-1-schnell, qwen-image, krea-2-raw, or cosmos3-super.",
+                },
+                "prompt": {
+                    "type": "string",
+                    "description": "Image prompt. Include subject, style, composition, and constraints.",
+                },
+                "size": {
+                    "type": "string",
+                    "description": "Optional output size such as 1024x1024 when supported by the model.",
+                },
+            },
+        ),
     },
     {
         "name": "utopic_speak",
-        "description": "Generate speech audio with a local Utopic TTS model.",
-        "inputSchema": _schema(["input"], {"model": "string", "input": "string", "voice": "string"}),
+        "description": (
+            "Generate local speech audio from text with Utopic TTS models. Use for narration, "
+            "voice prototypes, accessibility previews, and agent-read summaries without sending "
+            "text to a remote TTS API. Returns artifact JSON pointing at generated audio."
+        ),
+        "inputSchema": _schema(
+            ["input"],
+            {
+                "model": {
+                    "type": "string",
+                    "description": "Optional TTS model id, for example kokoro-82m, chatterbox, or dia-1.6b.",
+                },
+                "input": {
+                    "type": "string",
+                    "description": "Text to synthesize into speech.",
+                },
+                "voice": {
+                    "type": "string",
+                    "description": "Optional model-specific voice name.",
+                },
+            },
+        ),
     },
     {
         "name": "utopic_generate_music",
-        "description": "Generate music audio with a local Utopic music model.",
-        "inputSchema": _schema(["prompt"], {"model": "string", "prompt": "string"}),
+        "description": (
+            "Generate local music audio from a text prompt. Use for private soundtrack ideas, "
+            "loops, mood boards, and sonic sketches. Returns artifact JSON pointing at generated audio."
+        ),
+        "inputSchema": _schema(
+            ["prompt"],
+            {
+                "model": {
+                    "type": "string",
+                    "description": "Optional music model id, for example ace-step-3.5b.",
+                },
+                "prompt": {
+                    "type": "string",
+                    "description": "Music prompt with genre, instrumentation, mood, tempo, and duration hints.",
+                },
+            },
+        ),
     },
     {
         "name": "utopic_generate_video",
-        "description": "Generate video with a local Utopic video model.",
-        "inputSchema": _schema(["prompt"], {"model": "string", "prompt": "string", "size": "string"}),
+        "description": (
+            "Generate local video from a text prompt with Utopic video models. Use for short "
+            "text-to-video clips, motion studies, and prototype visuals. Some video models require "
+            "GB10 or high-memory CUDA; use utopic_models_check before running large jobs."
+        ),
+        "inputSchema": _schema(
+            ["prompt"],
+            {
+                "model": {
+                    "type": "string",
+                    "description": "Optional video model id, for example wan2.1-t2v-1.3b, wan2.1-t2v-14b, or ltx-video.",
+                },
+                "prompt": {
+                    "type": "string",
+                    "description": "Video prompt with subject, motion, camera, style, and duration hints.",
+                },
+                "size": {
+                    "type": "string",
+                    "description": "Optional output size such as 832x480 when supported by the model.",
+                },
+            },
+        ),
     },
     {
         "name": "utopic_generate_misc",
-        "description": "Run a local Utopic misc artifact model.",
-        "inputSchema": _schema(["artifact"], {"model": "string", "artifact": "string", "artifact_type": "string"}),
+        "description": (
+            "Run a local miscellaneous artifact workflow such as ZUNA signal processing. "
+            "Use for local file-in/file-out models that are not text, image, speech, music, "
+            "or video yet. Returns artifact JSON with generated local files."
+        ),
+        "inputSchema": _schema(
+            ["artifact"],
+            {
+                "model": {
+                    "type": "string",
+                    "description": "Optional misc model id, for example zuna.",
+                },
+                "artifact": {
+                    "type": "string",
+                    "description": "Path to a local input artifact file.",
+                },
+                "artifact_type": {
+                    "type": "string",
+                    "description": "Optional MIME type for the input artifact.",
+                },
+            },
+        ),
     },
     {
         "name": "utopic_models_list",
-        "description": "List local Utopic catalog models.",
+        "description": (
+            "List every Utopic catalog model with modality, runtime, endpoints, outputs, "
+            "hardware hints, and bridge setup metadata. Agents should call this before choosing "
+            "a model for text, image, TTS, music, video, or misc generation."
+        ),
         "inputSchema": _schema([], {}),
     },
     {
         "name": "utopic_models_check",
-        "description": "Check Utopic model cache and runtime readiness.",
-        "inputSchema": _schema([], {"model": "string", "all": "boolean"}),
+        "description": (
+            "Check whether one model or the whole catalog is ready on this machine. Reports "
+            "download/cache state, bridge dependency gaps, hardware requirements, and local "
+            "runtime readiness so agents can avoid doomed OOM or missing-dependency calls."
+        ),
+        "inputSchema": _schema(
+            [],
+            {
+                "model": {
+                    "type": "string",
+                    "description": "Catalog id to check, for example diffusiongemma-26b-a4b-q4 or flux-1-schnell.",
+                },
+                "all": {
+                    "type": "boolean",
+                    "description": "When true, check every catalog model and summarize readiness.",
+                },
+            },
+        ),
     },
     {
         "name": "utopic_models_pull",
-        "description": "Prepare or pull one Utopic catalog model, or every catalog model with all=true.",
-        "inputSchema": _schema([], {"model": "string", "all": "boolean", "force": "boolean"}),
+        "description": (
+            "Download or prepare a Utopic catalog model for local use. Use this when an agent "
+            "has permission to fetch weights or set up bridge model metadata. Supports one model "
+            "or all=true; returns paths and setup results."
+        ),
+        "inputSchema": _schema(
+            [],
+            {
+                "model": {
+                    "type": "string",
+                    "description": "Catalog id to download or prepare.",
+                },
+                "all": {
+                    "type": "boolean",
+                    "description": "When true, prepare every catalog model. Do not combine with model.",
+                },
+                "force": {
+                    "type": "boolean",
+                    "description": "When true, redownload or refresh cached model metadata.",
+                },
+            },
+        ),
     },
 ]
 

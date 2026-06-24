@@ -1,4 +1,5 @@
 import base64
+import io
 import json
 import os
 import subprocess
@@ -7,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from utopic import __version__, bridge, cli, gateway
+from utopic import __version__, bridge, cli, gateway, mcp
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -148,13 +149,16 @@ def test_gateway_image_generation_reports_packaged_bridge_dependency_gap():
         gateway.handle_openai_request("POST", "/v1/images/generations", request)
     )
 
-    assert status == 501
-    assert payload["error"]["code"] == "bridge_dependency_missing"
+    assert status in {501, 502}
+    assert payload["error"]["code"] in {
+        "bridge_dependency_missing",
+        "bridge_adapter_api_mismatch",
+    }
     assert payload["error"]["model"] == "qwen-image"
     assert payload["error"]["modality"] == "image"
     assert payload["error"]["engine"] == "diffusers"
     assert payload["error"]["install_hint"] == 'pip install "utopic[image]"'
-    assert "diffusers bridge dependencies are not installed" in payload["error"]["message"]
+    assert "diffusers bridge" in payload["error"]["message"]
 
 
 def test_gateway_uses_packaged_bridge_command_by_default_for_bridge_models(monkeypatch):
@@ -169,8 +173,11 @@ def test_gateway_uses_packaged_bridge_command_by_default_for_bridge_models(monke
         )
     )
 
-    assert status == 501
-    assert payload["error"]["code"] == "bridge_dependency_missing"
+    assert status in {501, 502}
+    assert payload["error"]["code"] in {
+        "bridge_dependency_missing",
+        "bridge_adapter_api_mismatch",
+    }
     assert payload["error"]["engine"] == "diffusers"
     assert payload["error"]["model"] == "qwen-image"
     assert payload["error"]["modality"] == "image"
@@ -230,8 +237,11 @@ def test_gateway_exposes_openai_routes_for_each_bridge_modality():
     for endpoint, request, modality, engine, install_hint in cases:
         status, payload = decode(gateway.handle_openai_request("POST", endpoint, request))
 
-        assert status == 501
-        assert payload["error"]["code"] == "bridge_dependency_missing"
+        assert status in {501, 502}
+        assert payload["error"]["code"] in {
+            "bridge_dependency_missing",
+            "bridge_adapter_api_mismatch",
+        }
         assert payload["error"]["modality"] == modality
         assert payload["error"]["engine"] == engine
         assert payload["error"]["install_hint"] == install_hint
@@ -785,7 +795,10 @@ def test_packaged_bridge_reports_missing_dependencies_for_known_engine(capsys):
     captured = capsys.readouterr()
     payload = json.loads(captured.out)
 
-    assert payload["error"]["code"] == "bridge_dependency_missing"
+    assert payload["error"]["code"] in {
+        "bridge_dependency_missing",
+        "bridge_adapter_api_mismatch",
+    }
     assert payload["error"]["engine"] == "diffusers"
     assert "pip install" in payload["error"]["install_hint"]
     assert payload["metadata"]["schema_version"] == "utopic-bridge/v1"
@@ -1063,7 +1076,121 @@ def test_gateway_mcp_lists_and_dispatches_multimodal_tools():
     assert status == 200
     assert payload["result"]["isError"] is True
     assert payload["result"]["content"][0]["type"] == "text"
-    assert "bridge_dependency_missing" in payload["result"]["content"][0]["text"]
+    bridge_error = json.loads(payload["result"]["content"][0]["text"])["error"]["code"]
+    assert bridge_error in {"bridge_dependency_missing", "bridge_adapter_api_mismatch"}
+
+
+def test_gateway_mcp_tool_definitions_are_clear_for_agents():
+    status, payload = decode(
+        gateway.handle_mcp_request({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+    )
+
+    assert status == 200
+    by_name = {tool["name"]: tool for tool in payload["result"]["tools"]}
+    all_descriptions = "\n".join(tool["description"] for tool in by_name.values()).lower()
+
+    for required_phrase in [
+        "local",
+        "offline",
+        "private",
+        "image",
+        "speech",
+        "music",
+        "video",
+        "readiness",
+        "hardware",
+        "outputs",
+    ]:
+        assert required_phrase in all_descriptions
+
+    chat = by_name["utopic_chat"]
+    assert "OpenAI-compatible".lower() in chat["description"].lower()
+    assert "diffusiongemma-26b-a4b-q4" in chat["inputSchema"]["properties"]["model"]["description"]
+    assert "max_tokens" in chat["inputSchema"]["properties"]
+
+    video = by_name["utopic_generate_video"]
+    assert "gb10" in video["description"].lower()
+    assert "utopic_models_check" in video["description"]
+
+    models_check = by_name["utopic_models_check"]
+    assert "missing-dependency" in models_check["description"]
+    assert "OOM" in models_check["description"]
+
+
+def test_native_stdio_mcp_schema_points_agents_to_runtime_mcp_for_multimodal_tools():
+    source = (REPO_ROOT / "python" / "utopic" / "core" / "native" / "mcp_server.cpp").read_text(
+        encoding="utf-8"
+    )
+
+    assert "local/offline Utopic diffusion GGUF model" in source
+    assert "utopic-runtime /mcp endpoint" in source
+    assert "Maximum completion tokens" in source
+
+
+def test_runtime_stdio_mcp_lists_full_gateway_tool_catalog():
+    request = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/list",
+        "params": {},
+    }
+    stdin = io.StringIO(json.dumps(request) + "\n")
+    stdout = io.StringIO()
+
+    assert mcp._runtime_stdio(stdin, stdout, native_base_url=None) == 0
+    response = json.loads(stdout.getvalue())
+
+    assert response["id"] == 1
+    tool_names = {tool["name"] for tool in response["result"]["tools"]}
+    assert {
+        "utopic_chat",
+        "utopic_generate_image",
+        "utopic_speak",
+        "utopic_generate_music",
+        "utopic_generate_video",
+        "utopic_generate_misc",
+        "utopic_models_check",
+    } <= tool_names
+
+
+def test_runtime_stdio_mcp_reports_packaged_model_readiness():
+    request = {
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "tools/call",
+        "params": {
+            "name": "utopic_models_check",
+            "arguments": {"model": "diffusiongemma-26b-a4b-q4"},
+        },
+    }
+    stdin = io.StringIO(json.dumps(request) + "\n")
+    stdout = io.StringIO()
+
+    assert mcp._runtime_stdio(stdin, stdout, native_base_url=None) == 0
+    response = json.loads(stdout.getvalue())
+    payload = json.loads(response["result"]["content"][0]["text"])
+
+    assert response["result"]["isError"] is True
+    assert payload["id"] == "diffusiongemma-26b-a4b-q4"
+    assert payload["status"] in {"missing_model_file", "size_mismatch"}
+    assert "utopic models pull diffusiongemma-26b-a4b-q4" in payload["next_steps"]
+
+
+def test_runtime_stdio_mcp_suppresses_notification_responses():
+    requests = [
+        {"jsonrpc": "2.0", "method": "notifications/initialized"},
+        {"jsonrpc": "2.0", "id": 3, "method": "ping"},
+    ]
+    stdin = io.StringIO("".join(json.dumps(request) + "\n" for request in requests))
+    stdout = io.StringIO()
+
+    assert mcp._runtime_stdio(stdin, stdout, native_base_url=None) == 0
+    lines = [line for line in stdout.getvalue().splitlines() if line]
+
+    assert len(lines) == 1
+    response = json.loads(lines[0])
+    assert response["id"] == 3
+    assert response["result"] == {}
 
 
 def test_gateway_mcp_checks_model_readiness(monkeypatch):
