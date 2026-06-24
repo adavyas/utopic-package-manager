@@ -247,6 +247,7 @@ def test_gateway_native_text_falls_back_to_runner_without_server(monkeypatch, tm
             "text": "hello from runner",
             "artifacts": [],
             "backend": "metal",
+            "device": "Apple M4 Pro",
             "metrics": {"prompt_tokens": 3, "answer_tokens": 4},
         }
 
@@ -268,6 +269,7 @@ def test_gateway_native_text_falls_back_to_runner_without_server(monkeypatch, tm
     assert payload["choices"][0]["message"]["content"] == "hello from runner"
     assert payload["usage"] == {"prompt_tokens": 3, "completion_tokens": 4, "total_tokens": 7}
     assert payload["metadata"]["runtime"] == "native-runner"
+    assert payload["metadata"]["device"] == "Apple M4 Pro"
     assert captured["entry"] is entry
     assert captured["request"]["messages"][0]["content"] == "hi"
 

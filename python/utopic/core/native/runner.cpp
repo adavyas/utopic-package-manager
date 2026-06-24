@@ -180,6 +180,10 @@ static string detected_capacity_text(const json & detected) {
     return text;
 }
 
+static string host_device() {
+    return detected_capacity().value("device", "");
+}
+
 static json capacity_preflight_error(const json & root, const string & runner_name) {
     const json opts = root.value("options", json::object());
     const json requirements = opts.value("requirements", json::object());
@@ -403,6 +407,7 @@ static json run_chat(const json & root) {
             {"text", r.text},
             {"artifacts", json::array()},
             {"backend", host_backend()},
+            {"device", host_device()},
             {"metrics", {
                 {"prompt_tokens", r.prompt_tokens},
                 {"answer_tokens", r.answer_tokens},

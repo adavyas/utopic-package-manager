@@ -1198,6 +1198,7 @@ def _native_runner_to_chat_completion(entry: models.ModelEntry, payload: dict[st
             "runtime": "native-runner",
             "engine": entry.engine,
             "backend": payload.get("backend"),
+            "device": payload.get("device"),
             "metrics": metrics,
         },
     }
@@ -1225,6 +1226,7 @@ def _native_runner_to_artifact_response(
         "metadata": {
             "runtime": "native-runner",
             "backend": payload.get("backend"),
+            "device": payload.get("device"),
             "metrics": payload.get("metrics") if isinstance(payload.get("metrics"), dict) else {},
             "native_status": entry.native_status,
             "runner": entry.runner,

@@ -34,7 +34,7 @@ BIN_ALIASES: Mapping[str, str] = {
     "utopic-runner": "utopic_runner",
 }
 INSTALL_METADATA_NAME = "install.json"
-INSTALL_METADATA_SCHEMA_VERSION = 4
+INSTALL_METADATA_SCHEMA_VERSION = 5
 INSTALL_METADATA_MATCH_KEYS = (
     "schema_version",
     "package_version",

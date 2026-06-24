@@ -179,6 +179,7 @@ def test_gateway_native_artifact_model_routes_to_native_runner(monkeypatch):
             "ok": True,
             "type": "image",
             "backend": "metal",
+            "device": "Apple M4 Pro",
             "artifacts": [{"type": "image/png", "url": "file:///tmp/unit-native-image.png"}],
             "metrics": {"total_ms": 12.5},
         }
@@ -197,6 +198,7 @@ def test_gateway_native_artifact_model_routes_to_native_runner(monkeypatch):
     assert payload["model"] == entry.id
     assert payload["metadata"]["runtime"] == "native-runner"
     assert payload["metadata"]["runner"] == "utopic-runner"
+    assert payload["metadata"]["device"] == "Apple M4 Pro"
     assert payload["data"] == [{"url": "file:///tmp/unit-native-image.png"}]
     assert captured["entry"] is entry
     assert captured["endpoint"] == "/v1/images/generations"
