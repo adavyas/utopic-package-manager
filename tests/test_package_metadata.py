@@ -79,6 +79,13 @@ def test_package_manager_no_longer_owns_typescript_chat_source():
     assert not (REPO_ROOT / "node" / "utopic-chat.ts").exists()
 
 
+def test_vendor_script_sources_chat_artifact_from_typescript_build_output():
+    vendor_script = (REPO_ROOT / "scripts" / "vendor_core.py").read_text(encoding="utf-8")
+
+    assert 'tmp / "chat" / "dist" / "utopic-chat.js"' in vendor_script
+    assert 'tmp / "python" / "utopic_core" / "node"' not in vendor_script
+
+
 def test_vendored_core_layout_exists():
     assert (REPO_ROOT / "python" / "utopic" / "cmake" / "CMakeLists.txt").exists()
     assert not (REPO_ROOT / "python" / "utopic" / "core" / "native" / "CMakeLists.txt").exists()
