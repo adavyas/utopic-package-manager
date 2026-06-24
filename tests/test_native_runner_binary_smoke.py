@@ -702,3 +702,56 @@ def test_native_runner_reports_unsupported_modality_with_readiness_detail(tmp_pa
     assert detail["native_status"] == "planned"
     assert detail["supported_backends"] == ["metal", "cuda"]
     assert detail["expected_vram_gib"] == 8.0
+
+
+def test_native_runner_reports_backend_unavailable_before_planned_modality(tmp_path):
+    request_path = tmp_path / "cuda-image-request.json"
+    progress_path = tmp_path / "progress.jsonl"
+    request_path.write_text(
+        json.dumps(
+            _contract_request(
+                tmp_path,
+                {
+                    "task": "image",
+                    "model": "cuda-only-image",
+                    "input": {"prompt": "a native backend gate"},
+                    "progress_path": str(progress_path),
+                    "options": {
+                        "modality": "image",
+                        "runner": "utopic-runner",
+                        "native_status": "planned",
+                        "supported_backends": ["cuda"],
+                        "expected_vram_gib": 8.0,
+                        "expected_ram_gib": 16.0,
+                    },
+                },
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    completed = _run_runner_with_env(
+        _runner_binary(),
+        request_path,
+        {
+            "UTOPIC_RUNTIME_BACKEND": "metal",
+            "UTOPIC_RUNTIME_DEVICE": "Apple test GPU",
+            "UTOPIC_GPU_MEMORY_GIB": "48",
+        },
+    )
+    payload = _last_json(completed.stdout)
+
+    assert completed.returncode != 0
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "backend_unavailable"
+    assert payload["run_id"] == "run_unit"
+    assert payload["progress_url"] == "/v1/utopic/runs/run_unit/events"
+    assert payload["progress_path"] == str(progress_path)
+    assert payload["output_dir"] == str(tmp_path / "outputs")
+    assert payload["error"]["detail"]["model"] == "cuda-only-image"
+    assert payload["error"]["detail"]["supported_backends"] == ["cuda"]
+    assert payload["error"]["detail"]["detected"]["backend"] == "metal"
+
+    events = _progress_events(progress_path)
+    assert [event["event"] for event in events] == ["started", "failed"]
+    assert events[-1]["error"]["code"] == "backend_unavailable"

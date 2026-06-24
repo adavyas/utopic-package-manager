@@ -246,6 +246,58 @@ static string host_device() {
     return detected_device_name();
 }
 
+static bool json_string_array_contains(const json & values, const string & needle) {
+    if (!values.is_array() || needle.empty()) {
+        return false;
+    }
+    for (const auto & value : values) {
+        if (value.is_string() && value.get<string>() == needle) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static json backend_preflight_error(const json & root, const string & runner_name) {
+    const json opts = root.value("options", json::object());
+    if (!opts.is_object()) {
+        return json();
+    }
+    const json supported = opts.value("supported_backends", json::array());
+    if (!supported.is_array() || supported.empty()) {
+        return json();
+    }
+    const json detected = detected_capacity();
+    const string backend = detected.value("backend", host_backend());
+    if (json_string_array_contains(supported, backend)) {
+        return json();
+    }
+
+    char message[256];
+    snprintf(
+        message,
+        sizeof(message),
+        "model %s does not support the detected %s backend on %s",
+        root.value("model", "").c_str(),
+        backend.c_str(),
+        detected.value("device", "unknown device").c_str());
+    return error_response("backend_unavailable", message, {
+        {"task", root.value("task", "")},
+        {"model", root.value("model", "")},
+        {"modality", opts.value("modality", root.value("task", ""))},
+        {"engine", opts.value("engine", "")},
+        {"runtime", opts.value("runtime", "")},
+        {"runner", opts.value("runner", runner_name)},
+        {"native_status", opts.value("native_status", "")},
+        {"supported_backends", supported},
+        {"expected_vram_gib", opts.value("expected_vram_gib", json())},
+        {"expected_ram_gib", opts.value("expected_ram_gib", json())},
+        {"requirements", opts.value("requirements", json::object())},
+        {"oom_policy", opts.value("oom_policy", json::object())},
+        {"detected", detected},
+    });
+}
+
 static json capacity_preflight_error(const json & root, const string & runner_name) {
     const json opts = root.value("options", json::object());
     const json requirements = opts.value("requirements", json::object());
@@ -621,9 +673,18 @@ int main(int argc, char ** argv) {
     const runner_request req = make_runner_request(root, runner_name);
     append_progress_event(req, "started");
 
+    response = backend_preflight_error(root, runner_name);
+    if (!response.is_null()) {
+        append_progress_event(req, "failed", {{"error", response.value("error", json::object())}});
+        attach_run_metadata(response, req);
+        printf("%s\n", response.dump().c_str());
+        return 1;
+    }
+
     response = capacity_preflight_error(root, runner_name);
     if (!response.is_null()) {
         append_progress_event(req, "failed", {{"error", response.value("error", json::object())}});
+        attach_run_metadata(response, req);
         printf("%s\n", response.dump().c_str());
         return 1;
     }
