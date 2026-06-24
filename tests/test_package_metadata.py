@@ -178,6 +178,15 @@ def test_package_manager_no_longer_owns_typescript_chat_source():
     assert not (REPO_ROOT / "node" / "utopic-chat.ts").exists()
 
 
+def test_native_runner_errors_echo_oom_policy_from_contract():
+    runner = (REPO_ROOT / "python" / "utopic" / "core" / "native" / "runner.cpp").read_text(
+        encoding="utf-8"
+    )
+
+    assert '{"oom_policy", opts.value("oom_policy", json::object())}' in runner
+    assert '{"oom_policy", req.options.value("oom_policy", json::object())}' in runner
+
+
 def test_vendor_script_sources_chat_artifact_from_typescript_build_output():
     vendor_script = (REPO_ROOT / "scripts" / "vendor_core.py").read_text(encoding="utf-8")
 

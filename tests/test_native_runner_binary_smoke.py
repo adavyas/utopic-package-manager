@@ -311,6 +311,12 @@ def test_native_runner_reports_planned_non_text_task_readiness(tmp_path):
                         "supported_backends": ["metal", "cuda"],
                         "expected_vram_gib": 8.0,
                         "expected_ram_gib": 16.0,
+                        "oom_policy": {
+                            "action": "fail_before_runner",
+                            "min_gpu_memory_gib": 8.0,
+                            "min_ram_gib": 16.0,
+                            "allow_cpu": False,
+                        },
                     },
                 },
             )
@@ -335,6 +341,12 @@ def test_native_runner_reports_planned_non_text_task_readiness(tmp_path):
     assert payload["error"]["detail"]["supported_backends"] == ["metal", "cuda"]
     assert payload["error"]["detail"]["expected_vram_gib"] == 8.0
     assert payload["error"]["detail"]["expected_ram_gib"] == 16.0
+    assert payload["error"]["detail"]["oom_policy"] == {
+        "action": "fail_before_runner",
+        "min_gpu_memory_gib": 8.0,
+        "min_ram_gib": 16.0,
+        "allow_cpu": False,
+    }
 
 
 def test_modality_runner_entrypoint_reports_planned_readiness(tmp_path):
@@ -469,6 +481,11 @@ def test_native_runner_reports_oom_preflight_before_planned_readiness(tmp_path):
                             "min_gpu_memory_gib": 96,
                             "allow_cpu": False,
                         },
+                        "oom_policy": {
+                            "action": "fail_before_runner",
+                            "min_gpu_memory_gib": 96,
+                            "allow_cpu": False,
+                        },
                     },
                 },
             )
@@ -495,6 +512,11 @@ def test_native_runner_reports_oom_preflight_before_planned_readiness(tmp_path):
     assert detail["model"] == "cosmos3-super"
     assert detail["runner"] == "utopic-runner"
     assert detail["required_gpu_memory_gib"] == 96
+    assert detail["oom_policy"] == {
+        "action": "fail_before_runner",
+        "min_gpu_memory_gib": 96,
+        "allow_cpu": False,
+    }
     assert detail["detected"]["gpu_memory_gib"] == 40
     assert detail["detected"]["backend"] == "cuda"
     assert detail["detected"]["device"] == "unit-test-gpu"

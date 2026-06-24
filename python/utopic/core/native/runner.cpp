@@ -285,6 +285,7 @@ static json capacity_preflight_error(const json & root, const string & runner_na
         {"expected_vram_gib", opts.value("expected_vram_gib", json())},
         {"expected_ram_gib", opts.value("expected_ram_gib", json())},
         {"requirements", requirements},
+        {"oom_policy", opts.value("oom_policy", json::object())},
         {"required_gpu_memory_gib", minimum},
         {"detected", detected},
     });
@@ -508,6 +509,7 @@ static json planned_native_response(const runner_request & req) {
         {"supported_backends", req.options.value("supported_backends", json::array())},
         {"expected_vram_gib", req.options.value("expected_vram_gib", json())},
         {"expected_ram_gib", req.options.value("expected_ram_gib", json())},
+        {"oom_policy", req.options.value("oom_policy", json::object())},
         {"detected", detected_capacity()},
     });
 }
