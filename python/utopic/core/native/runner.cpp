@@ -132,6 +132,11 @@ static bool validate_request_contract(const json & root, json & response) {
         response = invalid_request("task is required", "task");
         return false;
     }
+    const string task = root["task"].get<string>();
+    if (task != "chat" && task != "image" && task != "tts" && task != "music" && task != "video" && task != "misc") {
+        response = invalid_request("task must be chat, image, tts, music, video, or misc", "task");
+        return false;
+    }
     if (!root.contains("model") || !root["model"].is_string() || root["model"].get<string>().empty()) {
         response = invalid_request("model is required", "model");
         return false;

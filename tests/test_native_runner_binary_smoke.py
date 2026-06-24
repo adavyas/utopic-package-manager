@@ -193,6 +193,74 @@ def test_native_runner_reports_missing_model_path_for_chat(tmp_path):
     assert payload["error"]["message"] == "options.model_path is required for native chat"
 
 
+def test_native_runner_rejects_unknown_task(tmp_path):
+    request_path = tmp_path / "unknown-task.json"
+    request_path.write_text(
+        json.dumps(
+            {
+                "task": "not-a-task",
+                "model": "unit-model",
+                "input": {"prompt": "hello"},
+                "options": {},
+                "output_dir": str(tmp_path),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    completed = _run_runner(_runner_binary(), request_path)
+    payload = _last_json(completed.stdout)
+
+    assert completed.returncode != 0
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "invalid_request"
+    assert payload["error"]["message"] == "task must be chat, image, tts, music, video, or misc"
+    assert payload["error"]["detail"]["field"] == "task"
+
+
+def test_native_runner_reports_planned_non_text_task_readiness(tmp_path):
+    request_path = tmp_path / "planned-image.json"
+    request_path.write_text(
+        json.dumps(
+            {
+                "task": "image",
+                "model": "unit-image",
+                "input": {"prompt": "a red cube"},
+                "options": {
+                    "modality": "image",
+                    "engine": "diffusers",
+                    "runtime": "planned_native",
+                    "runner": "image_runner",
+                    "native_status": "planned",
+                    "supported_backends": ["metal", "cuda"],
+                    "expected_vram_gib": 8.0,
+                    "expected_ram_gib": 16.0,
+                },
+                "output_dir": str(tmp_path),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    completed = _run_runner(_runner_binary(), request_path)
+    payload = _last_json(completed.stdout)
+
+    assert completed.returncode != 0
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "unsupported_model"
+    assert payload["error"]["message"] == "native runner task is not implemented yet"
+    assert payload["error"]["detail"]["task"] == "image"
+    assert payload["error"]["detail"]["model"] == "unit-image"
+    assert payload["error"]["detail"]["modality"] == "image"
+    assert payload["error"]["detail"]["engine"] == "diffusers"
+    assert payload["error"]["detail"]["runtime"] == "planned_native"
+    assert payload["error"]["detail"]["runner"] == "image_runner"
+    assert payload["error"]["detail"]["native_status"] == "planned"
+    assert payload["error"]["detail"]["supported_backends"] == ["metal", "cuda"]
+    assert payload["error"]["detail"]["expected_vram_gib"] == 8.0
+    assert payload["error"]["detail"]["expected_ram_gib"] == 16.0
+
+
 def test_native_runner_reports_unloadable_model_cleanly(tmp_path):
     missing_model = tmp_path / "missing.gguf"
     request_path = tmp_path / "missing-model.json"
