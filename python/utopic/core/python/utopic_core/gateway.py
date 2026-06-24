@@ -1,7 +1,6 @@
 import base64
 import json
 import os
-import shlex
 import subprocess
 import sys
 import time
@@ -374,9 +373,6 @@ def handle_openai_request(
         preflight = _bridge_runtime_preflight(entry)
         if preflight is not None:
             return preflight
-        command = _explicit_bridge_command(entry) if _experimental_bridge_enabled() else None
-        if command is not None:
-            return _run_bridge(entry, path, runtime_request, command)
         runner_payload = native_runner.generation(entry, path, runtime_request)
         if runner_payload.get("ok") is False:
             return _json(_native_runner_error_status(runner_payload), runner_payload)
@@ -731,92 +727,6 @@ def _darwin_device_name() -> str:
     return name or "Apple Silicon"
 
 
-def _run_bridge(
-    entry: models.ModelEntry,
-    endpoint: str,
-    request: dict[str, Any],
-    command: list[str],
-) -> tuple[int, dict[str, str], bytes]:
-    run_id = "run_" + uuid.uuid4().hex
-    run_dir = _runs_dir() / run_id
-    output_dir = run_dir / "outputs"
-    progress_path = run_dir / "progress.jsonl"
-    run_dir.mkdir(parents=True, exist_ok=True)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    payload = {
-        "schema_version": "utopic-bridge/v1",
-        "run_id": run_id,
-        "endpoint": endpoint,
-        "model": entry.id,
-        "repo": entry.repo,
-        "name": entry.name,
-        "family": entry.family,
-        "modality": entry.modality,
-        "engine": entry.engine,
-        "input": _bridge_input(entry, request),
-        "parameters": {
-            key: value
-            for key, value in request.items()
-            if key not in {"model", "prompt", "input", "messages", "artifact", "input_file"}
-        },
-        "model_cache_path": str(entry.path),
-        "output_dir": str(output_dir),
-        "progress_path": str(progress_path),
-        "metadata": {
-            "outputs": list(entry.outputs),
-            "hardware": list(entry.hardware),
-            "repo": entry.repo,
-            "url": entry.url,
-        },
-    }
-    (run_dir / "request.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
-
-    try:
-        result = subprocess.run(
-            command,
-            input=json.dumps(payload),
-            text=True,
-            capture_output=True,
-            check=False,
-            timeout=_bridge_timeout_seconds(),
-        )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        return _bridge_failed(entry, str(exc), run_id=run_id, progress_path=progress_path)
-    if result.returncode != 0:
-        stderr = result.stderr.strip() or result.stdout.strip() or f"exit code {result.returncode}"
-        return _bridge_failed(entry, stderr, run_id=run_id, progress_path=progress_path)
-    try:
-        bridge_payload = json.loads(result.stdout or "{}")
-    except json.JSONDecodeError as exc:
-        return _bridge_failed(entry, f"invalid bridge JSON: {exc}", run_id=run_id, progress_path=progress_path)
-    if isinstance(bridge_payload, dict) and isinstance(bridge_payload.get("error"), dict):
-        return _bridge_adapter_error(entry, bridge_payload["error"], run_id=run_id, progress_path=progress_path)
-
-    artifacts, artifact_error = _normalize_artifacts(bridge_payload.get("artifacts"), entry, output_dir)
-    if artifact_error:
-        return _bridge_failed(entry, artifact_error, run_id=run_id, progress_path=progress_path)
-    if not artifacts:
-        return _bridge_failed(entry, "bridge returned no artifacts", run_id=run_id, progress_path=progress_path)
-    progress = _read_progress(progress_path)
-    response = {
-        "id": run_id,
-        "object": "utopic.artifact.response",
-        "created": int(time.time()),
-        "model": entry.id,
-        "modality": entry.modality,
-        "engine": entry.engine,
-        "artifacts": artifacts,
-        "progress": progress,
-        "progress_url": f"/v1/utopic/runs/{run_id}/events",
-        "metadata": bridge_payload.get("metadata") if isinstance(bridge_payload.get("metadata"), dict) else {},
-    }
-    if entry.modality == "image":
-        response["data"] = _image_generation_data(artifacts, request)
-    if endpoint == "/v1/responses":
-        return _json(200, _artifact_response_to_responses(entry, response))
-    return _json(200, response)
-
-
 def _image_generation_data(artifacts: list[dict[str, Any]], request: dict[str, Any]) -> list[dict[str, str]]:
     if request.get("response_format") != "b64_json":
         return [{"url": artifact["url"]} for artifact in artifacts if isinstance(artifact.get("url"), str)]
@@ -834,88 +744,9 @@ def _image_generation_data(artifacts: list[dict[str, Any]], request: dict[str, A
     return data
 
 
-def _bridge_failed(
-    entry: models.ModelEntry,
-    message: str,
-    *,
-    run_id: Optional[str] = None,
-    progress_path: Optional[Path] = None,
-) -> tuple[int, dict[str, str], bytes]:
-    payload: dict[str, Any] = {
-        "message": f"{entry.engine} bridge failed for {entry.id}: {message}",
-        "code": "bridge_engine_failed",
-        "model": entry.id,
-        "modality": entry.modality,
-        "engine": entry.engine,
-    }
-    _attach_bridge_run_context(payload, run_id=run_id, progress_path=progress_path)
-    return _json(
-        502,
-        {"error": payload},
-    )
-
-
-def _bridge_adapter_error(
-    entry: models.ModelEntry,
-    error: dict[str, Any],
-    *,
-    run_id: Optional[str] = None,
-    progress_path: Optional[Path] = None,
-) -> tuple[int, dict[str, str], bytes]:
-    code = error.get("code") if isinstance(error.get("code"), str) else "bridge_engine_failed"
-    status = 501 if code in {"bridge_dependency_missing", "bridge_adapter_not_implemented"} else 502
-    payload = {
-        "code": code,
-        "message": error.get("message") if isinstance(error.get("message"), str) else "bridge adapter failed",
-        "engine": error.get("engine") if isinstance(error.get("engine"), str) else entry.engine,
-        "install_hint": error.get("install_hint") if isinstance(error.get("install_hint"), str) else "",
-        "model": entry.id,
-        "modality": entry.modality,
-    }
-    _attach_bridge_run_context(payload, run_id=run_id, progress_path=progress_path)
-    return _json(status, {"error": payload})
-
-
-def _attach_bridge_run_context(
-    payload: dict[str, Any],
-    *,
-    run_id: Optional[str],
-    progress_path: Optional[Path],
-) -> None:
-    if not run_id:
-        return
-    payload["run_id"] = run_id
-    payload["progress_url"] = f"/v1/utopic/runs/{run_id}/events"
-    if progress_path is not None:
-        payload["progress"] = _read_progress(progress_path)
-
-
-def _bridge_command(entry: models.ModelEntry) -> Optional[list[str]]:
-    value = os.environ.get(_bridge_command_env_var(entry)) or os.environ.get("UTOPIC_BRIDGE_COMMAND")
-    if value:
-        return shlex.split(value)
-    return [sys.executable, "-m", "utopic.bridge", entry.engine]
-
-
-def _explicit_bridge_command(entry: models.ModelEntry) -> Optional[list[str]]:
-    value = os.environ.get(_bridge_command_env_var(entry)) or os.environ.get("UTOPIC_BRIDGE_COMMAND")
-    return shlex.split(value) if value else None
-
-
 def _bridge_command_env_var(entry: models.ModelEntry) -> str:
     normalized = "".join(char if char.isalnum() else "_" for char in entry.engine.upper()).strip("_")
     return f"UTOPIC_BRIDGE_{normalized}_COMMAND"
-
-
-def _bridge_input(entry: models.ModelEntry, request: dict[str, Any]) -> dict[str, Any]:
-    key = _input_key_for_modality(entry.modality)
-    if key in request:
-        return {key: request[key]}
-    if "prompt" in request:
-        return {key: request["prompt"]}
-    if "messages" in request:
-        return {key: request["messages"]}
-    return {key: ""}
 
 
 def _normalize_request_for_runtime(
@@ -1006,15 +837,6 @@ def _input_key_for_modality(modality: str) -> str:
     if modality == "misc":
         return "artifact"
     return "input" if modality == "tts" else "prompt"
-
-
-def _bridge_timeout_seconds() -> int:
-    value = os.environ.get("UTOPIC_BRIDGE_TIMEOUT_SECONDS", "3600")
-    try:
-        parsed = int(value)
-    except ValueError:
-        return 3600
-    return max(1, parsed)
 
 
 def _normalize_artifacts(

@@ -487,7 +487,6 @@ def test_gateway_ignores_bridge_command_without_experimental_gate(monkeypatch):
     monkeypatch.setenv("UTOPIC_BRIDGE_COMMAND", "python -m should_not_run")
     monkeypatch.delenv("UTOPIC_EXPERIMENTAL_BRIDGE", raising=False)
     monkeypatch.setattr(gateway.models, "get_model", lambda model_id: entry if model_id == entry.id else None)
-    monkeypatch.setattr(gateway, "_run_bridge", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("bridge should not run")))
 
     def fake_generation(runner_entry, endpoint, request):
         captured["entry"] = runner_entry
@@ -516,7 +515,7 @@ def test_gateway_ignores_bridge_command_without_experimental_gate(monkeypatch):
     assert captured["endpoint"] == "/v1/images/generations"
 
 
-def test_gateway_allows_bridge_command_when_experimental_gate_is_enabled(monkeypatch):
+def test_gateway_does_not_run_bridge_command_on_production_routes(monkeypatch):
     entry = gateway.models.ModelEntry(
         id="unit-image",
         name="Unit Image",
@@ -536,15 +535,21 @@ def test_gateway_allows_bridge_command_when_experimental_gate_is_enabled(monkeyp
     monkeypatch.setenv("UTOPIC_BRIDGE_COMMAND", "python -m experimental_bridge")
     monkeypatch.setenv("UTOPIC_EXPERIMENTAL_BRIDGE", "1")
     monkeypatch.setattr(gateway.models, "get_model", lambda model_id: entry if model_id == entry.id else None)
-    monkeypatch.setattr(gateway.native_runner, "generation", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("runner should not run")))
 
-    def fake_run_bridge(runner_entry, endpoint, request, command):
+    def fake_generation(runner_entry, endpoint, request):
         captured["entry"] = runner_entry
         captured["endpoint"] = endpoint
-        captured["command"] = command
-        return 200, {"content-type": "application/json"}, b'{"ok": true}'
+        captured["request"] = request
+        return {
+            "ok": False,
+            "error": {
+                "code": "unsupported_model",
+                "message": "native runner task is not implemented yet",
+                "detail": {"task": runner_entry.modality, "model": runner_entry.id},
+            },
+        }
 
-    monkeypatch.setattr(gateway, "_run_bridge", fake_run_bridge)
+    monkeypatch.setattr(gateway.native_runner, "generation", fake_generation)
 
     status, _headers, body = gateway.handle_openai_request(
         "POST",
@@ -552,11 +557,12 @@ def test_gateway_allows_bridge_command_when_experimental_gate_is_enabled(monkeyp
         {"model": entry.id, "prompt": "experimental"},
     )
 
-    assert status == 200
-    assert json.loads(body)["ok"] is True
+    payload = json.loads(body)
+    assert status == 503
+    assert payload["error"]["code"] == "unsupported_model"
     assert captured["entry"] is entry
     assert captured["endpoint"] == "/v1/images/generations"
-    assert captured["command"] == ["python", "-m", "experimental_bridge"]
+    assert captured["request"]["prompt"] == "experimental"
 
 
 def test_gateway_mcp_generate_speech_is_canonical_tts_tool(monkeypatch):

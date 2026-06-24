@@ -126,7 +126,6 @@ def test_gateway_cosmos_returns_native_runner_oom_preflight(monkeypatch):
         },
         raising=False,
     )
-    monkeypatch.setattr(gateway, "_run_bridge", lambda *_args, **_kwargs: pytest.fail("bridge should not start"))
 
     status, payload = decode(
         gateway.handle_openai_request(
@@ -184,7 +183,6 @@ def test_gateway_native_artifact_model_routes_to_native_runner(monkeypatch):
     )
     captured = {}
     monkeypatch.setattr(gateway.models, "get_model", lambda model_id: entry if model_id == entry.id else None)
-    monkeypatch.setattr(gateway, "_run_bridge", lambda *_args, **_kwargs: pytest.fail("bridge should not run"))
 
     def fake_generation(runner_entry, endpoint, request):
         captured["entry"] = runner_entry
@@ -359,177 +357,46 @@ def test_every_planned_catalog_model_has_openai_and_mcp_runtime_surface():
         assert tool_payload["error"]["engine"] == entry.engine
 
 
-def test_gateway_invokes_configured_bridge_and_returns_artifact_contract(tmp_path, monkeypatch):
-    script = tmp_path / "fake_bridge.py"
-    script.write_text(
-        """
-import json
-import pathlib
-import sys
 
-request = json.loads(sys.stdin.read())
-out_dir = pathlib.Path(request["output_dir"])
-out_dir.mkdir(parents=True, exist_ok=True)
-artifact = out_dir / "image.png"
-artifact.write_bytes(b"png")
-with pathlib.Path(request["progress_path"]).open("a", encoding="utf-8") as progress:
-    progress.write(json.dumps({"event": "generating", "progress": 0.5, "message": "half"}) + "\\n")
-    progress.write(json.dumps({"event": "completed", "progress": 1.0, "message": "done"}) + "\\n")
-print(json.dumps({
-    "artifacts": [{"type": "image/png", "path": str(artifact), "metadata": {"seed": 7}}],
-    "metadata": {
-        "engine_version": "fake",
-        "repo": request["repo"],
-        "model_cache_path": request["model_cache_path"],
-        "metadata": request["metadata"],
-    }
-}))
-""".strip(),
-        encoding="utf-8",
+def test_gateway_native_artifact_model_supports_b64_json_response_format(monkeypatch, tmp_path):
+    artifact = tmp_path / "native-image.png"
+    artifact.write_bytes(b"png")
+    entry = gateway.models.ModelEntry(
+        id="unit-native-image-b64",
+        name="Unit Native Image B64",
+        family="unit",
+        filename="unit-native-image-b64",
+        url="https://example.invalid/unit-image",
+        size="1 GiB",
+        recommended=False,
+        description="unit",
+        modality="image",
+        engine="native-image",
+        runtime="native",
+        native_status="ready",
+        runner="image_runner",
+        endpoints=("/v1/images/generations", "/v1/responses"),
+        outputs=("image/png",),
     )
-    monkeypatch.setenv("UTOPIC_HOME", str(tmp_path / "cache"))
-    monkeypatch.setenv("UTOPIC_EXPERIMENTAL_BRIDGE", "1")
-    monkeypatch.setenv("UTOPIC_BRIDGE_DIFFUSERS_COMMAND", f"{sys.executable} {script}")
+    monkeypatch.setattr(gateway.models, "get_model", lambda model_id: entry if model_id == entry.id else None)
 
-    status, payload = decode(
-        gateway.handle_openai_request(
-            "POST",
-            "/v1/images/generations",
-            {
-                "model": "qwen-image",
-                "prompt": "a precise product photo of a glass teapot",
-                "size": "1024x1024",
-                "seed": 7,
-            },
-        )
-    )
-
-    assert status == 200
-    assert payload["object"] == "utopic.artifact.response"
-    assert payload["model"] == "qwen-image"
-    assert payload["modality"] == "image"
-    assert payload["engine"] == "diffusers"
-    assert payload["progress_url"].startswith("/v1/utopic/runs/")
-    assert payload["artifacts"] == [
-        {
-            "type": "image/png",
-            "path": payload["artifacts"][0]["path"],
-            "url": f"file://{payload['artifacts'][0]['path']}",
-            "metadata": {"seed": 7},
+    def fake_generation(runner_entry, endpoint, request):
+        return {
+            "ok": True,
+            "type": "image",
+            "backend": "cpu",
+            "artifacts": [{"type": "image/png", "path": str(artifact)}],
+            "metrics": {},
         }
-    ]
-    assert pathlib_path_exists(payload["artifacts"][0]["path"])
-    assert payload["data"] == [{"url": f"file://{payload['artifacts'][0]['path']}"}]
-    assert payload["metadata"] == {
-        "engine_version": "fake",
-        "repo": "Qwen/Qwen-Image",
-        "model_cache_path": str(gateway.model_cache_path("qwen-image")),
-        "metadata": {
-            "outputs": ["image/png"],
-            "hardware": ["gb10", "cuda"],
-            "repo": "Qwen/Qwen-Image",
-            "url": "https://huggingface.co/Qwen/Qwen-Image",
-        },
-    }
-    assert payload["progress"] == [
-        {"event": "generating", "progress": 0.5, "message": "half"},
-        {"event": "completed", "progress": 1.0, "message": "done"},
-    ]
 
-    status, progress_payload = decode(
-        gateway.handle_openai_request("GET", payload["progress_url"], None)
-    )
-
-    assert status == 200
-    assert progress_payload == {
-        "object": "list",
-        "data": payload["progress"],
-    }
-
-
-def test_gateway_misc_generation_invokes_artifact_bridge(tmp_path, monkeypatch):
-    source = tmp_path / "sample.eeg"
-    source.write_bytes(b"zuna-input")
-    captured_path = tmp_path / "captured.json"
-    script = tmp_path / "fake_artifact_bridge.py"
-    script.write_text(
-        f"""
-import json
-import pathlib
-import sys
-
-request = json.loads(sys.stdin.read())
-pathlib.Path({str(captured_path)!r}).write_text(json.dumps(request), encoding="utf-8")
-out_dir = pathlib.Path(request["output_dir"])
-out_dir.mkdir(parents=True, exist_ok=True)
-artifact = out_dir / "zuna.bin"
-artifact.write_bytes(pathlib.Path(request["input"]["artifact"]).read_bytes())
-print(json.dumps({{
-    "artifacts": [{{"type": "application/octet-stream", "path": str(artifact), "metadata": {{"engine": "artifact"}}}}],
-    "metadata": {{"schema_version": "utopic-bridge/v1", "engine": "artifact"}}
-}}))
-""".strip(),
-        encoding="utf-8",
-    )
-    monkeypatch.setenv("UTOPIC_HOME", str(tmp_path / "cache"))
-    monkeypatch.setenv("UTOPIC_EXPERIMENTAL_BRIDGE", "1")
-    monkeypatch.setenv("UTOPIC_BRIDGE_ARTIFACT_COMMAND", f"{sys.executable} {script}")
-
-    status, payload = decode(
-        gateway.handle_openai_request(
-            "POST",
-            "/v1/utopic/misc/generations",
-            {
-                "model": "zuna",
-                "artifact": str(source),
-                "artifact_type": "application/octet-stream",
-            },
-        )
-    )
-
-    assert status == 200
-    assert payload["object"] == "utopic.artifact.response"
-    assert payload["model"] == "zuna"
-    assert payload["modality"] == "misc"
-    assert payload["engine"] == "artifact"
-    assert payload["artifacts"][0]["type"] == "application/octet-stream"
-    assert Path(payload["artifacts"][0]["path"]).read_bytes() == b"zuna-input"
-    captured = json.loads(captured_path.read_text(encoding="utf-8"))
-    assert captured["endpoint"] == "/v1/utopic/misc/generations"
-    assert captured["input"] == {"artifact": str(source)}
-    assert captured["parameters"] == {"artifact_type": "application/octet-stream"}
-
-
-def test_gateway_image_generation_supports_b64_json_response_format(tmp_path, monkeypatch):
-    script = tmp_path / "fake_bridge.py"
-    script.write_text(
-        """
-import json
-import pathlib
-import sys
-
-request = json.loads(sys.stdin.read())
-out_dir = pathlib.Path(request["output_dir"])
-out_dir.mkdir(parents=True, exist_ok=True)
-artifact = out_dir / "image.png"
-artifact.write_bytes(b"png")
-print(json.dumps({
-    "artifacts": [{"type": "image/png", "path": str(artifact), "metadata": {"seed": 11}}],
-    "metadata": {"engine_version": "fake"}
-}))
-""".strip(),
-        encoding="utf-8",
-    )
-    monkeypatch.setenv("UTOPIC_HOME", str(tmp_path / "cache"))
-    monkeypatch.setenv("UTOPIC_EXPERIMENTAL_BRIDGE", "1")
-    monkeypatch.setenv("UTOPIC_BRIDGE_DIFFUSERS_COMMAND", f"{sys.executable} {script}")
+    monkeypatch.setattr(gateway.native_runner, "generation", fake_generation)
 
     status, payload = decode(
         gateway.handle_openai_request(
             "POST",
             "/v1/images/generations",
             {
-                "model": "qwen-image",
+                "model": entry.id,
                 "prompt": "a precise product photo of a glass teapot",
                 "response_format": "b64_json",
             },
@@ -537,114 +404,51 @@ print(json.dumps({
     )
 
     assert status == 200
-    assert payload["object"] == "utopic.artifact.response"
-    assert payload["artifacts"][0]["url"].startswith("file://")
+    assert payload["metadata"]["runtime"] == "native-runner"
     assert payload["data"] == [{"b64_json": base64.b64encode(b"png").decode("ascii")}]
 
 
-def test_gateway_rejects_bridge_artifacts_outside_run_output_dir(tmp_path, monkeypatch):
-    script = tmp_path / "bad_bridge.py"
-    outside_path = tmp_path / "outside.png"
-    script.write_text(
-        f"""
-import json
-import pathlib
-
-path = pathlib.Path({str(outside_path)!r})
-path.write_bytes(b"png")
-print(json.dumps({{
-    "artifacts": [{{"type": "image/png", "path": str(path), "metadata": {{}}}}],
-    "metadata": {{"engine_version": "bad"}}
-}}))
-""".strip(),
-        encoding="utf-8",
+def test_responses_endpoint_normalizes_structured_input_for_native_image_runner(monkeypatch):
+    entry = gateway.models.ModelEntry(
+        id="unit-native-image-responses",
+        name="Unit Native Image Responses",
+        family="unit",
+        filename="unit-native-image-responses",
+        url="https://example.invalid/unit-image",
+        size="1 GiB",
+        recommended=False,
+        description="unit",
+        modality="image",
+        engine="native-image",
+        runtime="native",
+        native_status="ready",
+        runner="image_runner",
+        endpoints=("/v1/images/generations", "/v1/responses"),
+        outputs=("image/png",),
     )
-    monkeypatch.setenv("UTOPIC_HOME", str(tmp_path / "cache"))
-    monkeypatch.setenv("UTOPIC_EXPERIMENTAL_BRIDGE", "1")
-    monkeypatch.setenv("UTOPIC_BRIDGE_DIFFUSERS_COMMAND", f"{sys.executable} {script}")
+    captured = {}
+    monkeypatch.setattr(gateway.models, "get_model", lambda model_id: entry if model_id == entry.id else None)
 
-    status, payload = decode(
-        gateway.handle_openai_request(
-            "POST",
-            "/v1/images/generations",
-            {"model": "qwen-image", "prompt": "test"},
-        )
-    )
+    def fake_generation(runner_entry, endpoint, request):
+        captured["entry"] = runner_entry
+        captured["endpoint"] = endpoint
+        captured["request"] = request
+        return {
+            "ok": True,
+            "type": "image",
+            "backend": "cpu",
+            "artifacts": [{"type": "image/png", "url": "file:///tmp/native-response.png"}],
+            "metrics": {},
+        }
 
-    assert status == 502
-    assert payload["error"]["code"] == "bridge_engine_failed"
-    assert "bridge returned no artifacts" in payload["error"]["message"]
-
-
-def test_gateway_rejects_bridge_artifacts_with_undeclared_output_type(tmp_path, monkeypatch):
-    script = tmp_path / "wrong_type_bridge.py"
-    script.write_text(
-        """
-import json
-import pathlib
-import sys
-
-request = json.loads(sys.stdin.read())
-out_dir = pathlib.Path(request["output_dir"])
-out_dir.mkdir(parents=True, exist_ok=True)
-path = out_dir / "image.jpg"
-path.write_bytes(b"jpg")
-print(json.dumps({
-    "artifacts": [{"type": "image/jpeg", "path": str(path), "metadata": {}}],
-    "metadata": {"engine_version": "wrong-type"}
-}))
-""".strip(),
-        encoding="utf-8",
-    )
-    monkeypatch.setenv("UTOPIC_HOME", str(tmp_path / "cache"))
-    monkeypatch.setenv("UTOPIC_EXPERIMENTAL_BRIDGE", "1")
-    monkeypatch.setenv("UTOPIC_BRIDGE_DIFFUSERS_COMMAND", f"{sys.executable} {script}")
-
-    status, payload = decode(
-        gateway.handle_openai_request(
-            "POST",
-            "/v1/images/generations",
-            {"model": "qwen-image", "prompt": "test"},
-        )
-    )
-
-    assert status == 502
-    assert payload["error"]["code"] == "bridge_engine_failed"
-    assert "unsupported artifact type image/jpeg" in payload["error"]["message"]
-
-
-def test_responses_endpoint_normalizes_structured_input_for_image_bridge(tmp_path, monkeypatch):
-    script = tmp_path / "fake_image_bridge.py"
-    captured_path = tmp_path / "captured.json"
-    script.write_text(
-        f"""
-import json
-import pathlib
-import sys
-
-request = json.loads(sys.stdin.read())
-pathlib.Path({str(captured_path)!r}).write_text(json.dumps(request), encoding="utf-8")
-out_dir = pathlib.Path(request["output_dir"])
-out_dir.mkdir(parents=True, exist_ok=True)
-artifact = out_dir / "image.png"
-artifact.write_bytes(b"png")
-print(json.dumps({{
-    "artifacts": [{{"type": "image/png", "path": str(artifact), "metadata": {{}}}}],
-    "metadata": {{"schema_version": "utopic-bridge/v1", "engine": "diffusers"}}
-}}))
-""".strip(),
-        encoding="utf-8",
-    )
-    monkeypatch.setenv("UTOPIC_HOME", str(tmp_path / "cache"))
-    monkeypatch.setenv("UTOPIC_EXPERIMENTAL_BRIDGE", "1")
-    monkeypatch.setenv("UTOPIC_BRIDGE_DIFFUSERS_COMMAND", f"{sys.executable} {script}")
+    monkeypatch.setattr(gateway.native_runner, "generation", fake_generation)
 
     status, payload = decode(
         gateway.handle_openai_request(
             "POST",
             "/v1/responses",
             {
-                "model": "flux-1-schnell",
+                "model": entry.id,
                 "input": [
                     {
                         "role": "user",
@@ -659,66 +463,12 @@ print(json.dumps({{
     )
 
     assert status == 200
+    assert captured["entry"] is entry
+    assert captured["endpoint"] == "/v1/responses"
+    assert captured["request"]["prompt"] == "a red cube on a steel table"
+    assert captured["request"]["size"] == "512x512"
     assert payload["object"] == "response"
     assert payload["output"][0]["content"][0]["type"] == "output_image"
-    captured = json.loads(captured_path.read_text(encoding="utf-8"))
-    assert captured["endpoint"] == "/v1/responses"
-    assert captured["input"] == {"prompt": "a red cube on a steel table"}
-    assert captured["parameters"]["size"] == "512x512"
-
-
-def test_responses_endpoint_normalizes_structured_input_for_tts_bridge(tmp_path, monkeypatch):
-    script = tmp_path / "fake_tts_bridge.py"
-    captured_path = tmp_path / "captured.json"
-    script.write_text(
-        f"""
-import json
-import pathlib
-import sys
-
-request = json.loads(sys.stdin.read())
-pathlib.Path({str(captured_path)!r}).write_text(json.dumps(request), encoding="utf-8")
-out_dir = pathlib.Path(request["output_dir"])
-out_dir.mkdir(parents=True, exist_ok=True)
-artifact = out_dir / "speech.wav"
-artifact.write_bytes(b"wav")
-print(json.dumps({{
-    "artifacts": [{{"type": "audio/wav", "path": str(artifact), "metadata": {{"voice": "af_heart"}}}}],
-    "metadata": {{"schema_version": "utopic-bridge/v1", "engine": "kokoro"}}
-}}))
-""".strip(),
-        encoding="utf-8",
-    )
-    monkeypatch.setenv("UTOPIC_HOME", str(tmp_path / "cache"))
-    monkeypatch.setenv("UTOPIC_EXPERIMENTAL_BRIDGE", "1")
-    monkeypatch.setenv("UTOPIC_BRIDGE_KOKORO_COMMAND", f"{sys.executable} {script}")
-
-    status, payload = decode(
-        gateway.handle_openai_request(
-            "POST",
-            "/v1/responses",
-            {
-                "model": "kokoro-82m",
-                "input": [
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "input_text", "text": "say hello to local users"}
-                        ],
-                    }
-                ],
-                "voice": "af_heart",
-            },
-        )
-    )
-
-    assert status == 200
-    assert payload["object"] == "response"
-    assert payload["output"][0]["content"][0]["type"] == "output_audio"
-    captured = json.loads(captured_path.read_text(encoding="utf-8"))
-    assert captured["input"] == {"input": "say hello to local users"}
-    assert captured["parameters"]["voice"] == "af_heart"
-
 
 def test_responses_endpoint_for_native_text_uses_chat_proxy_and_wraps_response(monkeypatch):
     captured = {}
@@ -853,131 +603,6 @@ def test_packaged_bridge_reports_missing_dependencies_for_known_engine(capsys, m
     assert payload["error"]["engine"] == "diffusers"
     assert "pip install" in payload["error"]["install_hint"]
     assert payload["metadata"]["schema_version"] == "utopic-bridge/v1"
-
-
-def test_gateway_surfaces_structured_bridge_adapter_errors(tmp_path, monkeypatch):
-    script = tmp_path / "missing_bridge.py"
-    script.write_text(
-        """
-import json
-print(json.dumps({
-    "error": {
-        "code": "bridge_dependency_missing",
-        "message": "install diffusers",
-        "engine": "diffusers",
-        "install_hint": "pip install diffusers torch"
-    },
-    "metadata": {"schema_version": "utopic-bridge/v1"}
-}))
-""".strip(),
-        encoding="utf-8",
-    )
-    monkeypatch.setenv("UTOPIC_EXPERIMENTAL_BRIDGE", "1")
-    monkeypatch.setenv("UTOPIC_BRIDGE_DIFFUSERS_COMMAND", f"{sys.executable} {script}")
-
-    status, payload = decode(
-        gateway.handle_openai_request(
-            "POST",
-            "/v1/images/generations",
-            {"model": "qwen-image", "prompt": "test"},
-        )
-    )
-
-    assert status == 501
-    assert payload["error"] | {"run_id": "<run>", "progress_url": "<progress>"} == {
-        "code": "bridge_dependency_missing",
-        "message": "install diffusers",
-        "engine": "diffusers",
-        "install_hint": "pip install diffusers torch",
-        "model": "qwen-image",
-        "modality": "image",
-        "progress": [],
-        "run_id": "<run>",
-        "progress_url": "<progress>",
-    }
-    assert payload["error"]["run_id"].startswith("run_")
-    assert payload["error"]["progress_url"] == f"/v1/utopic/runs/{payload['error']['run_id']}/events"
-
-
-def test_gateway_bridge_failures_keep_progress_url_and_events(tmp_path, monkeypatch):
-    script = tmp_path / "failing_bridge.py"
-    script.write_text(
-        """
-import json
-import pathlib
-import sys
-
-request = json.loads(sys.stdin.read())
-progress_path = pathlib.Path(request["progress_path"])
-with progress_path.open("a", encoding="utf-8") as progress:
-    progress.write(json.dumps({"event": "loading", "progress": 0.1, "message": "loading model"}) + "\\n")
-    progress.write(json.dumps({"event": "failed", "progress": 1.0, "message": "missing kernel"}) + "\\n")
-print(json.dumps({
-    "error": {
-        "code": "bridge_adapter_api_mismatch",
-        "message": "missing kernel",
-        "engine": "diffusers",
-        "install_hint": "pip install --upgrade diffusers torch"
-    },
-    "metadata": {"schema_version": "utopic-bridge/v1"}
-}))
-""".strip(),
-        encoding="utf-8",
-    )
-    monkeypatch.setenv("UTOPIC_HOME", str(tmp_path / "cache"))
-    monkeypatch.setenv("UTOPIC_EXPERIMENTAL_BRIDGE", "1")
-    monkeypatch.setenv("UTOPIC_BRIDGE_DIFFUSERS_COMMAND", f"{sys.executable} {script}")
-
-    status, payload = decode(
-        gateway.handle_openai_request(
-            "POST",
-            "/v1/images/generations",
-            {"model": "qwen-image", "prompt": "a glass teapot"},
-        )
-    )
-
-    assert status == 502
-    assert payload["error"]["code"] == "bridge_adapter_api_mismatch"
-    assert payload["error"]["run_id"].startswith("run_")
-    assert payload["error"]["progress_url"] == f"/v1/utopic/runs/{payload['error']['run_id']}/events"
-    assert payload["error"]["progress"] == [
-        {"event": "loading", "progress": 0.1, "message": "loading model"},
-        {"event": "failed", "progress": 1.0, "message": "missing kernel"},
-    ]
-
-    status, progress_payload = decode(
-        gateway.handle_openai_request("GET", payload["error"]["progress_url"], None)
-    )
-
-    assert status == 200
-    assert progress_payload == {"object": "list", "data": payload["error"]["progress"]}
-
-    status, mcp_payload = decode(
-        gateway.handle_mcp_request(
-            {
-                "jsonrpc": "2.0",
-                "id": 7,
-                "method": "tools/call",
-                "params": {
-                    "name": "utopic_generate_image",
-                    "arguments": {"model": "qwen-image", "prompt": "a glass teapot"},
-                },
-            }
-        )
-    )
-
-    assert status == 200
-    assert mcp_payload["result"]["isError"] is True
-    mcp_error = json.loads(mcp_payload["result"]["content"][0]["text"])["error"]
-    assert mcp_error["run_id"].startswith("run_")
-    assert mcp_error["progress_url"] == f"/v1/utopic/runs/{mcp_error['run_id']}/events"
-    assert mcp_error["progress"] == payload["error"]["progress"]
-
-
-def pathlib_path_exists(path: str) -> bool:
-    from pathlib import Path
-
-    return Path(path).is_file()
 
 
 def test_gateway_forwards_native_text_to_configured_openai_server(monkeypatch):
@@ -1415,44 +1040,11 @@ def test_gateway_mcp_initialize_and_ping():
     assert payload == {"jsonrpc": "2.0", "id": 2, "result": {}}
 
 
-def test_gateway_mcp_dispatches_bridge_tools_through_same_runtime(tmp_path, monkeypatch):
-    script = tmp_path / "fake_bridge.py"
-    captured_path = tmp_path / "captured.jsonl"
-    script.write_text(
-        f"""
-import json
-import pathlib
-import sys
-
-request = json.loads(sys.stdin.read())
-with pathlib.Path({str(captured_path)!r}).open("a", encoding="utf-8") as handle:
-    handle.write(json.dumps(request) + "\\n")
-out_dir = pathlib.Path(request["output_dir"])
-out_dir.mkdir(parents=True, exist_ok=True)
-if request["modality"] == "misc":
-    artifact = out_dir / "artifact.bin"
-    artifact_type = "application/octet-stream"
-    artifact.write_bytes(pathlib.Path(request["input"]["artifact"]).read_bytes())
-elif request["modality"] == "tts":
-    artifact = out_dir / "speech.wav"
-    artifact_type = "audio/wav"
-    artifact.write_bytes(b"wav")
-else:
-    artifact = out_dir / "music.wav"
-    artifact_type = "audio/wav"
-    artifact.write_bytes(b"wav")
-print(json.dumps({{
-    "artifacts": [{{"type": artifact_type, "path": str(artifact), "metadata": {{"tool": request["engine"]}}}}],
-    "metadata": {{"schema_version": "utopic-bridge/v1", "engine": request["engine"]}}
-}}))
-""".strip(),
-        encoding="utf-8",
-    )
-    monkeypatch.setenv("UTOPIC_HOME", str(tmp_path / "cache"))
+def test_gateway_mcp_dispatches_planned_tools_to_native_readiness_runtime(tmp_path, monkeypatch):
     monkeypatch.setenv("UTOPIC_EXPERIMENTAL_BRIDGE", "1")
-    monkeypatch.setenv("UTOPIC_BRIDGE_KOKORO_COMMAND", f"{sys.executable} {script}")
-    monkeypatch.setenv("UTOPIC_BRIDGE_ACE_STEP_COMMAND", f"{sys.executable} {script}")
-    monkeypatch.setenv("UTOPIC_BRIDGE_ARTIFACT_COMMAND", f"{sys.executable} {script}")
+    monkeypatch.setenv("UTOPIC_BRIDGE_KOKORO_COMMAND", "python -m should_not_run")
+    monkeypatch.setenv("UTOPIC_BRIDGE_ACE_STEP_COMMAND", "python -m should_not_run")
+    monkeypatch.setenv("UTOPIC_BRIDGE_ARTIFACT_COMMAND", "python -m should_not_run")
     misc_source = tmp_path / "source.bin"
     misc_source.write_bytes(b"misc")
 
@@ -1486,22 +1078,12 @@ print(json.dumps({{
 
         assert status == 200
         assert payload["id"] == request_id
-        assert payload["result"]["isError"] is False
+        assert payload["result"]["isError"] is True
         tool_payload = json.loads(payload["result"]["content"][0]["text"])
-        assert tool_payload["object"] == "utopic.artifact.response"
-        assert tool_payload["artifacts"][0]["type"] in {"audio/wav", "application/octet-stream"}
-
-    captured = [
-        json.loads(line)
-        for line in captured_path.read_text(encoding="utf-8").splitlines()
-    ]
-    assert captured[0]["endpoint"] == "/v1/audio/speech"
-    assert captured[0]["input"] == {"input": "hello from mcp"}
-    assert captured[0]["parameters"]["voice"] == "af_heart"
-    assert captured[2]["endpoint"] == "/v1/utopic/misc/generations"
-    assert captured[2]["input"] == {"artifact": str(misc_source)}
-    assert captured[1]["endpoint"] == "/v1/audio/generations"
-    assert captured[1]["input"] == {"prompt": "ambient piano from mcp"}
+        assert tool_payload["error"]["code"] == "unsupported_model"
+        assert tool_payload["error"]["model"] == arguments["model"]
+        assert tool_payload["error"]["modality"] in {"tts", "music", "misc"}
+        assert tool_payload["error"]["native_status"] == "planned"
 
 
 def test_gateway_cli_help_and_version(capsys):
