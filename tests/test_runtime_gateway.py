@@ -200,6 +200,10 @@ def test_gateway_native_artifact_model_routes_to_native_runner(monkeypatch):
         return {
             "ok": True,
             "type": "image",
+            "run_id": "run_native_image",
+            "output_dir": "/tmp/utopic/run_native_image/outputs",
+            "progress_path": "/tmp/utopic/run_native_image/progress.jsonl",
+            "progress_url": "/v1/utopic/runs/run_native_image/events",
             "backend": "metal",
             "device": "Apple M4 Pro",
             "artifacts": [{"type": "image/png", "url": "file:///tmp/unit-native-image.png"}],
@@ -217,9 +221,14 @@ def test_gateway_native_artifact_model_routes_to_native_runner(monkeypatch):
     )
 
     assert status == 200
+    assert payload["id"] == "run_native_image"
     assert payload["model"] == entry.id
+    assert payload["progress_url"] == "/v1/utopic/runs/run_native_image/events"
     assert payload["metadata"]["runtime"] == "native-runner"
     assert payload["metadata"]["runner"] == "utopic-runner"
+    assert payload["metadata"]["run_id"] == "run_native_image"
+    assert payload["metadata"]["output_dir"] == "/tmp/utopic/run_native_image/outputs"
+    assert payload["metadata"]["progress_path"] == "/tmp/utopic/run_native_image/progress.jsonl"
     assert payload["metadata"]["device"] == "Apple M4 Pro"
     assert payload["data"] == [{"url": "file:///tmp/unit-native-image.png"}]
     assert captured["entry"] is entry

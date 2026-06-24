@@ -1232,23 +1232,29 @@ def _native_runner_to_artifact_response(
     if not isinstance(artifacts, list):
         artifacts = []
     normalized_artifacts = [artifact for artifact in artifacts if isinstance(artifact, dict)]
+    run_id = payload.get("run_id") if isinstance(payload.get("run_id"), str) and payload.get("run_id") else f"run_{uuid.uuid4().hex}"
+    progress = payload.get("progress") if isinstance(payload.get("progress"), list) else []
     response = {
-        "id": f"run_{uuid.uuid4().hex}",
+        "id": run_id,
         "object": "utopic.artifact.response",
         "created": int(time.time()),
         "model": entry.id,
         "modality": entry.modality,
         "engine": entry.engine,
         "artifacts": normalized_artifacts,
-        "progress": [],
+        "progress": progress,
+        "progress_url": payload.get("progress_url") if isinstance(payload.get("progress_url"), str) else None,
         "metadata": {
             "runtime": "native-runner",
+            "run_id": run_id,
             "backend": payload.get("backend"),
             "device": payload.get("device"),
             "metrics": payload.get("metrics") if isinstance(payload.get("metrics"), dict) else {},
             "native_status": entry.native_status,
             "runner": entry.runner,
             "endpoint": endpoint,
+            "output_dir": payload.get("output_dir") if isinstance(payload.get("output_dir"), str) else None,
+            "progress_path": payload.get("progress_path") if isinstance(payload.get("progress_path"), str) else None,
         },
     }
     if entry.modality == "image":
