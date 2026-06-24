@@ -570,7 +570,10 @@ def test_release_workflow_smokes_installed_prompt_flag_normalization():
     assert "prompt_probe = textwrap.dedent" in workflow
     assert '"--model=diffusiongemma-26b-a4b-q4"' in workflow
     assert '"--prompt=hello"' in workflow
-    assert '["-m", "/models/diffusiongemma.gguf", "-p", "hello"' in workflow
+    assert '("setup", True, "utopic_runner")' in workflow
+    assert '("binary", "utopic_runner")' in workflow
+    assert '("runner", "diffusiongemma-26b-a4b-q4", Path("/models/diffusiongemma.gguf"))' in workflow
+    assert 'calls[3][3]["messages"] != [{"role": "user", "content": "hello"}]' in workflow
 
 
 def test_workflows_smoke_installed_doctor_command():

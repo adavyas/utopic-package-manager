@@ -397,16 +397,25 @@ jobs:
 
           calls = []
           cli._ensure_setup = lambda enabled=True, binary_name="utopic": calls.append(("setup", enabled, binary_name))
+          cli._native.binary_path = lambda name: calls.append(("binary", name)) or Path(f"/fake/bin/{name}")
           cli.models.ensure_model = lambda value=None: calls.append(("model", value)) or Path("/models/diffusiongemma.gguf")
-          cli._native.main = lambda name, argv=None: calls.append((name, list(argv or [])))
+          cli.models.get_model = lambda model_id: None
+          cli.native_runner.chat_completion = lambda entry, request: calls.append(("runner", entry.id, entry.path, request)) or {"ok": True, "type": "text", "text": "runner ok", "metrics": {}}
 
           code = cli.main(["run", "--model=diffusiongemma-26b-a4b-q4", "--prompt=hello", "--temp=0.1", "--seed=7"])
           expected = [
-              ("setup", True, "utopic"),
+              ("setup", True, "utopic_runner"),
+              ("binary", "utopic_runner"),
               ("model", "diffusiongemma-26b-a4b-q4"),
-              ("utopic", ["-m", "/models/diffusiongemma.gguf", "-p", "hello", "--temp", "0.1", "--seed", "7"]),
           ]
-          if code not in (0, None) or calls != expected:
+          if (
+              code not in (0, None)
+              or calls[:3] != expected
+              or calls[3][0:3] != ("runner", "diffusiongemma-26b-a4b-q4", Path("/models/diffusiongemma.gguf"))
+              or calls[3][3]["messages"] != [{"role": "user", "content": "hello"}]
+              or calls[3][3]["temperature"] != 0.1
+              or calls[3][3]["seed"] != 7
+          ):
               raise SystemExit(f"unexpected run prompt argv normalization: code={code!r} calls={calls!r}")
           ''')
                   completed = subprocess.run(
