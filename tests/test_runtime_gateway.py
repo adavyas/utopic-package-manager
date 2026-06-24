@@ -776,7 +776,8 @@ def test_responses_endpoint_for_native_text_accepts_prompt_fallback(monkeypatch)
     assert payload["output_text"] == "hello"
 
 
-def test_packaged_bridge_reports_missing_dependencies_for_known_engine(capsys):
+def test_packaged_bridge_reports_missing_dependencies_for_known_engine(capsys, monkeypatch):
+    monkeypatch.setenv("UTOPIC_EXPERIMENTAL_BRIDGE", "1")
     request = {
         "schema_version": "utopic-bridge/v1",
         "model": "qwen-image",

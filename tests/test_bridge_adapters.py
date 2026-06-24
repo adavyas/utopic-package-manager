@@ -3,7 +3,14 @@ import os
 from pathlib import Path
 import types
 
+import pytest
+
 from utopic import bridge
+
+
+@pytest.fixture(autouse=True)
+def _enable_experimental_bridge_for_adapter_tests(monkeypatch):
+    monkeypatch.setenv("UTOPIC_EXPERIMENTAL_BRIDGE", "1")
 
 
 def test_bridge_check_reports_missing_dependencies(monkeypatch, capsys):
@@ -146,6 +153,31 @@ def test_artifact_bridge_copies_input_artifact(tmp_path, capsys):
         for line in progress_path.read_text(encoding="utf-8").splitlines()
     ]
     assert [event["event"] for event in progress] == ["loading", "generating", "completed"]
+
+
+def test_bridge_generation_requires_explicit_experimental_gate(monkeypatch, tmp_path, capsys):
+    monkeypatch.delenv("UTOPIC_EXPERIMENTAL_BRIDGE", raising=False)
+    source = tmp_path / "source.eeg"
+    source.write_bytes(b"zuna-signal")
+    output_dir = tmp_path / "outputs"
+    request = {
+        "schema_version": "utopic-bridge/v1",
+        "model": "zuna",
+        "engine": "artifact",
+        "modality": "misc",
+        "input": {"artifact": str(source)},
+        "parameters": {"artifact_type": "application/octet-stream"},
+        "metadata": {"outputs": ["application/octet-stream"]},
+        "output_dir": str(output_dir),
+        "progress_path": str(tmp_path / "progress.jsonl"),
+    }
+
+    assert bridge.main(["artifact"], stdin=json.dumps(request)) == 0
+    payload = json.loads(capsys.readouterr().out)
+
+    assert payload["error"]["code"] == "bridge_experimental_disabled"
+    assert "UTOPIC_EXPERIMENTAL_BRIDGE=1" in payload["error"]["message"]
+    assert not output_dir.exists()
 
 
 def test_safe_run_preserves_import_error_message_without_module_name(tmp_path):

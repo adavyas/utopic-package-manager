@@ -89,6 +89,9 @@ HELP = """usage: utopic-bridge ENGINE
 Run a packaged Utopic bridge adapter. The adapter reads one utopic-bridge/v1
 JSON request from stdin and writes one JSON response to stdout.
 
+Generation is experimental and disabled unless UTOPIC_EXPERIMENTAL_BRIDGE=1
+is set. Use --check to inspect adapter dependencies without enabling runs.
+
 Known engines:
   diffusers   Qwen-Image, FLUX, and Krea image generation
   cosmos      Cosmos3 Super image generation
@@ -124,6 +127,23 @@ def main(argv: Optional[list[str]] = None, *, stdin: Optional[str] = None) -> in
     validation_error = _validate_bridge_request(adapter, request)
     if validation_error is not None:
         print(json.dumps(_error(adapter.engine, validation_error, "bridge_invalid_request", "", request=request)))
+        return 0
+    if not _experimental_bridge_enabled():
+        print(
+            json.dumps(
+                _error(
+                    adapter.engine,
+                    (
+                        "utopic-bridge generation is experimental and disabled by default. "
+                        "Set UTOPIC_EXPERIMENTAL_BRIDGE=1 to run this local Python adapter, "
+                        "or use the native runner/OpenAI/MCP surfaces for production paths."
+                    ),
+                    "bridge_experimental_disabled",
+                    "export UTOPIC_EXPERIMENTAL_BRIDGE=1",
+                    request=request,
+                )
+            )
+        )
         return 0
     missing = _missing_packages(adapter.packages)
     if missing:
@@ -178,6 +198,11 @@ def main(argv: Optional[list[str]] = None, *, stdin: Optional[str] = None) -> in
         )
     )
     return 0
+
+
+def _experimental_bridge_enabled() -> bool:
+    value = os.environ.get("UTOPIC_EXPERIMENTAL_BRIDGE", "")
+    return value.lower() in {"1", "true", "yes", "on"}
 
 
 def _print_run_result(adapter: BridgeAdapter, request: dict[str, Any], runner: object) -> None:
