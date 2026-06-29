@@ -19,7 +19,7 @@ CORE_CATALOG_PATH = (
     / "utopic_core"
     / "models.json"
 )
-EXPECTED_NATIVE_REF = "88347355de126f5f73f086acc9d475337625af0b"
+EXPECTED_NATIVE_REF = "63ae6901afaeca0811a6cf13d814e39b90d4636b"
 
 REQUIRED_NATIVE_RUNNER_FILES = {
     "runner.cpp",
@@ -582,7 +582,7 @@ def test_model_catalog_includes_first_multimodal_model_set():
         "flux-1-schnell": ("image", "bridge"),
         "krea-2-raw": ("image", "bridge"),
         "cosmos3-super": ("image", "bridge"),
-        "kokoro-82m": ("tts", "bridge"),
+        "kokoro-82m": ("tts", "native"),
         "chatterbox": ("tts", "bridge"),
         "dia-1.6b": ("tts", "bridge"),
         "ace-step-3.5b": ("music", "bridge"),

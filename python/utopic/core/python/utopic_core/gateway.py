@@ -939,6 +939,7 @@ def _native_runner_options(entry: models.ModelEntry, request: dict[str, Any]) ->
     if artifact_paths:
         options["artifact_paths"] = artifact_paths
         _apply_native_image_artifact_paths(options, artifact_paths)
+        _apply_native_sherpa_tts_artifact_paths(options, entry, artifact_paths)
     if entry.requirements:
         options["requirements"] = entry.requirements
     if entry.native_library:
@@ -950,9 +951,22 @@ def _native_runner_options(entry: models.ModelEntry, request: dict[str, Any]) ->
 
 def _native_library_path(native_library: str) -> Path:
     path = Path(native_library).expanduser()
+    path = _native_shared_library_path(path)
     if path.is_absolute() or path.parent != Path("."):
         return path
-    return installer.bin_dir() / native_library
+    return installer.bin_dir() / path
+
+
+def _native_shared_library_path(path: Path) -> Path:
+    if path.suffix:
+        return path
+    if sys.platform == "darwin":
+        suffix = ".dylib"
+    elif os.name == "nt":
+        suffix = ".dll"
+    else:
+        suffix = ".so"
+    return path.with_name(path.name + suffix)
 
 
 def _native_text_runner_response(
@@ -1049,6 +1063,23 @@ def _native_image_artifact_role(filename: str) -> Optional[str]:
     if "diffusion" in normalized or "unet" in normalized or "model" in normalized:
         return "diffusion_model_path"
     return None
+
+
+def _apply_native_sherpa_tts_artifact_paths(
+    options: dict[str, Any],
+    entry: models.ModelEntry,
+    artifact_paths: dict[str, str],
+) -> None:
+    if entry.modality != "tts" or entry.engine != "sherpa-onnx":
+        return
+    if "model.onnx" in artifact_paths:
+        options["model_path"] = artifact_paths["model.onnx"]
+    if "voices.bin" in artifact_paths:
+        options["voices_path"] = artifact_paths["voices.bin"]
+    if "tokens.txt" in artifact_paths:
+        options["tokens_path"] = artifact_paths["tokens.txt"]
+    if "espeak-ng-data" in artifact_paths:
+        options["data_dir"] = artifact_paths["espeak-ng-data"]
 
 
 def _parse_runner_json(stdout: str) -> tuple[Optional[dict[str, Any]], Optional[str]]:

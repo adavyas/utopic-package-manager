@@ -395,14 +395,14 @@
     "name": "Kokoro 82M",
     "family": "kokoro",
     "filename": "kokoro-82m",
-    "url": "https://huggingface.co/hexgrad/Kokoro-82M",
-    "repo": "hexgrad/Kokoro-82M",
-    "size": "82M parameters",
+    "url": "https://huggingface.co/csukuangfj/kokoro-en-v0_19",
+    "repo": "csukuangfj/kokoro-en-v0_19",
+    "size": "82M Sherpa-ONNX bundle",
     "recommended": false,
-    "description": "Tiny, fast open-weight TTS model for local speech synthesis.",
+    "description": "Tiny, fast open-weight TTS model for local speech synthesis. Native path uses the package-managed Sherpa-ONNX plugin when it is installed.",
     "modality": "tts",
-    "engine": "kokoro",
-    "runtime": "bridge",
+    "engine": "sherpa-onnx",
+    "runtime": "native",
     "hardware": [
       "mac-48gb",
       "gb10",
@@ -415,15 +415,25 @@
     "outputs": [
       "audio/wav"
     ],
-    "runner": "utopic-bridge:kokoro",
-    "native_status": "experimental",
+    "runner": "utopic_runner",
+    "native_status": "ready",
     "supported_backends": [
-      "metal",
+      "cpu",
       "cuda"
     ],
     "artifact_filenames": [
-      "speech.wav"
+      "model.onnx",
+      "tokens.txt",
+      "voices.bin",
+      "espeak-ng-data"
     ],
+    "artifact_urls": {
+      "model.onnx": "https://huggingface.co/csukuangfj/kokoro-en-v0_19/resolve/main/model.onnx",
+      "tokens.txt": "https://huggingface.co/csukuangfj/kokoro-en-v0_19/resolve/main/tokens.txt",
+      "voices.bin": "https://huggingface.co/csukuangfj/kokoro-en-v0_19/resolve/main/voices.bin",
+      "espeak-ng-data": "https://huggingface.co/api/models/csukuangfj/kokoro-en-v0_19/tree/main/espeak-ng-data?recursive=1"
+    },
+    "native_library": "utopic_sherpa_tts",
     "expected_vram_gib": 2,
     "expected_ram_gib": 4,
     "oom_policy": {

@@ -350,11 +350,15 @@ def _is_nonempty_file(path: Path) -> bool:
     return path.is_file() and path.stat().st_size > 0
 
 
+def _is_nonempty_dir(path: Path) -> bool:
+    return path.is_dir() and any(child.is_file() for child in path.rglob("*"))
+
+
 def is_model_downloaded(entry: ModelEntry) -> bool:
     if entry.runtime == "bridge":
         return (entry.path / "utopic-model.json").is_file()
     if _native_uses_artifact_directory(entry):
-        return all(_is_nonempty_file(_native_artifact_cache_path(entry, filename)) for filename in entry.artifact_filenames)
+        return all(_native_artifact_present(entry, filename) for filename in entry.artifact_filenames)
     if not _is_nonempty_file(entry.path):
         return False
     if entry.bytes is None:
@@ -364,6 +368,13 @@ def is_model_downloaded(entry: ModelEntry) -> bool:
 
 def _native_artifact_cache_path(entry: ModelEntry, filename: str) -> Path:
     return entry.path / _safe_artifact_filename(entry, filename)
+
+
+def _native_artifact_present(entry: ModelEntry, filename: str) -> bool:
+    path = _native_artifact_cache_path(entry, filename)
+    if _artifact_url_is_hf_tree(entry.artifact_urls.get(filename, "")):
+        return _is_nonempty_dir(path)
+    return _is_nonempty_file(path)
 
 
 def _is_empty_file(path: Path) -> bool:
@@ -510,15 +521,19 @@ def _pull_native_artifact_model(entry: ModelEntry, *, force: bool = False) -> Pa
         if filename not in entry.artifact_urls:
             raise RuntimeError(f"Native model '{entry.id}' is missing artifact URL for {filename}")
         target = _native_artifact_cache_path(entry, filename)
-        if target.exists() and _is_nonempty_file(target) and not force:
+        artifact_url = entry.artifact_urls[filename]
+        if target.exists() and _native_artifact_present(entry, filename) and not force:
+            continue
+        if _artifact_url_is_hf_tree(artifact_url):
+            _pull_native_hf_tree_artifact(entry, filename, artifact_url, target, force=force)
             continue
         tmp = target.with_name(target.name + ".partial")
         if tmp.exists():
             _remove_path(tmp)
         try:
             print(f"Pulling {entry.name} artifact {filename} from Hugging Face")
-            print(entry.artifact_urls[filename])
-            _copy_stream_with_progress(entry.artifact_urls[filename], tmp)
+            print(artifact_url)
+            _copy_stream_with_progress(artifact_url, tmp)
             if tmp.stat().st_size == 0:
                 raise OSError("downloaded 0 bytes")
             tmp.replace(target)
@@ -527,6 +542,90 @@ def _pull_native_artifact_model(entry: ModelEntry, *, force: bool = False) -> Pa
                 _remove_path(tmp)
             raise RuntimeError(f"Failed to pull {entry.id} artifact {filename}: {exc}") from exc
     return destination
+
+
+def _artifact_url_is_hf_tree(url: str) -> bool:
+    try:
+        parsed = urllib.parse.urlsplit(url)
+    except ValueError:
+        return False
+    return parsed.netloc == "huggingface.co" and "/tree/" in parsed.path and parsed.path.startswith("/api/models/")
+
+
+def _pull_native_hf_tree_artifact(
+    entry: ModelEntry,
+    filename: str,
+    url: str,
+    target: Path,
+    *,
+    force: bool,
+) -> None:
+    if target.exists() and force:
+        _remove_path(target)
+    target.mkdir(parents=True, exist_ok=True)
+    try:
+        print(f"Pulling {entry.name} artifact tree {filename} from Hugging Face")
+        print(url)
+        for item in _fetch_hf_tree_listing(url):
+            if not isinstance(item, dict) or item.get("type") != "file" or not isinstance(item.get("path"), str):
+                continue
+            remote_path = item["path"]
+            local_path = _hf_tree_local_path(target, filename, remote_path)
+            local_path.parent.mkdir(parents=True, exist_ok=True)
+            if local_path.exists() and _is_nonempty_file(local_path) and not force:
+                continue
+            tmp = local_path.with_name(local_path.name + ".partial")
+            if tmp.exists():
+                _remove_path(tmp)
+            _copy_stream_with_progress(_hf_tree_resolve_url(url, remote_path), tmp)
+            if tmp.stat().st_size == 0:
+                raise OSError(f"downloaded 0 bytes for {remote_path}")
+            tmp.replace(local_path)
+    except Exception as exc:
+        raise RuntimeError(f"Failed to pull {entry.id} artifact tree {filename}: {exc}") from exc
+
+
+def _fetch_hf_tree_listing(url: str) -> list[object]:
+    with urllib.request.urlopen(url) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+    if not isinstance(payload, list):
+        raise OSError("Hugging Face tree API did not return a JSON list")
+    return payload
+
+
+def _hf_tree_parts(url: str) -> tuple[str, str]:
+    parsed = urllib.parse.urlsplit(url)
+    parts = parsed.path.strip("/").split("/")
+    try:
+        tree_index = parts.index("tree")
+    except ValueError as exc:
+        raise OSError(f"invalid Hugging Face tree URL: {url}") from exc
+    if len(parts) < tree_index + 2 or parts[:2] != ["api", "models"]:
+        raise OSError(f"invalid Hugging Face tree URL: {url}")
+    repo = "/".join(parts[2:tree_index])
+    revision = parts[tree_index + 1]
+    if not repo or not revision:
+        raise OSError(f"invalid Hugging Face tree URL: {url}")
+    return repo, revision
+
+
+def _hf_tree_resolve_url(tree_url: str, remote_path: str) -> str:
+    repo, revision = _hf_tree_parts(tree_url)
+    quoted_path = urllib.parse.quote(remote_path, safe="/")
+    return f"https://huggingface.co/{repo}/resolve/{revision}/{quoted_path}"
+
+
+def _hf_tree_local_path(target: Path, artifact_name: str, remote_path: str) -> Path:
+    normalized_remote = Path(remote_path)
+    if normalized_remote.is_absolute() or any(part == ".." for part in normalized_remote.parts):
+        raise OSError(f"unsafe Hugging Face tree path: {remote_path}")
+    parts = normalized_remote.parts
+    if not parts or parts[0] != artifact_name:
+        raise OSError(f"Hugging Face tree path {remote_path} is outside artifact {artifact_name}")
+    relative_parts = parts[1:]
+    if not relative_parts:
+        raise OSError(f"Hugging Face tree path {remote_path} does not name a file")
+    return target.joinpath(*relative_parts)
 
 
 def resolve_model(value: Optional[str]) -> Path:

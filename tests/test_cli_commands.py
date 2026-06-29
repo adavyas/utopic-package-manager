@@ -1357,9 +1357,9 @@ def test_cli_generate_video_high_quality_invokes_gateway_and_copies_artifact(
             },
         ),
         (
-            ["speech", "kokoro-82m", "--input", "hello", "--voice", "af_heart"],
+            ["speech", "chatterbox", "--input", "hello", "--voice", "af_heart"],
             "/v1/audio/speech",
-            {"model": "kokoro-82m", "input": "hello", "voice": "af_heart"},
+            {"model": "chatterbox", "input": "hello", "voice": "af_heart"},
         ),
         (
             ["tts", "dia-1.6b", "--input", "hello", "--sample-rate", "44100"],

@@ -8,7 +8,9 @@ from pathlib import Path
 
 import pytest
 
-from utopic import __version__, bridge, cli, gateway, mcp
+from utopic import __version__, bridge, cli, gateway, mcp, models
+from utopic_core import runtime_env
+from utopic_core.models import ModelEntry
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -83,7 +85,6 @@ def test_gateway_models_endpoint_exposes_bridge_activation_for_all_bridge_models
         "flux-1-schnell",
         "krea-2-raw",
         "cosmos3-super",
-        "kokoro-82m",
         "chatterbox",
         "dia-1.6b",
         "ace-step-3.5b",
@@ -107,6 +108,54 @@ def test_gateway_models_endpoint_exposes_bridge_activation_for_all_bridge_models
     assert by_id["ltx-video"]["bridge"]["environment_variable"] == "UTOPIC_BRIDGE_LTX_COMMAND"
     assert by_id["cosmos3-super"]["bridge"]["command"] == "utopic-bridge cosmos"
     assert by_id["cosmos3-super"]["bridge"]["environment_variable"] == "UTOPIC_BRIDGE_COSMOS_COMMAND"
+
+
+def test_gateway_maps_native_sherpa_tts_artifacts_to_plugin_options(monkeypatch, tmp_path):
+    entry = ModelEntry(
+        id="kokoro-native-test",
+        name="Kokoro Native Test",
+        family="kokoro",
+        filename="kokoro-native-test",
+        url="https://huggingface.co/example/kokoro-native-test",
+        size="test",
+        recommended=False,
+        description="Native Kokoro test entry.",
+        modality="tts",
+        engine="sherpa-onnx",
+        runtime="native",
+        hardware=("local",),
+        endpoints=("/v1/audio/speech",),
+        outputs=("audio/wav",),
+        repo="example/kokoro-native-test",
+        runner="utopic_runner",
+        native_status="ready",
+        artifact_filenames=("model.onnx", "voices.bin", "tokens.txt", "espeak-ng-data"),
+        native_library="utopic_sherpa_tts",
+    )
+
+    class FakeInstaller:
+        @staticmethod
+        def bin_dir() -> Path:
+            return tmp_path / "bin"
+
+    monkeypatch.setattr(runtime_env, "_installer_api", FakeInstaller)
+    monkeypatch.setattr(gateway.sys, "platform", "darwin")
+    monkeypatch.setattr(models, "models_dir", lambda: tmp_path / "models")
+
+    options = gateway._native_runner_options(
+        entry,
+        {"input": "hello", "voice": "af_heart", "speaker_id": 2, "speed": 1.1},
+    )
+    model_dir = tmp_path / "models" / entry.id
+
+    assert options["native_library_path"] == str(tmp_path / "bin" / "utopic_sherpa_tts.dylib")
+    assert options["model_path"] == str(model_dir / "model.onnx")
+    assert options["voices_path"] == str(model_dir / "voices.bin")
+    assert options["tokens_path"] == str(model_dir / "tokens.txt")
+    assert options["data_dir"] == str(model_dir / "espeak-ng-data")
+    assert options["voice"] == "af_heart"
+    assert options["speaker_id"] == 2
+    assert options["speed"] == 1.1
 
 
 def test_gateway_cosmos_returns_oom_preflight_before_starting_bridge(monkeypatch):
@@ -201,17 +250,6 @@ def test_gateway_exposes_openai_routes_for_each_bridge_modality():
             "image",
             "diffusers",
             'pip install "utopic[image]"',
-        ),
-        (
-            "/v1/audio/speech",
-            {"model": "kokoro-82m", "input": "hello"},
-            "tts",
-            "kokoro",
-            (
-                'pip install "utopic[tts]" && python -m pip install '
-                "https://github.com/explosion/spacy-models/releases/download/"
-                "en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl"
-            ),
         ),
         (
             "/v1/audio/speech",
@@ -657,20 +695,20 @@ artifact = out_dir / "speech.wav"
 artifact.write_bytes(b"wav")
 print(json.dumps({{
     "artifacts": [{{"type": "audio/wav", "path": str(artifact), "metadata": {{"voice": "af_heart"}}}}],
-    "metadata": {{"schema_version": "utopic-bridge/v1", "engine": "kokoro"}}
+    "metadata": {{"schema_version": "utopic-bridge/v1", "engine": "chatterbox"}}
 }}))
 """.strip(),
         encoding="utf-8",
     )
     monkeypatch.setenv("UTOPIC_HOME", str(tmp_path / "cache"))
-    monkeypatch.setenv("UTOPIC_BRIDGE_KOKORO_COMMAND", f"{sys.executable} {script}")
+    monkeypatch.setenv("UTOPIC_BRIDGE_CHATTERBOX_COMMAND", f"{sys.executable} {script}")
 
     status, payload = decode(
         gateway.handle_openai_request(
             "POST",
             "/v1/responses",
             {
-                "model": "kokoro-82m",
+                "model": "chatterbox",
                 "experimental_bridge": True,
                 "input": [
                     {
@@ -1420,7 +1458,7 @@ print(json.dumps({{
         encoding="utf-8",
     )
     monkeypatch.setenv("UTOPIC_HOME", str(tmp_path / "cache"))
-    monkeypatch.setenv("UTOPIC_BRIDGE_KOKORO_COMMAND", f"{sys.executable} {script}")
+    monkeypatch.setenv("UTOPIC_BRIDGE_CHATTERBOX_COMMAND", f"{sys.executable} {script}")
     monkeypatch.setenv("UTOPIC_BRIDGE_ACE_STEP_COMMAND", f"{sys.executable} {script}")
     monkeypatch.setenv("UTOPIC_BRIDGE_ARTIFACT_COMMAND", f"{sys.executable} {script}")
     misc_source = tmp_path / "source.bin"
@@ -1429,11 +1467,11 @@ print(json.dumps({{
     for request_id, name, arguments in [
         (
             10,
-            "utopic_speak",
-            {
-                "model": "kokoro-82m",
-                "input": "hello from mcp",
-                "voice": "af_heart",
+                "utopic_speak",
+                {
+                    "model": "chatterbox",
+                    "input": "hello from mcp",
+                    "voice": "af_heart",
                 "experimental_bridge": True,
             },
         ),
