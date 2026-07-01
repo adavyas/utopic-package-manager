@@ -385,6 +385,15 @@ std::string hidream_o1_default_sd_cli() {
     return env_or("UTOPIC_HIDREAM_SDCLI", home_path("/stable-diffusion.cpp/build-gb10/bin/sd-cli"));
 }
 
+std::string hidream_o1_default_source_dir() {
+    return env_or("UTOPIC_HIDREAM_SOURCE_DIR",
+                  home_path("/.cache/utopic/src/HiDream-O1-Image"));
+}
+
+std::string hidream_o1_default_torch_python() {
+    return env_or("UTOPIC_HIDREAM_TORCH_PYTHON", "python3");
+}
+
 std::string build_hidream_o1_oracle_command(const HiDreamO1RunRequest& req) {
     const HiDreamO1RuntimeConfig cfg = default_hidream_o1_runtime_config();
     const int width = req.width > 0 ? req.width : 1024;
@@ -410,7 +419,36 @@ std::string build_hidream_o1_oracle_command(const HiDreamO1RunRequest& req) {
 }
 
 std::string build_hidream_o1_command(const HiDreamO1RunRequest& req) {
-    return build_hidream_o1_oracle_command(req);
+    const HiDreamO1RuntimeConfig cfg = default_hidream_o1_runtime_config();
+    const int width = req.width > 0 ? req.width : cfg.default_width;
+    const int height = req.height > 0 ? req.height : cfg.default_height;
+    const std::string python = req.torch_python.empty() ? hidream_o1_default_torch_python() : req.torch_python;
+    const std::string source_dir = req.source_dir.empty() ? hidream_o1_default_source_dir() : req.source_dir;
+    const std::string model_dir = req.model_dir.empty() ? hidream_o1_default_model_dir() : req.model_dir;
+
+    std::ostringstream cmd;
+    cmd << "cd " << shell_quote(source_dir)
+        << " && PYTHONPATH=" << shell_quote(source_dir)
+        << " UTOPIC_HIDREAM_USE_FLASH_ATTN="
+        << shell_quote(env_or("UTOPIC_HIDREAM_USE_FLASH_ATTN", "0"))
+        << " " << shell_quote(python)
+        << " " << shell_quote(join_path(source_dir, "inference.py"))
+        << " --model_path " << shell_quote(model_dir)
+        << " --prompt " << shell_quote(req.prompt)
+        << " --output_image " << shell_quote(req.output_path)
+        << " --height " << height
+        << " --width " << width
+        << " --model_type dev"
+        << " --seed " << req.seed
+        << " --shift " << cfg.default_shift
+        << " --guidance_scale " << cfg.default_guidance_scale
+        << " --noise_scale_start " << cfg.default_noise_scale_start
+        << " --noise_scale_end " << cfg.default_noise_scale_end
+        << " --noise_clip_std " << cfg.default_noise_clip_std;
+    if (!req.extra_args.empty()) {
+        cmd << " " << req.extra_args;
+    }
+    return cmd.str();
 }
 
 bool hidream_o1_file_exists(const std::string& path) {

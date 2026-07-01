@@ -69,6 +69,9 @@ using HiDreamO1X0Predictor = std::function<bool(const HiDreamO1ForwardTraceStep&
 
 struct HiDreamO1RunRequest {
     std::string sd_cli;
+    std::string torch_python;
+    std::string source_dir;
+    std::string model_dir;
     std::string model_path;
     std::string prompt;
     std::string output_path;
@@ -134,6 +137,8 @@ std::vector<unsigned char> hidream_o1_unpatch_to_rgb8(const std::vector<float>& 
 std::string hidream_o1_default_model_dir();
 std::string hidream_o1_default_model_path();
 std::string hidream_o1_default_sd_cli();
+std::string hidream_o1_default_source_dir();
+std::string hidream_o1_default_torch_python();
 std::string build_hidream_o1_oracle_command(const HiDreamO1RunRequest& req);
 std::string build_hidream_o1_command(const HiDreamO1RunRequest& req);
 bool hidream_o1_file_exists(const std::string& path);

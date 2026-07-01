@@ -10,11 +10,11 @@ namespace {
 
 void usage(const char* argv0) {
     std::fprintf(stderr,
-                 "usage: %s --prompt TEXT --out image.png [--model checkpoint.safetensors] [--sd-cli sd-cli] "
-                 "[--width 1024] [--height 1024] [--steps 28] [--seed 42] [--cfg-scale 1.0] [--extra-args ARGS] [--dry-run]\n",
+                 "usage: %s --prompt TEXT --out image.png [--model-dir DIR] [--source-dir DIR] [--torch-python PY] "
+                 "[--width 1024] [--height 1024] [--steps 28] [--seed 42] [--extra-args ARGS] [--dry-run]\n",
                  argv0);
     std::fprintf(stderr,
-                 "note: this is the sd.cpp oracle wrapper. The native Dev-2604 port uses the shard manifest/scheduler targets first.\n");
+                 "note: this is the non-sd.cpp HiDream Dev-2604 runner surface. It uses the official Pixel-DiT Torch implementation until the C++ transformer predictor is complete.\n");
 }
 
 bool consume(std::string arg, const char* name) {
@@ -44,13 +44,14 @@ bool ensure_parent_dir(const std::string& path) {
 int main(int argc, char** argv) {
     const utopic::HiDreamO1RuntimeConfig cfg = utopic::default_hidream_o1_runtime_config();
     utopic::HiDreamO1RunRequest req;
-    req.sd_cli = utopic::hidream_o1_default_sd_cli();
-    req.model_path = utopic::hidream_o1_default_model_path();
+    req.torch_python = utopic::hidream_o1_default_torch_python();
+    req.source_dir = utopic::hidream_o1_default_source_dir();
+    req.model_dir = utopic::hidream_o1_default_model_dir();
     req.width = 1024;
     req.height = 1024;
     req.steps = cfg.default_steps;
     req.seed = 42;
-    req.cfg_scale = 1.0f;
+    req.cfg_scale = cfg.default_guidance_scale;
 
     bool dry_run = false;
     for (int i = 1; i < argc; ++i) {
@@ -62,10 +63,12 @@ int main(int argc, char** argv) {
             req.prompt = argv[++i];
         } else if (consume(a, "--out") && i + 1 < argc) {
             req.output_path = argv[++i];
-        } else if (consume(a, "--model") && i + 1 < argc) {
-            req.model_path = argv[++i];
-        } else if (consume(a, "--sd-cli") && i + 1 < argc) {
-            req.sd_cli = argv[++i];
+        } else if ((consume(a, "--model-dir") || consume(a, "--model")) && i + 1 < argc) {
+            req.model_dir = argv[++i];
+        } else if (consume(a, "--source-dir") && i + 1 < argc) {
+            req.source_dir = argv[++i];
+        } else if (consume(a, "--torch-python") && i + 1 < argc) {
+            req.torch_python = argv[++i];
         } else if (consume(a, "--width") && i + 1 < argc) {
             req.width = std::atoi(argv[++i]);
         } else if (consume(a, "--height") && i + 1 < argc) {
@@ -99,10 +102,11 @@ int main(int argc, char** argv) {
     const utopic::HiDreamO1Shape shape = utopic::hidream_o1_shape_for_size(cfg, req.width, req.height);
     const std::string cmd = utopic::build_hidream_o1_command(req);
     std::fprintf(stderr,
-                 "utopic_hidream_o1 model=%s backend=sd.cpp-oracle checkpoint=%s sd_cli=%s width=%d height=%d patch_tokens=%lld patch_dim=%d steps=%d cfg=%.3f seed=%d native_status=%s\n",
+                 "utopic_hidream_o1 model=%s backend=official-torch-reference-no-sdcpp model_dir=%s source_dir=%s torch_python=%s width=%d height=%d patch_tokens=%lld patch_dim=%d steps=%d cfg=%.3f seed=%d native_status=%s\n",
                  cfg.model_id,
-                 req.model_path.c_str(),
-                 req.sd_cli.c_str(),
+                 req.model_dir.c_str(),
+                 req.source_dir.c_str(),
+                 req.torch_python.c_str(),
                  req.width,
                  req.height,
                  static_cast<long long>(shape.patch_tokens),
@@ -116,12 +120,16 @@ int main(int argc, char** argv) {
     if (dry_run) {
         return 0;
     }
-    if (!utopic::hidream_o1_file_exists(req.sd_cli)) {
-        std::fprintf(stderr, "utopic_hidream_o1: missing sd.cpp oracle backend binary: %s\n", req.sd_cli.c_str());
+    if (!utopic::hidream_o1_file_exists(req.torch_python)) {
+        std::fprintf(stderr, "utopic_hidream_o1: missing torch python: %s\n", req.torch_python.c_str());
         return 1;
     }
-    if (!utopic::hidream_o1_file_exists(req.model_path)) {
-        std::fprintf(stderr, "utopic_hidream_o1: missing HiDream-O1 checkpoint: %s\n", req.model_path.c_str());
+    if (!utopic::hidream_o1_dir_exists(req.source_dir)) {
+        std::fprintf(stderr, "utopic_hidream_o1: missing HiDream-O1 source dir: %s\n", req.source_dir.c_str());
+        return 1;
+    }
+    if (!utopic::hidream_o1_dir_exists(req.model_dir)) {
+        std::fprintf(stderr, "utopic_hidream_o1: missing HiDream-O1 model dir: %s\n", req.model_dir.c_str());
         return 1;
     }
     if (!ensure_parent_dir(req.output_path)) {
@@ -130,7 +138,7 @@ int main(int argc, char** argv) {
     }
     const int rc = std::system(cmd.c_str());
     if (rc != 0) {
-        std::fprintf(stderr, "utopic_hidream_o1: sd.cpp oracle backend failed with code %d\n", rc);
+        std::fprintf(stderr, "utopic_hidream_o1: official torch backend failed with code %d\n", rc);
         return 1;
     }
     if (!utopic::hidream_o1_file_exists(req.output_path)) {

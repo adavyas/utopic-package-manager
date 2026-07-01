@@ -1029,41 +1029,34 @@ def _run_native_hidream_o1(
     prompt = str(request.get("prompt") or "")
     if not prompt:
         return _native_runner_failed(entry, "prompt is required", run_id=run_id, progress_path=progress_path)
-    if os.environ.get("UTOPIC_HIDREAM_ALLOW_ORACLE", "") not in {"1", "true", "TRUE", "yes", "YES"}:
-        return _native_runner_failed(
-            entry,
-            "hidream-o1 native Dev-2604 path is in progress; sd.cpp oracle is disabled by default",
-            run_id=run_id,
-            progress_path=progress_path,
-        )
     output_path = output_dir / "image.png"
     try:
         native_hidream = str(_native_binary_path("utopic_hidream_o1"))
     except RuntimeError as exc:
         return _native_runner_failed(entry, str(exc), run_id=run_id, progress_path=progress_path)
-    checkpoint_path = models._native_artifact_cache_path(entry, entry.filename)
+    model_dir = request.get("model_dir") or os.environ.get("UTOPIC_HIDREAM_MODEL_DIR")
+    if not isinstance(model_dir, str) or not model_dir:
+        model_dir = str(models._native_artifact_cache_path(entry, entry.filename).parent)
     command = [
         native_hidream,
         "--prompt",
         prompt,
         "--out",
         str(output_path),
-        "--model",
-        str(checkpoint_path),
+        "--model-dir",
+        model_dir,
     ]
     for request_key, flag in (
         ("width", "--width"),
         ("height", "--height"),
         ("steps", "--steps"),
         ("seed", "--seed"),
-        ("cfg_scale", "--cfg-scale"),
+        ("source_dir", "--source-dir"),
+        ("torch_python", "--torch-python"),
     ):
         value = request.get(request_key)
         if value is not None:
             command.extend([flag, str(value)])
-    sd_cli = request.get("sd_cli")
-    if isinstance(sd_cli, str) and sd_cli:
-        command.extend(["--sd-cli", sd_cli])
     extra_args = request.get("extra_args")
     if isinstance(extra_args, str) and extra_args:
         command.extend(["--extra-args", extra_args])
@@ -1081,7 +1074,7 @@ def _run_native_hidream_o1(
                     for key, value in request.items()
                     if key not in {"model", "prompt", "input", "messages", "response_format"}
                 },
-                "checkpoint_path": str(checkpoint_path),
+                "model_dir": model_dir,
                 "output_dir": str(output_dir),
                 "progress_path": str(progress_path),
             },

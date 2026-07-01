@@ -336,7 +336,7 @@ out.write_bytes(b"RIFF....WAVEfmt ")
     assert args[args.index("--seed") + 1] == "123"
 
 
-def test_gateway_blocks_hidream_o1_oracle_by_default(tmp_path, monkeypatch):
+def test_gateway_runs_hidream_o1_non_sdcpp_runner(tmp_path, monkeypatch):
     script = tmp_path / "utopic_hidream_o1"
     captured = tmp_path / "captured.json"
     script.write_text(
@@ -373,58 +373,8 @@ out.write_bytes(b"PNG")
             "height": 1024,
             "steps": 28,
             "seed": 123,
-            "cfg_scale": 1.0,
-            "sd_cli": "/opt/sd-cli",
-        },
-    )
-
-    assert status == 502
-    assert headers["content-type"] == "application/json"
-    payload = json.loads(body.decode("utf-8"))
-    assert "native Dev-2604 path is in progress" in payload["error"]["message"]
-    assert not captured.exists()
-
-
-def test_gateway_runs_hidream_o1_oracle_when_explicitly_enabled(tmp_path, monkeypatch):
-    script = tmp_path / "utopic_hidream_o1"
-    captured = tmp_path / "captured.json"
-    script.write_text(
-        f"""#!/usr/bin/env python3
-import json
-import pathlib
-import sys
-
-args = sys.argv[1:]
-captured = {str(captured)!r}
-with pathlib.Path(captured).open("w", encoding="utf-8") as handle:
-    json.dump(args, handle)
-out = pathlib.Path(args[args.index("--out") + 1])
-out.parent.mkdir(parents=True, exist_ok=True)
-out.write_bytes(b"PNG")
-""".strip(),
-        encoding="utf-8",
-    )
-    script.chmod(0o755)
-    monkeypatch.setenv("UTOPIC_HIDREAM_ALLOW_ORACLE", "1")
-    monkeypatch.setenv("UTOPIC_HOME", str(tmp_path / "cache"))
-    monkeypatch.setattr(
-        gateway,
-        "_native_binary_path",
-        lambda name: script if name == "utopic_hidream_o1" else tmp_path / name,
-    )
-
-    status, headers, body = gateway.handle_openai_request(
-        "POST",
-        "/v1/images/generations",
-        {
-            "model": "hidream-o1",
-            "prompt": "a photorealistic studio portrait",
-            "width": 1024,
-            "height": 1024,
-            "steps": 28,
-            "seed": 123,
-            "cfg_scale": 1.0,
-            "sd_cli": "/opt/sd-cli",
+            "source_dir": "/src/HiDream-O1-Image",
+            "torch_python": "/venv/bin/python",
         },
     )
 
@@ -438,15 +388,15 @@ out.write_bytes(b"PNG")
     assert Path(payload["artifacts"][0]["path"]).read_bytes() == b"PNG"
     args = json.loads(captured.read_text(encoding="utf-8"))
     assert args[:2] == ["--prompt", "a photorealistic studio portrait"]
-    assert args[args.index("--model") + 1].endswith(
-        "models/hidream-o1/model.safetensors.index.json"
-    )
+    assert args[args.index("--model-dir") + 1].endswith("models/hidream-o1")
     assert args[args.index("--width") + 1] == "1024"
     assert args[args.index("--height") + 1] == "1024"
     assert args[args.index("--steps") + 1] == "28"
     assert args[args.index("--seed") + 1] == "123"
-    assert args[args.index("--cfg-scale") + 1] == "1.0"
-    assert args[args.index("--sd-cli") + 1] == "/opt/sd-cli"
+    assert args[args.index("--source-dir") + 1] == "/src/HiDream-O1-Image"
+    assert args[args.index("--torch-python") + 1] == "/venv/bin/python"
+    assert "--cfg-scale" not in args
+    assert "--sd-cli" not in args
 
 
 def test_every_bridge_catalog_model_has_openai_and_mcp_runtime_surface():
