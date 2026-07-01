@@ -132,6 +132,11 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "utopic_hidream_o1: missing HiDream-O1 model dir: %s\n", req.model_dir.c_str());
         return 1;
     }
+    std::string patch_error;
+    if (!utopic::hidream_o1_patch_official_source_for_flash_env(req.source_dir, &patch_error)) {
+        std::fprintf(stderr, "utopic_hidream_o1: failed to prepare official HiDream source: %s\n", patch_error.c_str());
+        return 1;
+    }
     if (!ensure_parent_dir(req.output_path)) {
         std::fprintf(stderr, "utopic_hidream_o1: failed to create output directory for: %s\n", req.output_path.c_str());
         return 1;

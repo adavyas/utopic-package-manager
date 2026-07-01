@@ -143,6 +143,7 @@ std::string build_hidream_o1_oracle_command(const HiDreamO1RunRequest& req);
 std::string build_hidream_o1_command(const HiDreamO1RunRequest& req);
 bool hidream_o1_file_exists(const std::string& path);
 bool hidream_o1_dir_exists(const std::string& path);
+bool hidream_o1_patch_official_source_for_flash_env(const std::string& source_dir, std::string* error);
 bool load_hidream_o1_shard_manifest(const std::string& model_dir, HiDreamO1ShardManifest* manifest);
 HiDreamO1SafetensorsHeader inspect_hidream_o1_safetensors_header(const std::string& file_path);
 

@@ -461,6 +461,44 @@ bool hidream_o1_dir_exists(const std::string& path) {
     return !path.empty() && stat(path.c_str(), &st) == 0 && S_ISDIR(st.st_mode);
 }
 
+bool hidream_o1_patch_official_source_for_flash_env(const std::string& source_dir, std::string* error) {
+    const std::string pipeline_path = join_path(source_dir, "models/pipeline.py");
+    std::string text;
+    if (!read_text_file(pipeline_path, &text)) {
+        if (error) *error = "missing or unreadable official HiDream pipeline: " + pipeline_path;
+        return false;
+    }
+    if (text.find("UTOPIC_HIDREAM_USE_FLASH_ATTN") != std::string::npos) {
+        return true;
+    }
+    const std::string import_needle = "import torch\n";
+    const std::string flash_needle = "\"use_flash_attn\": True";
+    const std::string flash_replacement =
+        "\"use_flash_attn\": os.environ.get(\"UTOPIC_HIDREAM_USE_FLASH_ATTN\", \"1\").lower() not in (\"0\", \"false\", \"no\")";
+
+    size_t import_pos = text.find(import_needle);
+    size_t flash_pos = text.find(flash_needle);
+    if (import_pos == std::string::npos || flash_pos == std::string::npos) {
+        if (error) *error = "official HiDream pipeline does not match expected flash-attn hook shape";
+        return false;
+    }
+    text.replace(import_pos, import_needle.size(), "import os\n" + import_needle);
+    flash_pos = text.find(flash_needle);
+    text.replace(flash_pos, flash_needle.size(), flash_replacement);
+
+    std::ofstream out(pipeline_path, std::ios::binary | std::ios::trunc);
+    if (!out) {
+        if (error) *error = "failed to open official HiDream pipeline for patching: " + pipeline_path;
+        return false;
+    }
+    out.write(text.data(), static_cast<std::streamsize>(text.size()));
+    if (!out) {
+        if (error) *error = "failed to write official HiDream pipeline patch: " + pipeline_path;
+        return false;
+    }
+    return true;
+}
+
 bool load_hidream_o1_shard_manifest(const std::string& model_dir, HiDreamO1ShardManifest* manifest) {
     if (manifest == nullptr) return false;
     *manifest = HiDreamO1ShardManifest{};
