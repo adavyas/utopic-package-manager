@@ -397,7 +397,7 @@
     "filename": "model.safetensors.index.json",
     "url": "https://huggingface.co/HiDream-ai/HiDream-O1-Image-Dev-2604",
     "repo": "HiDream-ai/HiDream-O1-Image-Dev-2604",
-    "size": "35.2 GB BF16 sharded checkpoint",
+    "size": "35.2 GB F32 sharded checkpoint",
     "recommended": false,
     "description": "SOTA open-weight image target under native Utopic port. sd.cpp is oracle-only; the active native path starts with Dev-2604 shard loading, scheduler parity, and staged transformer gates.",
     "modality": "image",
