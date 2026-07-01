@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <string>
 #include <vector>
@@ -34,6 +35,37 @@ struct HiDreamO1Shape {
     int64_t patch_tokens = 0;
     int64_t pixel_values = 0;
 };
+
+struct HiDreamO1ForwardPlan {
+    int width = 0;
+    int height = 0;
+    int h_patches = 0;
+    int w_patches = 0;
+    int patch_size = 0;
+    int patch_dim = 0;
+    int64_t text_tokens = 0;
+    int64_t timestep_token_begin = 0;
+    int64_t image_token_begin = 0;
+    int64_t image_tokens = 0;
+    int64_t total_sequence_tokens = 0;
+    std::vector<int> raw_token_types;
+    std::vector<unsigned char> token_types_bin;
+    std::vector<unsigned char> vinput_mask;
+};
+
+struct HiDreamO1ForwardTraceStep {
+    int step_index = 0;
+    int timestep = 0;
+    float sigma = 0.0f;
+    float sigma_next = 0.0f;
+    float t_pixeldit = 0.0f;
+    float noise_scale = 0.0f;
+};
+
+using HiDreamO1X0Predictor = std::function<bool(const HiDreamO1ForwardTraceStep& step,
+                                                const std::vector<float>& current_z,
+                                                std::vector<float>* x0_pred,
+                                                std::string* error)>;
 
 struct HiDreamO1RunRequest {
     std::string sd_cli;
@@ -71,8 +103,34 @@ struct HiDreamO1SafetensorsHeader {
 
 HiDreamO1RuntimeConfig default_hidream_o1_runtime_config();
 HiDreamO1Shape hidream_o1_shape_for_size(const HiDreamO1RuntimeConfig& cfg, int width, int height);
+HiDreamO1ForwardPlan hidream_o1_build_t2i_forward_plan(const HiDreamO1RuntimeConfig& cfg,
+                                                       int width,
+                                                       int height,
+                                                       int64_t text_tokens);
 std::vector<int> hidream_o1_dev_timesteps();
 std::vector<float> hidream_o1_dev_sigmas();
+std::vector<float> hidream_o1_noise_scale_schedule(const HiDreamO1RuntimeConfig& cfg, int steps);
+float hidream_o1_t_pixeldit(int timestep);
+std::vector<float> hidream_o1_x0_to_model_output(const std::vector<float>& x0_pred,
+                                                 const std::vector<float>& z,
+                                                 float sigma);
+std::vector<float> hidream_o1_flash_step(const std::vector<float>& sample,
+                                         const std::vector<float>& model_output,
+                                         const std::vector<float>& noise,
+                                         float sigma,
+                                         float sigma_next,
+                                         float s_noise,
+                                         float noise_clip_std);
+bool hidream_o1_run_forward_loop(const std::vector<float>& initial_z,
+                                 const std::vector<std::vector<float>>& noise_by_step,
+                                 const HiDreamO1X0Predictor& predict_x0,
+                                 std::vector<float>* final_z,
+                                 std::vector<HiDreamO1ForwardTraceStep>* trace,
+                                 std::string* error);
+std::vector<unsigned char> hidream_o1_unpatch_to_rgb8(const std::vector<float>& patch_tokens,
+                                                      int width,
+                                                      int height,
+                                                      const HiDreamO1RuntimeConfig& cfg);
 std::string hidream_o1_default_model_dir();
 std::string hidream_o1_default_model_path();
 std::string hidream_o1_default_sd_cli();

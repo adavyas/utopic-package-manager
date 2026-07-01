@@ -1,6 +1,7 @@
 #include "hidream_o1_native.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
@@ -9,6 +10,7 @@
 #include <sstream>
 #include <string>
 #include <sys/stat.h>
+#include <vector>
 
 namespace utopic {
 
@@ -121,6 +123,19 @@ uint64_t read_le_u64(const unsigned char bytes[8]) {
     return v;
 }
 
+float unbiased_stddev(const std::vector<float>& values) {
+    if (values.size() < 2) return 0.0f;
+    double mean = 0.0;
+    for (float v : values) mean += v;
+    mean /= static_cast<double>(values.size());
+    double accum = 0.0;
+    for (float v : values) {
+        const double d = static_cast<double>(v) - mean;
+        accum += d * d;
+    }
+    return static_cast<float>(std::sqrt(accum / static_cast<double>(values.size() - 1)));
+}
+
 }  // namespace
 
 HiDreamO1RuntimeConfig default_hidream_o1_runtime_config() {
@@ -141,6 +156,42 @@ HiDreamO1Shape hidream_o1_shape_for_size(const HiDreamO1RuntimeConfig& cfg, int 
     return shape;
 }
 
+HiDreamO1ForwardPlan hidream_o1_build_t2i_forward_plan(const HiDreamO1RuntimeConfig& cfg,
+                                                       int width,
+                                                       int height,
+                                                       int64_t text_tokens) {
+    HiDreamO1ForwardPlan plan;
+    plan.width = width;
+    plan.height = height;
+    plan.patch_size = cfg.patch_size;
+    plan.patch_dim = cfg.patch_size * cfg.patch_size * 3;
+    if (width <= 0 || height <= 0 || cfg.patch_size <= 0 || width % cfg.patch_size != 0 || height % cfg.patch_size != 0 ||
+        text_tokens < 0) {
+        return plan;
+    }
+    plan.h_patches = height / cfg.patch_size;
+    plan.w_patches = width / cfg.patch_size;
+    plan.text_tokens = text_tokens;
+    plan.timestep_token_begin = text_tokens;
+    plan.image_token_begin = plan.timestep_token_begin + cfg.timestep_token_num;
+    plan.image_tokens = static_cast<int64_t>(plan.h_patches) * static_cast<int64_t>(plan.w_patches);
+    plan.total_sequence_tokens = plan.image_token_begin + plan.image_tokens;
+    plan.raw_token_types.assign(static_cast<size_t>(plan.total_sequence_tokens), 0);
+    plan.token_types_bin.assign(static_cast<size_t>(plan.total_sequence_tokens), 0);
+    plan.vinput_mask.assign(static_cast<size_t>(plan.total_sequence_tokens), 0);
+
+    for (int64_t i = plan.timestep_token_begin; i < plan.image_token_begin; ++i) {
+        plan.raw_token_types[static_cast<size_t>(i)] = 3;
+        plan.token_types_bin[static_cast<size_t>(i)] = 1;
+    }
+    for (int64_t i = plan.image_token_begin; i < plan.total_sequence_tokens; ++i) {
+        plan.raw_token_types[static_cast<size_t>(i)] = 1;
+        plan.token_types_bin[static_cast<size_t>(i)] = 1;
+        plan.vinput_mask[static_cast<size_t>(i)] = 1;
+    }
+    return plan;
+}
+
 std::vector<int> hidream_o1_dev_timesteps() {
     return {999, 987, 974, 960, 945, 929, 913, 895, 877, 857, 836, 814, 790, 764,
             737, 707, 675, 640, 602, 560, 515, 464, 409, 347, 278, 199, 110, 8};
@@ -155,6 +206,169 @@ std::vector<float> hidream_o1_dev_sigmas() {
     }
     sigmas.push_back(0.0f);
     return sigmas;
+}
+
+std::vector<float> hidream_o1_noise_scale_schedule(const HiDreamO1RuntimeConfig& cfg, int steps) {
+    if (steps <= 0) return {};
+    std::vector<float> schedule(static_cast<size_t>(steps), cfg.default_noise_scale_start);
+    if (steps == 1) return schedule;
+    for (int i = 0; i < steps; ++i) {
+        const float r = static_cast<float>(i) / static_cast<float>(steps - 1);
+        schedule[static_cast<size_t>(i)] = cfg.default_noise_scale_start +
+                                           (cfg.default_noise_scale_end - cfg.default_noise_scale_start) * r;
+    }
+    return schedule;
+}
+
+float hidream_o1_t_pixeldit(int timestep) {
+    return 1.0f - static_cast<float>(timestep) / 1000.0f;
+}
+
+std::vector<float> hidream_o1_x0_to_model_output(const std::vector<float>& x0_pred,
+                                                 const std::vector<float>& z,
+                                                 float sigma) {
+    if (x0_pred.size() != z.size() || sigma == 0.0f) return {};
+    std::vector<float> out(z.size());
+    for (size_t i = 0; i < z.size(); ++i) {
+        const float v = (x0_pred[i] - z[i]) / sigma;
+        out[i] = -v;
+    }
+    return out;
+}
+
+std::vector<float> hidream_o1_flash_step(const std::vector<float>& sample,
+                                         const std::vector<float>& model_output,
+                                         const std::vector<float>& noise,
+                                         float sigma,
+                                         float sigma_next,
+                                         float s_noise,
+                                         float noise_clip_std) {
+    if (sample.size() != model_output.size() || sample.size() != noise.size()) return {};
+    std::vector<float> clipped_noise = noise;
+    if (noise_clip_std > 0.0f) {
+        const float stddev = unbiased_stddev(clipped_noise);
+        const float clip_val = noise_clip_std * stddev;
+        if (clip_val > 0.0f) {
+            for (float& v : clipped_noise) {
+                v = std::max(-clip_val, std::min(clip_val, v));
+            }
+        }
+    }
+
+    std::vector<float> prev(sample.size());
+    for (size_t i = 0; i < sample.size(); ++i) {
+        const float denoised = sample[i] - model_output[i] * sigma;
+        prev[i] = sigma_next * clipped_noise[i] * s_noise + (1.0f - sigma_next) * denoised;
+    }
+    return prev;
+}
+
+bool hidream_o1_run_forward_loop(const std::vector<float>& initial_z,
+                                 const std::vector<std::vector<float>>& noise_by_step,
+                                 const HiDreamO1X0Predictor& predict_x0,
+                                 std::vector<float>* final_z,
+                                 std::vector<HiDreamO1ForwardTraceStep>* trace,
+                                 std::string* error) {
+    if (initial_z.empty()) {
+        if (error) *error = "initial_z is empty";
+        return false;
+    }
+    if (!predict_x0) {
+        if (error) *error = "missing x0 predictor";
+        return false;
+    }
+
+    const HiDreamO1RuntimeConfig cfg = default_hidream_o1_runtime_config();
+    const std::vector<int> timesteps = hidream_o1_dev_timesteps();
+    const std::vector<float> sigmas = hidream_o1_dev_sigmas();
+    const std::vector<float> noise_schedule = hidream_o1_noise_scale_schedule(cfg, static_cast<int>(timesteps.size()));
+    if (sigmas.size() != timesteps.size() + 1 || noise_schedule.size() != timesteps.size()) {
+        if (error) *error = "scheduler shape mismatch";
+        return false;
+    }
+
+    std::vector<float> current = initial_z;
+    if (trace) trace->clear();
+    for (size_t i = 0; i < timesteps.size(); ++i) {
+        HiDreamO1ForwardTraceStep step;
+        step.step_index = static_cast<int>(i);
+        step.timestep = timesteps[i];
+        step.sigma = sigmas[i];
+        step.sigma_next = sigmas[i + 1];
+        step.t_pixeldit = hidream_o1_t_pixeldit(step.timestep);
+        step.noise_scale = noise_schedule[i];
+
+        std::vector<float> x0_pred;
+        std::string predictor_error;
+        if (!predict_x0(step, current, &x0_pred, &predictor_error)) {
+            if (error) *error = predictor_error.empty() ? "x0 predictor failed" : predictor_error;
+            return false;
+        }
+        const std::vector<float> model_output = hidream_o1_x0_to_model_output(x0_pred, current, step.sigma);
+        if (model_output.empty()) {
+            if (error) *error = "x0 predictor returned wrong shape";
+            return false;
+        }
+
+        std::vector<float> noise(current.size(), 0.0f);
+        if (i < noise_by_step.size() && !noise_by_step[i].empty()) {
+            if (noise_by_step[i].size() != current.size()) {
+                if (error) *error = "noise vector shape mismatch";
+                return false;
+            }
+            noise = noise_by_step[i];
+        }
+
+        current = hidream_o1_flash_step(current,
+                                        model_output,
+                                        noise,
+                                        step.sigma,
+                                        step.sigma_next,
+                                        step.noise_scale,
+                                        cfg.default_noise_clip_std);
+        if (current.empty()) {
+            if (error) *error = "flash scheduler step failed";
+            return false;
+        }
+        if (trace) trace->push_back(step);
+    }
+
+    if (final_z) *final_z = std::move(current);
+    return true;
+}
+
+std::vector<unsigned char> hidream_o1_unpatch_to_rgb8(const std::vector<float>& patch_tokens,
+                                                      int width,
+                                                      int height,
+                                                      const HiDreamO1RuntimeConfig& cfg) {
+    const HiDreamO1Shape shape = hidream_o1_shape_for_size(cfg, width, height);
+    if (shape.patch_tokens <= 0 || shape.patch_dim <= 0) return {};
+    const int h_patches = height / cfg.patch_size;
+    const int w_patches = width / cfg.patch_size;
+    const size_t expected = static_cast<size_t>(shape.patch_tokens) * static_cast<size_t>(shape.patch_dim);
+    if (patch_tokens.size() != expected) return {};
+
+    std::vector<unsigned char> rgb(static_cast<size_t>(width) * static_cast<size_t>(height) * 3, 0);
+    for (int py_patch = 0; py_patch < h_patches; ++py_patch) {
+        for (int px_patch = 0; px_patch < w_patches; ++px_patch) {
+            const int64_t token = static_cast<int64_t>(py_patch) * w_patches + px_patch;
+            const size_t token_base = static_cast<size_t>(token) * static_cast<size_t>(shape.patch_dim);
+            for (int c = 0; c < 3; ++c) {
+                const size_t channel_base = token_base + static_cast<size_t>(c) * cfg.patch_size * cfg.patch_size;
+                for (int y = 0; y < cfg.patch_size; ++y) {
+                    for (int x = 0; x < cfg.patch_size; ++x) {
+                        const int out_y = py_patch * cfg.patch_size + y;
+                        const int out_x = px_patch * cfg.patch_size + x;
+                        const float normalized = (patch_tokens[channel_base + static_cast<size_t>(y) * cfg.patch_size + x] + 1.0f) * 0.5f;
+                        const float clamped = std::max(0.0f, std::min(1.0f, normalized));
+                        const int quantized = static_cast<int>(std::lround(clamped * 255.0f));
+                        rgb[(static_cast<size_t>(out_y) * width + out_x) * 3 + c] = static_cast<unsigned char>(std::max(0, std::min(255, quantized)));
+                    }
+                }
+            }
+        }
+    }
+    return rgb;
 }
 
 std::string hidream_o1_default_model_dir() {
