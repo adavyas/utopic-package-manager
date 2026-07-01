@@ -198,7 +198,12 @@ def _validate_catalog_entry(item: object, index: int) -> ModelEntry:
     if not isinstance(artifact_urls, dict):
         raise RuntimeError(f"Invalid model catalog entry {index}: artifact_urls must be an object")
     _validate_artifact_urls(artifact_urls, artifact_filenames, index)
-    if runtime == "native" and native_library is None and not item["filename"].lower().endswith(".gguf"):
+    if (
+        runtime == "native"
+        and native_library is None
+        and not artifact_urls
+        and not item["filename"].lower().endswith(".gguf")
+    ):
         raise RuntimeError(
             f"Invalid model catalog entry {index}: native GGUF models must use a GGUF filename"
         )

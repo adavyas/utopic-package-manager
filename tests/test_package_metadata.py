@@ -19,7 +19,7 @@ CORE_CATALOG_PATH = (
     / "utopic_core"
     / "models.json"
 )
-EXPECTED_NATIVE_REF = "79cb9c5fd757f7fdf2f84e7165a935f6ac77cc46"
+EXPECTED_NATIVE_REF = "03d652431b6c3f4e6ed1f59a475a6e76beb30b6d"
 
 REQUIRED_NATIVE_RUNNER_FILES = {
     "runner.cpp",
@@ -35,6 +35,9 @@ REQUIRED_NATIVE_RUNNER_FILES = {
     "sherpa_tts_plugin.cpp",
     "image_engine.cpp",
     "image_engine.h",
+    "core/hidream_o1_native.cpp",
+    "core/hidream_o1_native.h",
+    "tools/utopic_hidream_o1.cpp",
     "video_engine.cpp",
     "video_engine.h",
 }
@@ -582,6 +585,7 @@ def test_model_catalog_includes_first_multimodal_model_set():
         "flux-1-schnell": ("image", "bridge"),
         "krea-2-raw": ("image", "bridge"),
         "cosmos3-super": ("image", "bridge"),
+        "hidream-o1": ("image", "native"),
         "kokoro-82m": ("tts", "native"),
         "chatterbox": ("tts", "bridge"),
         "dia-1.6b": ("tts", "bridge"),
@@ -598,6 +602,8 @@ def test_model_catalog_includes_first_multimodal_model_set():
 
     assert by_id["cosmos3-super"]["requirements"]["min_gpu_memory_gib"] == 96
     assert by_id["cosmos3-super"]["requirements"]["allow_cpu"] is False
+    assert by_id["hidream-o1"]["runner"] == "utopic_hidream_o1"
+    assert by_id["hidream-o1"]["artifact_filenames"] == ["hidream_o1_image_dev_bf16.safetensors"]
     assert "mac-48gb" not in by_id["krea-2-raw"]["hardware"]
 
 

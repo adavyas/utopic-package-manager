@@ -18,12 +18,20 @@ PACKAGED_CORE_DIR = PACKAGE_DIR / "core"
 PACKAGED_NATIVE_DIR = PACKAGED_CORE_DIR / "native"
 PACKAGED_CMAKE_DIR = PACKAGE_DIR / "cmake"
 UTOPIC_NATIVE_REPO = "https://github.com/adavyas/utopic.git"
-UTOPIC_NATIVE_REF = "79cb9c5fd757f7fdf2f84e7165a935f6ac77cc46"
+UTOPIC_NATIVE_REF = "03d652431b6c3f4e6ed1f59a475a6e76beb30b6d"
 LLAMA_REPO = "https://github.com/ggml-org/llama.cpp.git"
 LLAMA_REF = "ef5e2dcce"
 STABLE_DIFFUSION_REPO = "https://github.com/leejet/stable-diffusion.cpp.git"
 STABLE_DIFFUSION_REF = "8caa3f908ae6d4a4bef531e73b9a969f266a3d1f"
-BIN_NAMES = ("utopic", "utopic_server", "utopic_mcp", "utopic_acp", "utopic_runner", "utopic_ace")
+BIN_NAMES = (
+    "utopic",
+    "utopic_server",
+    "utopic_mcp",
+    "utopic_acp",
+    "utopic_runner",
+    "utopic_ace",
+    "utopic_hidream_o1",
+)
 SHARED_PLUGIN_NAMES = ("utopic_sherpa_tts",)
 INSTALL_METADATA_NAME = "install.json"
 INSTALL_METADATA_SCHEMA_VERSION = 2

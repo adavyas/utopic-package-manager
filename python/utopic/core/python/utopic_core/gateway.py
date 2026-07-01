@@ -831,6 +831,8 @@ def _run_native_runner(
 ) -> tuple[int, dict[str, str], bytes]:
     if entry.runner == "utopic_ace" or entry.engine == "ace-step":
         return _run_native_ace_step(entry, endpoint, request)
+    if entry.runner == "utopic_hidream_o1" or entry.engine == "hidream-o1":
+        return _run_native_hidream_o1(entry, endpoint, request)
 
     run_id = "run_" + uuid.uuid4().hex
     run_dir = _runs_dir() / run_id
@@ -1006,6 +1008,121 @@ def _run_native_ace_step(
             "metrics": {},
             "runtime": entry.runtime,
             "runner": "utopic_ace",
+        },
+    }
+    if endpoint == "/v1/responses":
+        return _json(200, _artifact_response_to_responses(entry, response))
+    return _json(200, response)
+
+
+def _run_native_hidream_o1(
+    entry: models.ModelEntry,
+    endpoint: str,
+    request: dict[str, Any],
+) -> tuple[int, dict[str, str], bytes]:
+    run_id = "run_" + uuid.uuid4().hex
+    run_dir = _runs_dir() / run_id
+    output_dir = run_dir / "outputs"
+    progress_path = run_dir / "progress.jsonl"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    prompt = str(request.get("prompt") or "")
+    if not prompt:
+        return _native_runner_failed(entry, "prompt is required", run_id=run_id, progress_path=progress_path)
+    output_path = output_dir / "image.png"
+    try:
+        native_hidream = str(_native_binary_path("utopic_hidream_o1"))
+    except RuntimeError as exc:
+        return _native_runner_failed(entry, str(exc), run_id=run_id, progress_path=progress_path)
+    checkpoint_path = models._native_artifact_cache_path(entry, entry.filename)
+    command = [
+        native_hidream,
+        "--prompt",
+        prompt,
+        "--out",
+        str(output_path),
+        "--model",
+        str(checkpoint_path),
+    ]
+    for request_key, flag in (
+        ("width", "--width"),
+        ("height", "--height"),
+        ("steps", "--steps"),
+        ("seed", "--seed"),
+        ("cfg_scale", "--cfg-scale"),
+    ):
+        value = request.get(request_key)
+        if value is not None:
+            command.extend([flag, str(value)])
+    sd_cli = request.get("sd_cli")
+    if isinstance(sd_cli, str) and sd_cli:
+        command.extend(["--sd-cli", sd_cli])
+    extra_args = request.get("extra_args")
+    if isinstance(extra_args, str) and extra_args:
+        command.extend(["--extra-args", extra_args])
+
+    request_path = run_dir / "request.json"
+    request_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "utopic-native-hidream-o1/v1",
+                "run_id": run_id,
+                "model": entry.id,
+                "input": {"prompt": prompt},
+                "parameters": {
+                    key: value
+                    for key, value in request.items()
+                    if key not in {"model", "prompt", "input", "messages", "response_format"}
+                },
+                "checkpoint_path": str(checkpoint_path),
+                "output_dir": str(output_dir),
+                "progress_path": str(progress_path),
+            },
+            indent=2,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    try:
+        result = subprocess.run(
+            command,
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=_runner_timeout_seconds(),
+        )
+    except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
+        return _native_runner_failed(entry, str(exc), run_id=run_id, progress_path=progress_path)
+    if result.returncode != 0:
+        message = result.stderr.strip() or result.stdout.strip() or f"exit code {result.returncode}"
+        return _native_runner_failed(entry, message, run_id=run_id, progress_path=progress_path)
+    if not output_path.is_file() or output_path.stat().st_size == 0:
+        return _native_runner_failed(entry, "native HiDream-O1 runner produced no image.png", run_id=run_id, progress_path=progress_path)
+
+    artifact = {
+        "type": "image/png",
+        "path": str(output_path),
+        "url": f"file://{output_path}",
+        "metadata": {"runner": "utopic_hidream_o1"},
+    }
+    response = {
+        "id": run_id,
+        "object": "utopic.artifact.response",
+        "created": int(time.time()),
+        "model": entry.id,
+        "modality": entry.modality,
+        "engine": entry.engine,
+        "artifacts": [artifact],
+        "data": _image_generation_data([artifact], request),
+        "progress": _read_progress(progress_path),
+        "progress_url": f"/v1/utopic/runs/{run_id}/events",
+        "metadata": {
+            "backend": "native",
+            "device": None,
+            "metrics": {},
+            "runtime": entry.runtime,
+            "runner": "utopic_hidream_o1",
         },
     }
     if endpoint == "/v1/responses":

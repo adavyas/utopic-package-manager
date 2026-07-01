@@ -20,6 +20,7 @@ def test_dry_run_quotes_arguments_that_need_shell_escaping(capsys):
 def test_setup_installs_native_json_runner_binary():
     assert "utopic_runner" in installer.BIN_NAMES
     assert "utopic_ace" in installer.BIN_NAMES
+    assert "utopic_hidream_o1" in installer.BIN_NAMES
 
 
 def test_auto_backend_prefers_metal_when_available(monkeypatch):

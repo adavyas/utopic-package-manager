@@ -336,6 +336,69 @@ out.write_bytes(b"RIFF....WAVEfmt ")
     assert args[args.index("--seed") + 1] == "123"
 
 
+def test_gateway_runs_hidream_o1_through_native_binary(tmp_path, monkeypatch):
+    script = tmp_path / "utopic_hidream_o1"
+    captured = tmp_path / "captured.json"
+    script.write_text(
+        f"""#!/usr/bin/env python3
+import json
+import pathlib
+import sys
+
+args = sys.argv[1:]
+captured = {str(captured)!r}
+with pathlib.Path(captured).open("w", encoding="utf-8") as handle:
+    json.dump(args, handle)
+out = pathlib.Path(args[args.index("--out") + 1])
+out.parent.mkdir(parents=True, exist_ok=True)
+out.write_bytes(b"PNG")
+""".strip(),
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+    monkeypatch.setenv("UTOPIC_HOME", str(tmp_path / "cache"))
+    monkeypatch.setattr(
+        gateway,
+        "_native_binary_path",
+        lambda name: script if name == "utopic_hidream_o1" else tmp_path / name,
+    )
+
+    status, headers, body = gateway.handle_openai_request(
+        "POST",
+        "/v1/images/generations",
+        {
+            "model": "hidream-o1",
+            "prompt": "a photorealistic studio portrait",
+            "width": 1024,
+            "height": 1024,
+            "steps": 28,
+            "seed": 123,
+            "cfg_scale": 1.0,
+            "sd_cli": "/opt/sd-cli",
+        },
+    )
+
+    assert status == 200
+    assert headers["content-type"] == "application/json"
+    payload = json.loads(body.decode("utf-8"))
+    assert payload["model"] == "hidream-o1"
+    assert payload["metadata"]["runtime"] == "native"
+    assert payload["metadata"]["runner"] == "utopic_hidream_o1"
+    assert payload["artifacts"][0]["type"] == "image/png"
+    assert Path(payload["artifacts"][0]["path"]).read_bytes() == b"PNG"
+    args = json.loads(captured.read_text(encoding="utf-8"))
+    assert args[:2] == ["--prompt", "a photorealistic studio portrait"]
+    assert args[args.index("--model") + 1].endswith(
+        "models/hidream-o1/hidream_o1_image_dev_bf16.safetensors"
+    )
+    assert args[args.index("--width") + 1] == "1024"
+    assert args[args.index("--height") + 1] == "1024"
+    assert args[args.index("--steps") + 1] == "28"
+    assert args[args.index("--seed") + 1] == "123"
+    assert args[args.index("--cfg-scale") + 1] == "1.0"
+    assert args[args.index("--sd-cli") + 1] == "/opt/sd-cli"
+
+
 def test_every_bridge_catalog_model_has_openai_and_mcp_runtime_surface():
     generation_tool_by_modality = {
         "image": "utopic_generate_image",
