@@ -207,12 +207,19 @@ target_include_directories(utopic_ace PRIVATE "${UTOPIC_NATIVE_SOURCE_DIR}")
 set_target_properties(utopic_ace PROPERTIES
   BUILD_RPATH "${LLAMA_BIN}" INSTALL_RPATH "${LLAMA_BIN}")
 
-# Native HiDream-O1 image runner: prompt -> sd.cpp-native HiDream backend -> PNG.
+# HiDream-O1 oracle wrapper and native Dev-2604 manifest inspector.
 add_executable(utopic_hidream_o1
   "${UTOPIC_NATIVE_SOURCE_DIR}/tools/utopic_hidream_o1.cpp"
   "${UTOPIC_NATIVE_SOURCE_DIR}/core/hidream_o1_native.cpp")
 target_include_directories(utopic_hidream_o1 PRIVATE "${UTOPIC_NATIVE_SOURCE_DIR}")
 set_target_properties(utopic_hidream_o1 PROPERTIES
+  BUILD_RPATH "${LLAMA_BIN}" INSTALL_RPATH "${LLAMA_BIN}")
+
+add_executable(hidream_o1_native_manifest
+  "${UTOPIC_NATIVE_SOURCE_DIR}/tools/hidream_o1_native_manifest.cpp"
+  "${UTOPIC_NATIVE_SOURCE_DIR}/core/hidream_o1_native.cpp")
+target_include_directories(hidream_o1_native_manifest PRIVATE "${UTOPIC_NATIVE_SOURCE_DIR}")
+set_target_properties(hidream_o1_native_manifest PROPERTIES
   BUILD_RPATH "${LLAMA_BIN}" INSTALL_RPATH "${LLAMA_BIN}")
 
 if(UTOPIC_ENABLE_SHERPA_ONNX)

@@ -13,6 +13,8 @@ void usage(const char* argv0) {
                  "usage: %s --prompt TEXT --out image.png [--model checkpoint.safetensors] [--sd-cli sd-cli] "
                  "[--width 1024] [--height 1024] [--steps 28] [--seed 42] [--cfg-scale 1.0] [--extra-args ARGS] [--dry-run]\n",
                  argv0);
+    std::fprintf(stderr,
+                 "note: this is the sd.cpp oracle wrapper. The native Dev-2604 port uses the shard manifest/scheduler targets first.\n");
 }
 
 bool consume(std::string arg, const char* name) {
@@ -44,11 +46,11 @@ int main(int argc, char** argv) {
     utopic::HiDreamO1RunRequest req;
     req.sd_cli = utopic::hidream_o1_default_sd_cli();
     req.model_path = utopic::hidream_o1_default_model_path();
-    req.width = cfg.default_width;
-    req.height = cfg.default_height;
+    req.width = 1024;
+    req.height = 1024;
     req.steps = cfg.default_steps;
     req.seed = 42;
-    req.cfg_scale = cfg.default_cfg_scale;
+    req.cfg_scale = 1.0f;
 
     bool dry_run = false;
     for (int i = 1; i < argc; ++i) {
@@ -97,7 +99,7 @@ int main(int argc, char** argv) {
     const utopic::HiDreamO1Shape shape = utopic::hidream_o1_shape_for_size(cfg, req.width, req.height);
     const std::string cmd = utopic::build_hidream_o1_command(req);
     std::fprintf(stderr,
-                 "utopic_hidream_o1 model=%s backend=sd.cpp-native checkpoint=%s sd_cli=%s width=%d height=%d patch_tokens=%lld patch_dim=%d steps=%d cfg=%.3f seed=%d\n",
+                 "utopic_hidream_o1 model=%s backend=sd.cpp-oracle checkpoint=%s sd_cli=%s width=%d height=%d patch_tokens=%lld patch_dim=%d steps=%d cfg=%.3f seed=%d native_status=%s\n",
                  cfg.model_id,
                  req.model_path.c_str(),
                  req.sd_cli.c_str(),
@@ -107,14 +109,15 @@ int main(int argc, char** argv) {
                  shape.patch_dim,
                  req.steps,
                  req.cfg_scale,
-                 req.seed);
+                 req.seed,
+                 cfg.native_status);
     std::fprintf(stderr, "utopic_hidream_o1 command=%s\n", cmd.c_str());
 
     if (dry_run) {
         return 0;
     }
     if (!utopic::hidream_o1_file_exists(req.sd_cli)) {
-        std::fprintf(stderr, "utopic_hidream_o1: missing sd.cpp native backend binary: %s\n", req.sd_cli.c_str());
+        std::fprintf(stderr, "utopic_hidream_o1: missing sd.cpp oracle backend binary: %s\n", req.sd_cli.c_str());
         return 1;
     }
     if (!utopic::hidream_o1_file_exists(req.model_path)) {
@@ -127,7 +130,7 @@ int main(int argc, char** argv) {
     }
     const int rc = std::system(cmd.c_str());
     if (rc != 0) {
-        std::fprintf(stderr, "utopic_hidream_o1: native backend failed with code %d\n", rc);
+        std::fprintf(stderr, "utopic_hidream_o1: sd.cpp oracle backend failed with code %d\n", rc);
         return 1;
     }
     if (!utopic::hidream_o1_file_exists(req.output_path)) {

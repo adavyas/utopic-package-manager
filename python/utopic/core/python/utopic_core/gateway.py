@@ -1029,6 +1029,13 @@ def _run_native_hidream_o1(
     prompt = str(request.get("prompt") or "")
     if not prompt:
         return _native_runner_failed(entry, "prompt is required", run_id=run_id, progress_path=progress_path)
+    if os.environ.get("UTOPIC_HIDREAM_ALLOW_ORACLE", "") not in {"1", "true", "TRUE", "yes", "YES"}:
+        return _native_runner_failed(
+            entry,
+            "hidream-o1 native Dev-2604 path is in progress; sd.cpp oracle is disabled by default",
+            run_id=run_id,
+            progress_path=progress_path,
+        )
     output_path = output_dir / "image.png"
     try:
         native_hidream = str(_native_binary_path("utopic_hidream_o1"))
