@@ -72,6 +72,10 @@ def test_gateway_models_endpoint_exposes_multimodal_runtime_metadata():
     assert by_id["zuna"]["repo"] == "Zyphra/ZUNA"
     assert "/v1/utopic/misc/generations" in by_id["zuna"]["endpoints"]
     assert by_id["zuna"]["bridge"]["input"] == "artifact"
+    assert by_id["ace-step-1.5"]["modality"] == "music"
+    assert by_id["ace-step-1.5"]["runtime"] == "native"
+    assert by_id["ace-step-1.5"]["runner"] == "utopic_ace"
+    assert "bridge" not in by_id["ace-step-1.5"]
 
 
 def test_gateway_models_endpoint_exposes_bridge_activation_for_all_bridge_models():
@@ -87,7 +91,6 @@ def test_gateway_models_endpoint_exposes_bridge_activation_for_all_bridge_models
         "cosmos3-super",
         "chatterbox",
         "dia-1.6b",
-        "ace-step-3.5b",
         "wan2.1-t2v-1.3b",
         "wan2.1-t2v-14b",
         "ltx-video",
@@ -259,13 +262,6 @@ def test_gateway_exposes_openai_routes_for_each_bridge_modality():
             'pip install "utopic[chatterbox]"',
         ),
         (
-            "/v1/audio/generations",
-            {"model": "ace-step-3.5b", "prompt": "ambient piano"},
-            "music",
-            "ace-step",
-            'pip install "utopic[music]" && pip install git+https://github.com/ace-step/ACE-Step.git',
-        ),
-        (
             "/v1/videos/generations",
             {"model": "wan2.1-t2v-1.3b", "prompt": "waves"},
             "video",
@@ -292,7 +288,52 @@ def test_gateway_exposes_openai_routes_for_each_bridge_modality():
         }
         assert payload["error"]["modality"] == modality
         assert payload["error"]["engine"] == engine
-        assert payload["error"]["install_hint"] == install_hint
+        if install_hint:
+            assert payload["error"]["install_hint"] == install_hint
+
+
+def test_gateway_runs_ace_step_through_native_binary(tmp_path, monkeypatch):
+    script = tmp_path / "utopic_ace"
+    captured = tmp_path / "captured.json"
+    script.write_text(
+        f"""#!/usr/bin/env python3
+import json
+import pathlib
+import sys
+
+args = sys.argv[1:]
+captured = {str(captured)!r}
+with pathlib.Path(captured).open("w", encoding="utf-8") as handle:
+    json.dump(args, handle)
+out = pathlib.Path(args[args.index("--out") + 1])
+out.parent.mkdir(parents=True, exist_ok=True)
+out.write_bytes(b"RIFF....WAVEfmt ")
+""".strip(),
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+    monkeypatch.setenv("UTOPIC_HOME", str(tmp_path / "cache"))
+    monkeypatch.setattr(gateway, "_native_binary_path", lambda name: script if name == "utopic_ace" else tmp_path / name)
+
+    status, headers, body = gateway.handle_openai_request(
+        "POST",
+        "/v1/audio/generations",
+        {"model": "ace-step-1.5", "prompt": "ambient piano", "duration": 2, "steps": 8, "seed": 123},
+    )
+
+    assert status == 200
+    assert headers["content-type"] == "application/json"
+    payload = json.loads(body.decode("utf-8"))
+    assert payload["model"] == "ace-step-1.5"
+    assert payload["metadata"]["runtime"] == "native"
+    assert payload["artifacts"][0]["type"] == "audio/wav"
+    assert Path(payload["artifacts"][0]["path"]).read_bytes().startswith(b"RIFF")
+    args = json.loads(captured.read_text(encoding="utf-8"))
+    assert args[:2] == ["--prompt", "ambient piano"]
+    assert args[args.index("--models") + 1].endswith("models/ace-step-1.5")
+    assert args[args.index("--seconds") + 1] == "2"
+    assert args[args.index("--steps") + 1] == "8"
+    assert args[args.index("--seed") + 1] == "123"
 
 
 def test_every_bridge_catalog_model_has_openai_and_mcp_runtime_surface():
@@ -1476,15 +1517,6 @@ print(json.dumps({{
             },
         ),
         (
-            11,
-            "utopic_generate_music",
-            {
-                "model": "ace-step-3.5b",
-                "prompt": "ambient piano from mcp",
-                "experimental_bridge": True,
-            },
-        ),
-        (
             12,
             "utopic_generate_misc",
             {
@@ -1519,10 +1551,8 @@ print(json.dumps({{
     assert captured[0]["endpoint"] == "/v1/audio/speech"
     assert captured[0]["input"] == {"input": "hello from mcp"}
     assert captured[0]["parameters"]["voice"] == "af_heart"
-    assert captured[2]["endpoint"] == "/v1/utopic/misc/generations"
-    assert captured[2]["input"] == {"artifact": str(misc_source)}
-    assert captured[1]["endpoint"] == "/v1/audio/generations"
-    assert captured[1]["input"] == {"prompt": "ambient piano from mcp"}
+    assert captured[1]["endpoint"] == "/v1/utopic/misc/generations"
+    assert captured[1]["input"] == {"artifact": str(misc_source)}
 
 
 def test_gateway_cli_help_and_version(capsys):

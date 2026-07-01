@@ -171,7 +171,7 @@ MCP_TOOLS = [
             {
                 "model": {
                     "type": "string",
-                    "description": "Optional music model id, for example ace-step-3.5b.",
+                    "description": "Optional music model id, for example ace-step-1.5.",
                 },
                 "prompt": {
                     "type": "string",
@@ -829,6 +829,9 @@ def _run_native_runner(
     endpoint: str,
     request: dict[str, Any],
 ) -> tuple[int, dict[str, str], bytes]:
+    if entry.runner == "utopic_ace" or entry.engine == "ace-step":
+        return _run_native_ace_step(entry, endpoint, request)
+
     run_id = "run_" + uuid.uuid4().hex
     run_dir = _runs_dir() / run_id
     output_dir = run_dir / "outputs"
@@ -897,6 +900,114 @@ def _run_native_runner(
     }
     if entry.modality == "image":
         response["data"] = _image_generation_data(artifacts, request)
+    if endpoint == "/v1/responses":
+        return _json(200, _artifact_response_to_responses(entry, response))
+    return _json(200, response)
+
+
+def _run_native_ace_step(
+    entry: models.ModelEntry,
+    endpoint: str,
+    request: dict[str, Any],
+) -> tuple[int, dict[str, str], bytes]:
+    run_id = "run_" + uuid.uuid4().hex
+    run_dir = _runs_dir() / run_id
+    output_dir = run_dir / "outputs"
+    progress_path = run_dir / "progress.jsonl"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    prompt = str(request.get("prompt") or "")
+    if not prompt:
+        return _native_runner_failed(entry, "prompt is required", run_id=run_id, progress_path=progress_path)
+    output_path = output_dir / "music.wav"
+    try:
+        native_ace = str(_native_binary_path("utopic_ace"))
+    except RuntimeError as exc:
+        return _native_runner_failed(entry, str(exc), run_id=run_id, progress_path=progress_path)
+    command = [
+        native_ace,
+        "--prompt",
+        prompt,
+        "--out",
+        str(output_path),
+        "--models",
+        str(entry.path),
+    ]
+    duration = request.get("seconds", request.get("duration"))
+    if duration is not None:
+        command.extend(["--seconds", str(duration)])
+    steps = request.get("steps", request.get("num_inference_steps", request.get("inference_steps")))
+    if steps is not None:
+        command.extend(["--steps", str(steps)])
+    seed = request.get("seed")
+    if seed is not None:
+        command.extend(["--seed", str(seed)])
+    lyrics = request.get("lyrics")
+    if isinstance(lyrics, str):
+        command.extend(["--lyrics", lyrics])
+
+    request_path = run_dir / "request.json"
+    request_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "utopic-native-ace/v1",
+                "run_id": run_id,
+                "model": entry.id,
+                "input": {"prompt": prompt},
+                "parameters": {
+                    key: value
+                    for key, value in request.items()
+                    if key not in {"model", "prompt", "input", "messages", "response_format"}
+                },
+                "output_dir": str(output_dir),
+                "progress_path": str(progress_path),
+            },
+            indent=2,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    try:
+        result = subprocess.run(
+            command,
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=_runner_timeout_seconds(),
+        )
+    except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
+        return _native_runner_failed(entry, str(exc), run_id=run_id, progress_path=progress_path)
+    if result.returncode != 0:
+        message = result.stderr.strip() or result.stdout.strip() or f"exit code {result.returncode}"
+        return _native_runner_failed(entry, message, run_id=run_id, progress_path=progress_path)
+    if not output_path.is_file() or output_path.stat().st_size == 0:
+        return _native_runner_failed(entry, "native ACE runner produced no music.wav", run_id=run_id, progress_path=progress_path)
+
+    artifact = {
+        "type": "audio/wav",
+        "path": str(output_path),
+        "url": f"file://{output_path}",
+        "metadata": {"runner": "utopic_ace"},
+    }
+    response = {
+        "id": run_id,
+        "object": "utopic.artifact.response",
+        "created": int(time.time()),
+        "model": entry.id,
+        "modality": entry.modality,
+        "engine": entry.engine,
+        "artifacts": [artifact],
+        "progress": _read_progress(progress_path),
+        "progress_url": f"/v1/utopic/runs/{run_id}/events",
+        "metadata": {
+            "backend": "native",
+            "device": None,
+            "metrics": {},
+            "runtime": entry.runtime,
+            "runner": "utopic_ace",
+        },
+    }
     if endpoint == "/v1/responses":
         return _json(200, _artifact_response_to_responses(entry, response))
     return _json(200, response)

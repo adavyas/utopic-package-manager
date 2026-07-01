@@ -1367,10 +1367,10 @@ def test_cli_generate_video_high_quality_invokes_gateway_and_copies_artifact(
             {"model": "dia-1.6b", "input": "hello", "sample_rate": 44100},
         ),
         (
-            ["music", "ace-step-3.5b", "-p", "bright synthwave", "--duration", "30", "--lyrics", ""],
+            ["music", "ace-step-1.5", "-p", "bright synthwave", "--duration", "30", "--lyrics", ""],
             "/v1/audio/generations",
             {
-                "model": "ace-step-3.5b",
+                "model": "ace-step-1.5",
                 "prompt": "bright synthwave",
                 "duration": 30.0,
                 "lyrics": "",
@@ -1414,7 +1414,9 @@ def test_cli_generate_supports_all_bridge_modalities(monkeypatch, tmp_path, args
     )
     monkeypatch.setattr(cli.gateway, "handle_openai_request", fake_handle)
 
-    expected = {**expected, "experimental_bridge": True}
+    expected = dict(expected)
+    if cli.models.get_model(expected["model"]).runtime == "bridge":
+        expected["experimental_bridge"] = True
 
     assert cli.main(["generate", *args, "--experimental-bridge"]) == 0
 

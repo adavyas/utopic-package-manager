@@ -19,7 +19,7 @@ CORE_CATALOG_PATH = (
     / "utopic_core"
     / "models.json"
 )
-EXPECTED_NATIVE_REF = "ca952d2f705ec80245cb97743e50bc2ff7fcb9d7"
+EXPECTED_NATIVE_REF = "79cb9c5fd757f7fdf2f84e7165a935f6ac77cc46"
 
 REQUIRED_NATIVE_RUNNER_FILES = {
     "runner.cpp",
@@ -585,7 +585,7 @@ def test_model_catalog_includes_first_multimodal_model_set():
         "kokoro-82m": ("tts", "native"),
         "chatterbox": ("tts", "bridge"),
         "dia-1.6b": ("tts", "bridge"),
-        "ace-step-3.5b": ("music", "bridge"),
+        "ace-step-1.5": ("music", "native"),
         "wan2.1-t2v-1.3b": ("video", "bridge"),
         "wan2.1-t2v-14b": ("video", "bridge"),
         "ltx-video": ("video", "bridge"),

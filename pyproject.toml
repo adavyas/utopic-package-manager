@@ -116,9 +116,11 @@ where = ["python"]
 utopic = [
   "cmake/*",
   "core/native/*",
+  "core/native/core/*",
+  "core/native/tools/*",
   "core/python/utopic_core/*",
   "core/python/utopic_core/node/*",
 ]
 
 [tool.utopic]
-native-ref = "ca952d2f705ec80245cb97743e50bc2ff7fcb9d7"
+native-ref = "79cb9c5fd757f7fdf2f84e7165a935f6ac77cc46"

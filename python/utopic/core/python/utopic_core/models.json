@@ -527,18 +527,18 @@
     }
   },
   {
-    "id": "ace-step-3.5b",
-    "name": "ACE-Step 3.5B",
+    "id": "ace-step-1.5",
+    "name": "ACE-Step 1.5",
     "family": "ace-step",
-    "filename": "ace-step-3.5b",
-    "url": "https://huggingface.co/ACE-Step/ACE-Step-v1-3.5B",
-    "repo": "ACE-Step/ACE-Step-v1-3.5B",
-    "size": "3.5B parameters",
+    "filename": "acestep-v15-xl-turbo-Q8_0.gguf",
+    "url": "https://huggingface.co/Serveurperso/ACE-Step-1.5-GGUF",
+    "repo": "Serveurperso/ACE-Step-1.5-GGUF",
+    "size": "ACE-Step 1.5 GGUF",
     "recommended": false,
     "description": "Open-weight music generation model for local text-to-music experiments.",
     "modality": "music",
     "engine": "ace-step",
-    "runtime": "bridge",
+    "runtime": "native",
     "hardware": [
       "mac-48gb",
       "gb10",
@@ -551,15 +551,22 @@
     "outputs": [
       "audio/wav"
     ],
-    "runner": "utopic-bridge:ace-step",
-    "native_status": "experimental",
+    "runner": "utopic_ace",
+    "native_status": "ready",
     "supported_backends": [
       "metal",
       "cuda"
     ],
     "artifact_filenames": [
-      "music.wav"
+      "Qwen3-Embedding-0.6B-Q8_0.gguf",
+      "acestep-v15-xl-turbo-Q8_0.gguf",
+      "vae-BF16.gguf"
     ],
+    "artifact_urls": {
+      "Qwen3-Embedding-0.6B-Q8_0.gguf": "https://huggingface.co/Serveurperso/ACE-Step-1.5-GGUF/resolve/main/Qwen3-Embedding-0.6B-Q8_0.gguf",
+      "acestep-v15-xl-turbo-Q8_0.gguf": "https://huggingface.co/Serveurperso/ACE-Step-1.5-GGUF/resolve/main/acestep-v15-xl-turbo-Q8_0.gguf",
+      "vae-BF16.gguf": "https://huggingface.co/Serveurperso/ACE-Step-1.5-GGUF/resolve/main/vae-BF16.gguf"
+    },
     "expected_vram_gib": 16,
     "expected_ram_gib": 32,
     "oom_policy": {

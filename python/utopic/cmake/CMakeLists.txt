@@ -198,6 +198,15 @@ endif()
 set_target_properties(utopic_runner PROPERTIES
   BUILD_RPATH "${LLAMA_BIN}" INSTALL_RPATH "${LLAMA_BIN}")
 
+# Native ACE-Step music runner: prompt -> ACE-Step 1.5 GGUF synth -> WAV.
+add_executable(utopic_ace
+  "${UTOPIC_NATIVE_SOURCE_DIR}/tools/utopic_ace.cpp"
+  "${UTOPIC_NATIVE_SOURCE_DIR}/core/ace_step.cpp"
+  "${UTOPIC_NATIVE_SOURCE_DIR}/core/ace_step_native.cpp")
+target_include_directories(utopic_ace PRIVATE "${UTOPIC_NATIVE_SOURCE_DIR}")
+set_target_properties(utopic_ace PROPERTIES
+  BUILD_RPATH "${LLAMA_BIN}" INSTALL_RPATH "${LLAMA_BIN}")
+
 if(UTOPIC_ENABLE_SHERPA_ONNX)
   add_library(utopic_sherpa_tts SHARED
     "${UTOPIC_NATIVE_SOURCE_DIR}/sherpa_tts_plugin.cpp"
