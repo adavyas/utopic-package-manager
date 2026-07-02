@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstring>
 #include <functional>
 #include <limits>
@@ -324,6 +325,92 @@ void summarize_vector(const std::vector<float>& values,
     if (max_abs) *max_abs = maxv;
 }
 
+uint64_t fnv1a64(const std::string& value) {
+    uint64_t hash = 1469598103934665603ull;
+    for (unsigned char c : value) {
+        hash ^= static_cast<uint64_t>(c);
+        hash *= 1099511628211ull;
+    }
+    return hash;
+}
+
+uint64_t splitmix64(uint64_t x) {
+    x += 0x9e3779b97f4a7c15ull;
+    x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ull;
+    x = (x ^ (x >> 27)) * 0x94d049bb133111ebull;
+    return x ^ (x >> 31);
+}
+
+double uniform01(uint64_t* state) {
+    *state = splitmix64(*state);
+    const uint64_t mantissa = (*state >> 11) | 1ull;
+    return static_cast<double>(mantissa) * (1.0 / 9007199254740992.0);
+}
+
+float normal01(uint64_t* state) {
+    const double u1 = std::max(uniform01(state), 1e-12);
+    const double u2 = uniform01(state);
+    return static_cast<float>(std::sqrt(-2.0 * std::log(u1)) * std::cos(6.2831853071795864769 * u2));
+}
+
+std::string build_official_t2i_caption_prefix(const std::string& prompt) {
+    return "<|im_start|>user\n" + prompt + "<|im_end|>\n<|im_start|>assistant\n<|boi_token|>";
+}
+
+std::vector<uint64_t> pseudo_tokenize_official_caption(const std::string& prompt) {
+    const std::string caption = build_official_t2i_caption_prefix(prompt);
+    std::vector<uint64_t> tokens;
+    tokens.reserve(caption.size() / 4 + 8);
+    for (size_t i = 0; i < caption.size();) {
+        if (caption.compare(i, 12, "<|im_start|>") == 0) {
+            tokens.push_back(151644);
+            i += 12;
+        } else if (caption.compare(i, 10, "<|im_end|>") == 0) {
+            tokens.push_back(151645);
+            i += 10;
+        } else if (caption.compare(i, 13, "<|boi_token|>") == 0) {
+            tokens.push_back(151647);
+            i += 13;
+        } else {
+            size_t next = caption.find("<|", i);
+            if (next == std::string::npos) next = caption.size();
+            while (i < next) {
+                const size_t take = std::min<size_t>(4, next - i);
+                tokens.push_back(fnv1a64(caption.substr(i, take)));
+                i += take;
+            }
+        }
+    }
+    return tokens;
+}
+
+std::vector<float> build_prompt_conditioning_vector(const std::string& prompt,
+                                                    int64_t hidden_size,
+                                                    int vocab_size,
+                                                    int64_t* text_tokens) {
+    if (text_tokens) *text_tokens = 0;
+    if (hidden_size <= 0) return {};
+    const std::vector<uint64_t> tokens = pseudo_tokenize_official_caption(prompt);
+    if (text_tokens) *text_tokens = static_cast<int64_t>(tokens.size());
+    if (tokens.empty()) return std::vector<float>(static_cast<size_t>(hidden_size), 0.0f);
+
+    std::vector<float> conditioning(static_cast<size_t>(hidden_size), 0.0f);
+    const uint64_t vocab = vocab_size > 0 ? static_cast<uint64_t>(vocab_size) : 151936ull;
+    for (size_t tok = 0; tok < tokens.size(); ++tok) {
+        const uint64_t token_id = tokens[tok] % vocab;
+        for (int64_t dim = 0; dim < hidden_size; ++dim) {
+            const uint64_t h = splitmix64(token_id ^ (static_cast<uint64_t>(dim + 1) * 0x9e3779b97f4a7c15ull));
+            const float centered = (static_cast<float>((h >> 40) & 0xffffffu) / 8388608.0f) - 1.0f;
+            conditioning[static_cast<size_t>(dim)] += centered;
+        }
+    }
+    const float scale = 0.025f / std::sqrt(static_cast<float>(tokens.size()));
+    for (float& value : conditioning) {
+        value *= scale;
+    }
+    return conditioning;
+}
+
 bool run_text_layer_from_input(const HiDreamO1NativeModelLayout& layout,
                                const HiDreamO1TensorCatalog& catalog,
                                int layer,
@@ -540,6 +627,7 @@ bool run_visual_layer_from_input(const HiDreamO1NativeModelLayout& layout,
 
 bool run_projection_predictor(const HiDreamO1TensorCatalog& catalog,
                               const std::vector<float>& patch_input,
+                              const std::vector<float>& text_conditioning,
                               int64_t patch_tokens,
                               float timestep,
                               std::vector<float>* patch_output,
@@ -572,7 +660,8 @@ bool run_projection_predictor(const HiDreamO1TensorCatalog& catalog,
     const int64_t final_patch_dim = final_info.shape[0];
     const int64_t hidden_size = final_info.shape[1];
     if (patch_dim <= 0 || timestep_dim <= 0 || hidden_size <= 0 || final_patch_dim != patch_dim ||
-        patch_input.size() != static_cast<size_t>(patch_dim * patch_tokens)) {
+        patch_input.size() != static_cast<size_t>(patch_dim * patch_tokens) ||
+        (!text_conditioning.empty() && text_conditioning.size() != static_cast<size_t>(hidden_size))) {
         if (error) *error = "HiDream projection predictor shape mismatch";
         return false;
     }
@@ -634,6 +723,11 @@ bool run_projection_predictor(const HiDreamO1TensorCatalog& catalog,
     ggml_tensor* patch_x = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, patch_dim, patch_tokens);
     std::memcpy(patch_x->data, patch_input.data(), patch_input.size() * sizeof(float));
     ggml_tensor* patch_hidden = build_linear_bias(ctx, build_linear(ctx, patch_x, x_proj1), x_proj2, x_proj2_bias);
+    if (!text_conditioning.empty()) {
+        ggml_tensor* cond = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, hidden_size, 1);
+        std::memcpy(cond->data, text_conditioning.data(), text_conditioning.size() * sizeof(float));
+        patch_hidden = ggml_add(ctx, patch_hidden, cond);
+    }
 
     ggml_tensor* t_freq = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, timestep_dim, 1);
     float* t_data = static_cast<float*>(t_freq->data);
@@ -1456,14 +1550,36 @@ bool hidream_o1_generate_native_preview_image(const std::string& model_dir,
         if (error) *error = catalog.error;
         return false;
     }
+    HiDreamO1NativeModelLayout layout;
+    if (!load_hidream_o1_native_model_layout(model_dir, &layout)) {
+        if (error) *error = layout.error;
+        return false;
+    }
+
+    int64_t text_tokens = 0;
+    const std::vector<float> text_conditioning =
+        build_prompt_conditioning_vector(prompt, layout.text.hidden_size, layout.text.vocab_size, &text_tokens);
+    if (text_conditioning.empty() || text_tokens <= 0) {
+        if (error) *error = "native preview prompt conditioning failed";
+        return false;
+    }
+    const HiDreamO1ForwardPlan plan = hidream_o1_build_t2i_forward_plan(cfg, width, height, text_tokens);
+    if (plan.total_sequence_tokens <= 0 || plan.image_tokens != shape.patch_tokens) {
+        if (error) *error = "native preview official conditioning plan shape mismatch";
+        return false;
+    }
+    summary->text_tokens = plan.text_tokens;
+    summary->total_sequence_tokens = plan.total_sequence_tokens;
+    summarize_vector(text_conditioning,
+                     &summary->conditioning_values,
+                     &summary->conditioning_checksum,
+                     &summary->conditioning_l2,
+                     nullptr);
 
     std::vector<float> current(static_cast<size_t>(shape.patch_tokens) * static_cast<size_t>(shape.patch_dim), 0.0f);
-    const uint64_t prompt_hash = static_cast<uint64_t>(std::hash<std::string>{}(prompt));
-    uint64_t state = prompt_hash ^ (static_cast<uint64_t>(seed) << 32) ^ 0x9e3779b97f4a7c15ull;
+    uint64_t state = splitmix64(static_cast<uint64_t>(static_cast<uint32_t>(seed + 1)) ^ 0x684d3f1b5ac9e23dull);
     for (float& value : current) {
-        state = state * 6364136223846793005ull + 1442695040888963407ull;
-        const uint32_t bits = static_cast<uint32_t>((state >> 32) & 0xffffffffu);
-        value = (static_cast<float>(bits) / 2147483648.0f) - 1.0f;
+        value = cfg.default_noise_scale_start * normal01(&state);
     }
 
     const std::vector<int> timesteps = hidream_o1_dev_timesteps();
@@ -1475,6 +1591,7 @@ bool hidream_o1_generate_native_preview_image(const std::string& model_dir,
         const float t_pixeldit = hidream_o1_t_pixeldit(timesteps[static_cast<size_t>(i)]);
         if (!run_projection_predictor(catalog,
                                       current,
+                                      text_conditioning,
                                       shape.patch_tokens,
                                       t_pixeldit,
                                       &x0_pred,
