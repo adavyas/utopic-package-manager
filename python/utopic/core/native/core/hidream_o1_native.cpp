@@ -6,6 +6,7 @@
 #include <cstring>
 #include <fstream>
 #include <iterator>
+#include <limits>
 #include <set>
 #include <sstream>
 #include <string>
@@ -147,6 +148,112 @@ bool parse_json_int(const std::string& text, const std::string& key, int* out) {
     double value = 0.0;
     if (!parse_json_number(text, key, &value) || out == nullptr) return false;
     *out = static_cast<int>(value);
+    return true;
+}
+
+bool parse_json_string_after_key(const std::string& text, const std::string& key, std::string* out) {
+    if (out == nullptr) return false;
+    const size_t key_pos = text.find("\"" + key + "\"");
+    if (key_pos == std::string::npos) return false;
+    size_t pos = text.find(':', key_pos);
+    if (pos == std::string::npos) return false;
+    ++pos;
+    skip_ws(text, &pos);
+    return parse_json_string(text, &pos, out);
+}
+
+bool parse_json_int64_array_after_key(const std::string& text, const std::string& key, std::vector<int64_t>* out) {
+    if (out == nullptr) return false;
+    out->clear();
+    const size_t key_pos = text.find("\"" + key + "\"");
+    if (key_pos == std::string::npos) return false;
+    size_t pos = text.find(':', key_pos);
+    if (pos == std::string::npos) return false;
+    ++pos;
+    skip_ws(text, &pos);
+    if (pos >= text.size() || text[pos] != '[') return false;
+    ++pos;
+    while (pos < text.size()) {
+        skip_ws(text, &pos);
+        if (pos < text.size() && text[pos] == ']') {
+            ++pos;
+            return true;
+        }
+        const size_t begin = pos;
+        if (pos < text.size() && (text[pos] == '-' || text[pos] == '+')) ++pos;
+        while (pos < text.size() && text[pos] >= '0' && text[pos] <= '9') ++pos;
+        if (begin == pos || (begin + 1 == pos && (text[begin] == '-' || text[begin] == '+'))) return false;
+        out->push_back(static_cast<int64_t>(std::strtoll(text.substr(begin, pos - begin).c_str(), nullptr, 10)));
+        skip_ws(text, &pos);
+        if (pos < text.size() && text[pos] == ',') {
+            ++pos;
+            continue;
+        }
+        if (pos < text.size() && text[pos] == ']') {
+            ++pos;
+            return true;
+        }
+        return false;
+    }
+    return false;
+}
+
+bool parse_json_u64_pair_after_key(const std::string& text, const std::string& key, uint64_t out[2]) {
+    std::vector<int64_t> values;
+    if (!parse_json_int64_array_after_key(text, key, &values) || values.size() != 2) return false;
+    if (values[0] < 0 || values[1] < 0 || values[1] < values[0]) return false;
+    out[0] = static_cast<uint64_t>(values[0]);
+    out[1] = static_cast<uint64_t>(values[1]);
+    return true;
+}
+
+uint64_t read_le_u64(const unsigned char bytes[8]);
+
+bool read_safetensors_header_body(const std::string& file_path, uint64_t* header_bytes, std::string* header, std::string* error) {
+    if (header_bytes == nullptr || header == nullptr) return false;
+    *header_bytes = 0;
+    header->clear();
+
+    std::ifstream in(file_path, std::ios::binary);
+    if (!in) {
+        if (error) *error = "missing or unreadable safetensors shard: " + file_path;
+        return false;
+    }
+    unsigned char len_bytes[8] = {};
+    in.read(reinterpret_cast<char*>(len_bytes), sizeof(len_bytes));
+    if (in.gcount() != static_cast<std::streamsize>(sizeof(len_bytes))) {
+        if (error) *error = "short safetensors header length: " + file_path;
+        return false;
+    }
+    *header_bytes = read_le_u64(len_bytes);
+    if (*header_bytes == 0 || *header_bytes > (512ull << 20)) {
+        if (error) *error = "invalid safetensors header length: " + file_path;
+        return false;
+    }
+
+    header->assign(static_cast<size_t>(*header_bytes), '\0');
+    in.read(&(*header)[0], static_cast<std::streamsize>(header->size()));
+    if (in.gcount() != static_cast<std::streamsize>(header->size())) {
+        if (error) *error = "short safetensors header body: " + file_path;
+        return false;
+    }
+    return true;
+}
+
+bool extract_json_object_for_quoted_key(const std::string& text, const std::string& key, std::string* object) {
+    if (object == nullptr) return false;
+    const std::string quoted = "\"" + key + "\"";
+    const size_t key_pos = text.find(quoted);
+    if (key_pos == std::string::npos) return false;
+    size_t pos = key_pos + quoted.size();
+    skip_ws(text, &pos);
+    if (pos >= text.size() || text[pos] != ':') return false;
+    ++pos;
+    skip_ws(text, &pos);
+    if (pos >= text.size() || text[pos] != '{') return false;
+    const size_t close = find_matching_brace(text, pos);
+    if (close == std::string::npos || close <= pos) return false;
+    *object = text.substr(pos, close - pos + 1);
     return true;
 }
 
@@ -664,21 +771,9 @@ bool load_hidream_o1_native_model_layout(const std::string& model_dir, HiDreamO1
         if (entry.tensor_name == "lm_head.weight") layout->lm_head_tensor_count++;
     }
 
-    const char* required_block0[] = {
-        "model.language_model.layers.0.input_layernorm.weight",
-        "model.language_model.layers.0.self_attn.q_proj.weight",
-        "model.language_model.layers.0.self_attn.k_proj.weight",
-        "model.language_model.layers.0.self_attn.v_proj.weight",
-        "model.language_model.layers.0.self_attn.o_proj.weight",
-        "model.language_model.layers.0.self_attn.q_norm.weight",
-        "model.language_model.layers.0.self_attn.k_norm.weight",
-        "model.language_model.layers.0.post_attention_layernorm.weight",
-        "model.language_model.layers.0.mlp.gate_proj.weight",
-        "model.language_model.layers.0.mlp.up_proj.weight",
-        "model.language_model.layers.0.mlp.down_proj.weight",
-    };
+    const std::vector<std::string> required_block0 = hidream_o1_text_block_tensor_names(0);
     layout->has_required_text_block0 = true;
-    for (const char* name : required_block0) {
+    for (const std::string& name : required_block0) {
         if (names.find(name) == names.end()) {
             layout->has_required_text_block0 = false;
             break;
@@ -696,27 +791,8 @@ HiDreamO1SafetensorsHeader inspect_hidream_o1_safetensors_header(const std::stri
     HiDreamO1SafetensorsHeader result;
     result.file_path = file_path;
 
-    std::ifstream in(file_path, std::ios::binary);
-    if (!in) {
-        result.error = "missing or unreadable safetensors shard";
-        return result;
-    }
-    unsigned char len_bytes[8] = {};
-    in.read(reinterpret_cast<char*>(len_bytes), sizeof(len_bytes));
-    if (in.gcount() != static_cast<std::streamsize>(sizeof(len_bytes))) {
-        result.error = "short safetensors header length";
-        return result;
-    }
-    result.header_bytes = read_le_u64(len_bytes);
-    if (result.header_bytes == 0 || result.header_bytes > (512ull << 20)) {
-        result.error = "invalid safetensors header length";
-        return result;
-    }
-
-    std::string header(static_cast<size_t>(result.header_bytes), '\0');
-    in.read(&header[0], static_cast<std::streamsize>(header.size()));
-    if (in.gcount() != static_cast<std::streamsize>(header.size())) {
-        result.error = "short safetensors header body";
+    std::string header;
+    if (!read_safetensors_header_body(file_path, &result.header_bytes, &header, &result.error)) {
         return result;
     }
 
@@ -738,6 +814,163 @@ HiDreamO1SafetensorsHeader inspect_hidream_o1_safetensors_header(const std::stri
         pos += std::strlen("\"data_offsets\"");
     }
     return result;
+}
+
+bool load_hidream_o1_tensor_catalog(const std::string& model_dir, HiDreamO1TensorCatalog* catalog) {
+    if (catalog == nullptr) return false;
+    *catalog = HiDreamO1TensorCatalog{};
+    catalog->model_dir = model_dir;
+
+    HiDreamO1ShardManifest manifest;
+    if (!load_hidream_o1_shard_manifest(model_dir, &manifest)) {
+        catalog->error = manifest.error;
+        return false;
+    }
+
+    std::map<std::string, std::string> header_by_shard;
+    std::map<std::string, uint64_t> header_bytes_by_shard;
+    for (const std::string& shard : manifest.shard_files) {
+        const std::string path = join_path(model_dir, shard);
+        std::string header;
+        uint64_t header_bytes = 0;
+        std::string error;
+        if (!read_safetensors_header_body(path, &header_bytes, &header, &error)) {
+            catalog->error = error;
+            return false;
+        }
+        header_by_shard[shard] = std::move(header);
+        header_bytes_by_shard[shard] = header_bytes;
+    }
+
+    catalog->tensors.reserve(manifest.entries.size());
+    for (const HiDreamO1ShardEntry& entry : manifest.entries) {
+        const auto header_it = header_by_shard.find(entry.shard_file);
+        const auto header_bytes_it = header_bytes_by_shard.find(entry.shard_file);
+        if (header_it == header_by_shard.end() || header_bytes_it == header_bytes_by_shard.end()) {
+            catalog->missing_tensor_count++;
+            continue;
+        }
+
+        std::string tensor_object;
+        if (!extract_json_object_for_quoted_key(header_it->second, entry.tensor_name, &tensor_object)) {
+            catalog->missing_tensor_count++;
+            continue;
+        }
+
+        HiDreamO1TensorInfo info;
+        info.tensor_name = entry.tensor_name;
+        info.shard_file = entry.shard_file;
+        info.file_path = join_path(model_dir, entry.shard_file);
+        info.header_bytes = header_bytes_it->second;
+        if (!parse_json_string_after_key(tensor_object, "dtype", &info.dtype) ||
+            !parse_json_int64_array_after_key(tensor_object, "shape", &info.shape) ||
+            !parse_json_u64_pair_after_key(tensor_object, "data_offsets", info.data_offsets)) {
+            catalog->error = "failed to parse safetensors metadata for tensor: " + entry.tensor_name;
+            return false;
+        }
+        const uint64_t data_base = 8 + info.header_bytes;
+        info.absolute_data_begin = data_base + info.data_offsets[0];
+        info.absolute_data_end = data_base + info.data_offsets[1];
+        catalog->tensors.push_back(std::move(info));
+    }
+
+    if (catalog->tensors.empty()) {
+        catalog->error = "no tensor metadata resolved from safetensors headers";
+        return false;
+    }
+    return true;
+}
+
+bool find_hidream_o1_tensor(const HiDreamO1TensorCatalog& catalog,
+                            const std::string& tensor_name,
+                            HiDreamO1TensorInfo* tensor) {
+    for (const HiDreamO1TensorInfo& info : catalog.tensors) {
+        if (info.tensor_name == tensor_name) {
+            if (tensor) *tensor = info;
+            return true;
+        }
+    }
+    return false;
+}
+
+bool read_hidream_o1_tensor_bytes(const HiDreamO1TensorInfo& tensor,
+                                  std::vector<unsigned char>* bytes,
+                                  std::string* error) {
+    if (bytes == nullptr) return false;
+    bytes->clear();
+    if (tensor.file_path.empty()) {
+        if (error) *error = "tensor has no file path: " + tensor.tensor_name;
+        return false;
+    }
+    if (tensor.absolute_data_end < tensor.absolute_data_begin) {
+        if (error) *error = "tensor has invalid byte range: " + tensor.tensor_name;
+        return false;
+    }
+
+    const uint64_t n_bytes_u64 = tensor.absolute_data_end - tensor.absolute_data_begin;
+    if (n_bytes_u64 > static_cast<uint64_t>(std::numeric_limits<size_t>::max())) {
+        if (error) *error = "tensor byte range exceeds addressable size: " + tensor.tensor_name;
+        return false;
+    }
+    const size_t n_bytes = static_cast<size_t>(n_bytes_u64);
+
+    std::ifstream in(tensor.file_path, std::ios::binary);
+    if (!in) {
+        if (error) *error = "failed to open tensor shard: " + tensor.file_path;
+        return false;
+    }
+    in.seekg(static_cast<std::streamoff>(tensor.absolute_data_begin), std::ios::beg);
+    if (!in) {
+        if (error) *error = "failed to seek tensor payload: " + tensor.tensor_name;
+        return false;
+    }
+    bytes->assign(n_bytes, 0);
+    if (n_bytes == 0) return true;
+    in.read(reinterpret_cast<char*>(bytes->data()), static_cast<std::streamsize>(bytes->size()));
+    if (in.gcount() != static_cast<std::streamsize>(bytes->size())) {
+        bytes->clear();
+        if (error) *error = "short tensor payload read: " + tensor.tensor_name;
+        return false;
+    }
+    return true;
+}
+
+std::vector<std::string> hidream_o1_text_block_tensor_names(int layer) {
+    const std::string prefix = "model.language_model.layers." + std::to_string(layer) + ".";
+    return {
+        prefix + "input_layernorm.weight",
+        prefix + "self_attn.q_proj.weight",
+        prefix + "self_attn.k_proj.weight",
+        prefix + "self_attn.v_proj.weight",
+        prefix + "self_attn.o_proj.weight",
+        prefix + "self_attn.q_norm.weight",
+        prefix + "self_attn.k_norm.weight",
+        prefix + "post_attention_layernorm.weight",
+        prefix + "mlp.gate_proj.weight",
+        prefix + "mlp.up_proj.weight",
+        prefix + "mlp.down_proj.weight",
+    };
+}
+
+bool load_hidream_o1_text_block_tensors(const std::string& model_dir,
+                                        int layer,
+                                        std::vector<HiDreamO1TensorInfo>* tensors) {
+    if (tensors == nullptr) return false;
+    tensors->clear();
+
+    HiDreamO1TensorCatalog catalog;
+    if (!load_hidream_o1_tensor_catalog(model_dir, &catalog)) return false;
+    const std::vector<std::string> names = hidream_o1_text_block_tensor_names(layer);
+    tensors->reserve(names.size());
+    for (const std::string& name : names) {
+        HiDreamO1TensorInfo info;
+        if (!find_hidream_o1_tensor(catalog, name, &info)) {
+            tensors->clear();
+            return false;
+        }
+        tensors->push_back(std::move(info));
+    }
+    return true;
 }
 
 }  // namespace utopic

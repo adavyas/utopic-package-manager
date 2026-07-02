@@ -104,6 +104,25 @@ struct HiDreamO1SafetensorsHeader {
     std::string error;
 };
 
+struct HiDreamO1TensorInfo {
+    std::string tensor_name;
+    std::string shard_file;
+    std::string file_path;
+    std::string dtype;
+    std::vector<int64_t> shape;
+    uint64_t header_bytes = 0;
+    uint64_t data_offsets[2] = {0, 0};
+    uint64_t absolute_data_begin = 0;
+    uint64_t absolute_data_end = 0;
+};
+
+struct HiDreamO1TensorCatalog {
+    std::string model_dir;
+    std::vector<HiDreamO1TensorInfo> tensors;
+    int64_t missing_tensor_count = 0;
+    std::string error;
+};
+
 struct HiDreamO1TextModelConfig {
     int hidden_size = 0;
     int intermediate_size = 0;
@@ -186,5 +205,16 @@ bool hidream_o1_patch_official_source_for_flash_env(const std::string& source_di
 bool load_hidream_o1_shard_manifest(const std::string& model_dir, HiDreamO1ShardManifest* manifest);
 bool load_hidream_o1_native_model_layout(const std::string& model_dir, HiDreamO1NativeModelLayout* layout);
 HiDreamO1SafetensorsHeader inspect_hidream_o1_safetensors_header(const std::string& file_path);
+bool load_hidream_o1_tensor_catalog(const std::string& model_dir, HiDreamO1TensorCatalog* catalog);
+bool find_hidream_o1_tensor(const HiDreamO1TensorCatalog& catalog,
+                            const std::string& tensor_name,
+                            HiDreamO1TensorInfo* tensor);
+bool read_hidream_o1_tensor_bytes(const HiDreamO1TensorInfo& tensor,
+                                  std::vector<unsigned char>* bytes,
+                                  std::string* error);
+std::vector<std::string> hidream_o1_text_block_tensor_names(int layer);
+bool load_hidream_o1_text_block_tensors(const std::string& model_dir,
+                                        int layer,
+                                        std::vector<HiDreamO1TensorInfo>* tensors);
 
 }  // namespace utopic

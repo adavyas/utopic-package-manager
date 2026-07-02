@@ -2,6 +2,7 @@
 
 #include <cstdio>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -16,6 +17,16 @@ std::string join_path(const std::string& a, const std::string& b) {
     if (a.empty()) return b;
     if (a.back() == '/') return a + b;
     return a + "/" + b;
+}
+
+std::string shape_string(const std::vector<int64_t>& shape) {
+    std::string out = "[";
+    for (size_t i = 0; i < shape.size(); ++i) {
+        if (i > 0) out += ",";
+        out += std::to_string(shape[i]);
+    }
+    out += "]";
+    return out;
 }
 
 }  // namespace
@@ -117,6 +128,42 @@ int main(int argc, char** argv) {
                 std::printf(" dtype_%s=%lld", kv.first.c_str(), static_cast<long long>(kv.second));
             }
             std::printf("\n");
+        }
+    }
+    if (headers) {
+        utopic::HiDreamO1TensorCatalog catalog;
+        if (!utopic::load_hidream_o1_tensor_catalog(model_dir, &catalog)) {
+            std::fprintf(stderr, "hidream_o1_native_manifest: tensor catalog error: %s\n", catalog.error.c_str());
+            return 1;
+        }
+
+        long long bf16 = 0;
+        long long f32 = 0;
+        for (const utopic::HiDreamO1TensorInfo& tensor : catalog.tensors) {
+            if (tensor.dtype == "BF16") bf16++;
+            if (tensor.dtype == "F32") f32++;
+        }
+        std::printf("catalog_tensors total=%zu missing=%lld dtype_BF16=%lld dtype_F32=%lld\n",
+                    catalog.tensors.size(),
+                    static_cast<long long>(catalog.missing_tensor_count),
+                    bf16,
+                    f32);
+
+        std::vector<utopic::HiDreamO1TensorInfo> block0;
+        if (!utopic::load_hidream_o1_text_block_tensors(model_dir, 0, &block0)) {
+            std::fprintf(stderr, "hidream_o1_native_manifest: failed to resolve text block0 tensors\n");
+            return 1;
+        }
+        for (const utopic::HiDreamO1TensorInfo& tensor : block0) {
+            std::printf("block0_tensor=%s dtype=%s shape=%s shard=%s rel=[%llu,%llu] abs=[%llu,%llu]\n",
+                        tensor.tensor_name.c_str(),
+                        tensor.dtype.c_str(),
+                        shape_string(tensor.shape).c_str(),
+                        tensor.shard_file.c_str(),
+                        static_cast<unsigned long long>(tensor.data_offsets[0]),
+                        static_cast<unsigned long long>(tensor.data_offsets[1]),
+                        static_cast<unsigned long long>(tensor.absolute_data_begin),
+                        static_cast<unsigned long long>(tensor.absolute_data_end));
         }
     }
     return 0;
