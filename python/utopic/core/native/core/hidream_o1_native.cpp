@@ -973,4 +973,85 @@ bool load_hidream_o1_text_block_tensors(const std::string& model_dir,
     return true;
 }
 
+bool hidream_o1_prepare_native_execution(const std::string& model_dir,
+                                         int width,
+                                         int height,
+                                         int64_t text_tokens,
+                                         bool load_block0_payloads,
+                                         HiDreamO1NativeExecutionSummary* summary,
+                                         std::string* error) {
+    if (summary == nullptr) return false;
+    *summary = HiDreamO1NativeExecutionSummary{};
+    summary->model_dir = model_dir;
+    summary->width = width;
+    summary->height = height;
+    summary->text_tokens = text_tokens;
+
+    const HiDreamO1RuntimeConfig cfg = default_hidream_o1_runtime_config();
+    const HiDreamO1ForwardPlan plan = hidream_o1_build_t2i_forward_plan(cfg, width, height, text_tokens);
+    if (plan.total_sequence_tokens <= 0 || plan.image_tokens <= 0) {
+        summary->error = "invalid native HiDream execution shape or text token count";
+        if (error) *error = summary->error;
+        return false;
+    }
+    summary->image_tokens = plan.image_tokens;
+    summary->total_sequence_tokens = plan.total_sequence_tokens;
+
+    HiDreamO1NativeModelLayout layout;
+    if (!load_hidream_o1_native_model_layout(model_dir, &layout)) {
+        summary->error = layout.error;
+        if (error) *error = summary->error;
+        return false;
+    }
+    if (!layout.has_required_text_block0) {
+        summary->error = "native HiDream execution is missing required text block0 tensors";
+        if (error) *error = summary->error;
+        return false;
+    }
+    summary->text_layers = layout.text.num_hidden_layers;
+    summary->text_hidden = layout.text.hidden_size;
+    summary->text_heads = layout.text.num_attention_heads;
+    summary->text_kv_heads = layout.text.num_key_value_heads;
+    summary->text_head_dim = layout.text.head_dim;
+    summary->text_intermediate = layout.text.intermediate_size;
+    summary->tensor_count = layout.tensor_count;
+
+    HiDreamO1TensorCatalog catalog;
+    if (!load_hidream_o1_tensor_catalog(model_dir, &catalog)) {
+        summary->error = catalog.error;
+        if (error) *error = summary->error;
+        return false;
+    }
+    summary->catalog_tensor_count = static_cast<int64_t>(catalog.tensors.size());
+    summary->catalog_missing_tensor_count = catalog.missing_tensor_count;
+    if (catalog.missing_tensor_count != 0) {
+        summary->error = "native HiDream execution has unresolved tensor metadata";
+        if (error) *error = summary->error;
+        return false;
+    }
+
+    const std::vector<std::string> block0_names = hidream_o1_text_block_tensor_names(0);
+    summary->block0_tensor_count = static_cast<int64_t>(block0_names.size());
+    for (const std::string& name : block0_names) {
+        HiDreamO1TensorInfo tensor;
+        if (!find_hidream_o1_tensor(catalog, name, &tensor)) {
+            summary->error = "native HiDream execution failed to resolve tensor: " + name;
+            if (error) *error = summary->error;
+            return false;
+        }
+        if (!load_block0_payloads) continue;
+
+        std::vector<unsigned char> bytes;
+        std::string read_error;
+        if (!read_hidream_o1_tensor_bytes(tensor, &bytes, &read_error)) {
+            summary->error = read_error.empty() ? "native HiDream execution failed to read tensor: " + name : read_error;
+            if (error) *error = summary->error;
+            return false;
+        }
+        summary->block0_payload_bytes += static_cast<uint64_t>(bytes.size());
+    }
+    summary->block0_payloads_loaded = load_block0_payloads;
+    return true;
+}
+
 }  // namespace utopic

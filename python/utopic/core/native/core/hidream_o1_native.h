@@ -162,6 +162,28 @@ struct HiDreamO1NativeModelLayout {
     std::string error;
 };
 
+struct HiDreamO1NativeExecutionSummary {
+    std::string model_dir;
+    int width = 0;
+    int height = 0;
+    int64_t text_tokens = 0;
+    int64_t image_tokens = 0;
+    int64_t total_sequence_tokens = 0;
+    int text_layers = 0;
+    int text_hidden = 0;
+    int text_heads = 0;
+    int text_kv_heads = 0;
+    int text_head_dim = 0;
+    int text_intermediate = 0;
+    int64_t tensor_count = 0;
+    int64_t catalog_tensor_count = 0;
+    int64_t catalog_missing_tensor_count = 0;
+    int64_t block0_tensor_count = 0;
+    uint64_t block0_payload_bytes = 0;
+    bool block0_payloads_loaded = false;
+    std::string error;
+};
+
 HiDreamO1RuntimeConfig default_hidream_o1_runtime_config();
 HiDreamO1Shape hidream_o1_shape_for_size(const HiDreamO1RuntimeConfig& cfg, int width, int height);
 HiDreamO1ForwardPlan hidream_o1_build_t2i_forward_plan(const HiDreamO1RuntimeConfig& cfg,
@@ -216,5 +238,12 @@ std::vector<std::string> hidream_o1_text_block_tensor_names(int layer);
 bool load_hidream_o1_text_block_tensors(const std::string& model_dir,
                                         int layer,
                                         std::vector<HiDreamO1TensorInfo>* tensors);
+bool hidream_o1_prepare_native_execution(const std::string& model_dir,
+                                         int width,
+                                         int height,
+                                         int64_t text_tokens,
+                                         bool load_block0_payloads,
+                                         HiDreamO1NativeExecutionSummary* summary,
+                                         std::string* error);
 
 }  // namespace utopic

@@ -11,10 +11,11 @@ namespace {
 void usage(const char* argv0) {
     std::fprintf(stderr,
                  "usage: %s --prompt TEXT --out image.png [--model-dir DIR] [--source-dir DIR] [--torch-python PY] "
-                 "[--width 1024] [--height 1024] [--steps 28] [--seed 42] [--extra-args ARGS] [--dry-run]\n",
+                 "[--width 1024] [--height 1024] [--steps 28] [--seed 42] [--extra-args ARGS] "
+                 "[--native-exec-check] [--native-text-tokens N] [--native-skip-payloads] [--dry-run]\n",
                  argv0);
     std::fprintf(stderr,
-                 "note: this is the non-sd.cpp HiDream Dev-2604 runner surface. It uses the official Pixel-DiT Torch implementation until the C++ transformer predictor is complete.\n");
+                 "note: native-exec-check loads the HiDream config, safetensors catalog, forward token plan, and block0 tensor payloads without invoking sd.cpp or Torch.\n");
 }
 
 bool consume(std::string arg, const char* name) {
@@ -54,6 +55,9 @@ int main(int argc, char** argv) {
     req.cfg_scale = cfg.default_guidance_scale;
 
     bool dry_run = false;
+    bool native_exec_check = false;
+    bool native_load_payloads = true;
+    int64_t native_text_tokens = 256;
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
         if (consume(a, "--help")) {
@@ -81,6 +85,12 @@ int main(int argc, char** argv) {
             req.cfg_scale = std::atof(argv[++i]);
         } else if (consume(a, "--extra-args") && i + 1 < argc) {
             req.extra_args = argv[++i];
+        } else if (consume(a, "--native-exec-check")) {
+            native_exec_check = true;
+        } else if (consume(a, "--native-text-tokens") && i + 1 < argc) {
+            native_text_tokens = std::atoll(argv[++i]);
+        } else if (consume(a, "--native-skip-payloads")) {
+            native_load_payloads = false;
         } else if (consume(a, "--dry-run")) {
             dry_run = true;
         } else {
@@ -101,8 +111,43 @@ int main(int argc, char** argv) {
 
     const utopic::HiDreamO1Shape shape = utopic::hidream_o1_shape_for_size(cfg, req.width, req.height);
     const std::string cmd = utopic::build_hidream_o1_command(req);
+    if (native_exec_check) {
+        if (!utopic::hidream_o1_dir_exists(req.model_dir)) {
+            std::fprintf(stderr, "utopic_hidream_o1: missing HiDream-O1 model dir: %s\n", req.model_dir.c_str());
+            return 1;
+        }
+        utopic::HiDreamO1NativeExecutionSummary summary;
+        std::string native_error;
+        if (!utopic::hidream_o1_prepare_native_execution(req.model_dir,
+                                                         req.width,
+                                                         req.height,
+                                                         native_text_tokens,
+                                                         native_load_payloads,
+                                                         &summary,
+                                                         &native_error)) {
+            std::fprintf(stderr, "utopic_hidream_o1: native execution prep failed: %s\n", native_error.c_str());
+            return 1;
+        }
+        std::printf("utopic_hidream_o1 native_exec_check=OK model_dir=%s width=%d height=%d text_tokens=%lld image_tokens=%lld total_tokens=%lld text_layers=%d text_hidden=%d tensors=%lld catalog_tensors=%lld missing=%lld block0_tensors=%lld block0_payloads_loaded=%s block0_payload_bytes=%llu\n",
+                    summary.model_dir.c_str(),
+                    summary.width,
+                    summary.height,
+                    static_cast<long long>(summary.text_tokens),
+                    static_cast<long long>(summary.image_tokens),
+                    static_cast<long long>(summary.total_sequence_tokens),
+                    summary.text_layers,
+                    summary.text_hidden,
+                    static_cast<long long>(summary.tensor_count),
+                    static_cast<long long>(summary.catalog_tensor_count),
+                    static_cast<long long>(summary.catalog_missing_tensor_count),
+                    static_cast<long long>(summary.block0_tensor_count),
+                    summary.block0_payloads_loaded ? "yes" : "no",
+                    static_cast<unsigned long long>(summary.block0_payload_bytes));
+        if (dry_run) return 0;
+    }
+
     std::fprintf(stderr,
-                 "utopic_hidream_o1 model=%s backend=official-torch-reference-no-sdcpp model_dir=%s source_dir=%s torch_python=%s width=%d height=%d patch_tokens=%lld patch_dim=%d steps=%d cfg=%.3f seed=%d native_status=%s\n",
+                 "utopic_hidream_o1 model=%s backend=native-prep-plus-official-torch-reference-no-sdcpp model_dir=%s source_dir=%s torch_python=%s width=%d height=%d patch_tokens=%lld patch_dim=%d steps=%d cfg=%.3f seed=%d native_status=%s\n",
                  cfg.model_id,
                  req.model_dir.c_str(),
                  req.source_dir.c_str(),
