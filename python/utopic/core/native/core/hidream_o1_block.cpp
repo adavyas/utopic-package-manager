@@ -180,6 +180,7 @@ bool run_text_layer_from_input(const HiDreamO1NativeModelLayout& layout,
                                const HiDreamO1TensorCatalog& catalog,
                                int layer,
                                int64_t sequence_tokens,
+                               int64_t ar_prefix_tokens,
                                const std::vector<float>& input,
                                std::vector<float>* output,
                                HiDreamO1RealBlockRunSummary* summary,
@@ -311,6 +312,9 @@ ggml_tensor* build_attention_from_permuted(ggml_context* ctx,
                                            int64_t q_tokens,
                                            int64_t kv_tokens,
                                            bool causal) {
+    q = ggml_cont(ctx, q);
+    k = ggml_cont(ctx, k);
+    v = ggml_cont(ctx, v);
     const int64_t kv_groups = c.num_attention_heads / c.num_key_value_heads;
     ggml_tensor* kx = ggml_reshape_3d(
         ctx,
@@ -633,7 +637,7 @@ bool run_text_transformer_conditioning(const HiDreamO1NativeModelLayout& layout,
     for (int layer = 0; layer < layout.text.num_hidden_layers; ++layer) {
         std::vector<float> next;
         HiDreamO1RealBlockRunSummary block;
-        if (!run_text_layer_from_input(layout, catalog, layer, tokens, text_state, &next, &block, error)) {
+        if (!run_text_layer_from_input(layout, catalog, layer, tokens, tokens, text_state, &next, &block, error)) {
             return false;
         }
         if (payload_bytes) *payload_bytes += block.payload_bytes;
@@ -666,6 +670,7 @@ bool run_text_layer_from_input(const HiDreamO1NativeModelLayout& layout,
                                const HiDreamO1TensorCatalog& catalog,
                                int layer,
                                int64_t sequence_tokens,
+                               int64_t ar_prefix_tokens,
                                const std::vector<float>& input,
                                std::vector<float>* output,
                                HiDreamO1RealBlockRunSummary* summary,
@@ -673,7 +678,8 @@ bool run_text_layer_from_input(const HiDreamO1NativeModelLayout& layout,
     if (output == nullptr) return false;
     output->clear();
     const int64_t hidden = layout.text.hidden_size;
-    if (sequence_tokens <= 0 || hidden <= 0 || input.size() != static_cast<size_t>(hidden * sequence_tokens)) {
+    if (sequence_tokens <= 0 || ar_prefix_tokens < 0 || ar_prefix_tokens > sequence_tokens ||
+        hidden <= 0 || input.size() != static_cast<size_t>(hidden * sequence_tokens)) {
         if (error) *error = "HiDream text layer input shape mismatch";
         return false;
     }
@@ -704,7 +710,7 @@ bool run_text_layer_from_input(const HiDreamO1NativeModelLayout& layout,
     config.num_key_value_heads = layout.text.num_key_value_heads;
     config.head_dim = layout.text.head_dim;
     config.sequence_tokens = sequence_tokens;
-    config.ar_prefix_tokens = sequence_tokens;
+    config.ar_prefix_tokens = ar_prefix_tokens;
     config.rms_norm_eps = layout.text.rms_norm_eps > 0.0 ? static_cast<float>(layout.text.rms_norm_eps) : 1e-6f;
 
     HiDreamO1TextBlockGraphTensors t;
@@ -758,7 +764,7 @@ bool run_text_layer_from_input(const HiDreamO1NativeModelLayout& layout,
     if (summary) {
         summary->layer = layer;
         summary->sequence_tokens = sequence_tokens;
-        summary->ar_prefix_tokens = sequence_tokens;
+        summary->ar_prefix_tokens = ar_prefix_tokens;
         summary->hidden_size = config.hidden_size;
         summary->intermediate_size = config.intermediate_size;
         summary->payload_bytes = loaded_payload_bytes;
@@ -1007,6 +1013,331 @@ bool run_projection_predictor(const HiDreamO1TensorCatalog& catalog,
     if (payload_bytes) *payload_bytes += loaded_payload;
     ggml_free(ctx);
     return true;
+}
+
+void fill_timestep_frequency_tensor(ggml_tensor* t_freq, float timestep) {
+    float* t_data = static_cast<float*>(t_freq->data);
+    const int64_t timestep_dim = t_freq->ne[0];
+    const int64_t half = timestep_dim / 2;
+    const float scaled_t = timestep * 1000.0f;
+    for (int64_t i = 0; i < half; ++i) {
+        const double freq = std::exp(-std::log(10000.0) * static_cast<double>(i) / static_cast<double>(half));
+        const double arg = static_cast<double>(scaled_t) * freq;
+        t_data[i] = static_cast<float>(std::cos(arg));
+        t_data[half + i] = static_cast<float>(std::sin(arg));
+    }
+    if (timestep_dim % 2 != 0) {
+        t_data[timestep_dim - 1] = 0.0f;
+    }
+}
+
+bool run_generation_input_embeddings(const HiDreamO1TensorCatalog& catalog,
+                                     const std::vector<float>& patch_input,
+                                     int64_t patch_tokens,
+                                     float timestep,
+                                     std::vector<float>* patch_embeddings,
+                                     std::vector<float>* timestep_embedding,
+                                     int64_t* payload_bytes,
+                                     std::string* error) {
+    if (patch_embeddings == nullptr || timestep_embedding == nullptr) return false;
+    patch_embeddings->clear();
+    timestep_embedding->clear();
+
+    HiDreamO1TensorInfo x_proj1_info;
+    HiDreamO1TensorInfo t0_info;
+    HiDreamO1TensorInfo x_proj2_info;
+    if (!find_hidream_o1_tensor(catalog, "model.x_embedder.proj1.weight", &x_proj1_info) ||
+        x_proj1_info.shape.size() != 2) {
+        if (error) *error = "missing or invalid HiDream x_embedder.proj1.weight";
+        return false;
+    }
+    if (!find_hidream_o1_tensor(catalog, "model.x_embedder.proj2.weight", &x_proj2_info) ||
+        x_proj2_info.shape.size() != 2) {
+        if (error) *error = "missing or invalid HiDream x_embedder.proj2.weight";
+        return false;
+    }
+    if (!find_hidream_o1_tensor(catalog, "model.t_embedder1.mlp.0.weight", &t0_info) ||
+        t0_info.shape.size() != 2) {
+        if (error) *error = "missing or invalid HiDream t_embedder1.mlp.0.weight";
+        return false;
+    }
+    const int64_t patch_dim = x_proj1_info.shape[1];
+    const int64_t hidden_size = x_proj2_info.shape[0];
+    const int64_t timestep_dim = t0_info.shape[1];
+    if (patch_dim <= 0 || hidden_size <= 0 || timestep_dim <= 0 || patch_tokens <= 0 ||
+        patch_input.size() != static_cast<size_t>(patch_dim * patch_tokens)) {
+        if (error) *error = "HiDream generation input embedding shape mismatch";
+        return false;
+    }
+
+    uint64_t static_payload = 0;
+    const std::vector<std::string> names = {
+        "model.x_embedder.proj1.weight",
+        "model.x_embedder.proj2.weight",
+        "model.x_embedder.proj2.bias",
+        "model.t_embedder1.mlp.0.weight",
+        "model.t_embedder1.mlp.0.bias",
+        "model.t_embedder1.mlp.2.weight",
+        "model.t_embedder1.mlp.2.bias",
+    };
+    for (const std::string& name : names) {
+        HiDreamO1TensorInfo info;
+        if (!find_hidream_o1_tensor(catalog, name, &info)) {
+            if (error) *error = "missing HiDream embedding tensor: " + name;
+            return false;
+        }
+        static_payload += tensor_payload_bytes(info);
+    }
+
+    ggml_init_params params{};
+    params.mem_size = static_cast<size_t>(static_payload + (512ull << 20));
+    ggml_context* ctx = ggml_init(params);
+    if (ctx == nullptr) {
+        if (error) *error = "failed to allocate ggml context for HiDream generation embeddings";
+        return false;
+    }
+
+    int64_t loaded_payload = 0;
+    ggml_tensor* x_proj1 = nullptr;
+    ggml_tensor* x_proj2 = nullptr;
+    ggml_tensor* x_proj2_bias = nullptr;
+    ggml_tensor* t0 = nullptr;
+    ggml_tensor* t0_bias = nullptr;
+    ggml_tensor* t2 = nullptr;
+    ggml_tensor* t2_bias = nullptr;
+    bool ok = true;
+    ok = ok && load_f32_tensor_bytes(catalog, ctx, "model.x_embedder.proj1.weight", 2, &x_proj1, &loaded_payload, error);
+    ok = ok && load_f32_tensor_bytes(catalog, ctx, "model.x_embedder.proj2.weight", 2, &x_proj2, &loaded_payload, error);
+    ok = ok && load_f32_tensor_bytes(catalog, ctx, "model.x_embedder.proj2.bias", 1, &x_proj2_bias, &loaded_payload, error);
+    ok = ok && load_f32_tensor_bytes(catalog, ctx, "model.t_embedder1.mlp.0.weight", 2, &t0, &loaded_payload, error);
+    ok = ok && load_f32_tensor_bytes(catalog, ctx, "model.t_embedder1.mlp.0.bias", 1, &t0_bias, &loaded_payload, error);
+    ok = ok && load_f32_tensor_bytes(catalog, ctx, "model.t_embedder1.mlp.2.weight", 2, &t2, &loaded_payload, error);
+    ok = ok && load_f32_tensor_bytes(catalog, ctx, "model.t_embedder1.mlp.2.bias", 1, &t2_bias, &loaded_payload, error);
+    if (!ok) {
+        ggml_free(ctx);
+        return false;
+    }
+
+    ggml_tensor* patch_x = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, patch_dim, patch_tokens);
+    std::memcpy(patch_x->data, patch_input.data(), patch_input.size() * sizeof(float));
+    ggml_tensor* patch_hidden = build_linear_bias(ctx, build_linear(ctx, patch_x, x_proj1), x_proj2, x_proj2_bias);
+
+    ggml_tensor* t_freq = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, timestep_dim, 1);
+    fill_timestep_frequency_tensor(t_freq, timestep);
+    ggml_tensor* t_hidden = build_linear_bias(ctx, ggml_silu(ctx, build_linear_bias(ctx, t_freq, t0, t0_bias)), t2, t2_bias);
+
+    ggml_cgraph* graph = ggml_new_graph_custom(ctx, 4096, false);
+    ggml_build_forward_expand(graph, patch_hidden);
+    ggml_build_forward_expand(graph, t_hidden);
+    ggml_graph_compute_with_ctx(ctx, graph, 4);
+
+    const int64_t patch_values = ggml_nelements(patch_hidden);
+    const int64_t timestep_values = ggml_nelements(t_hidden);
+    const float* patch_data = static_cast<const float*>(patch_hidden->data);
+    const float* timestep_data = static_cast<const float*>(t_hidden->data);
+    patch_embeddings->assign(patch_data, patch_data + patch_values);
+    timestep_embedding->assign(timestep_data, timestep_data + timestep_values);
+    if (payload_bytes) *payload_bytes += loaded_payload;
+    ggml_free(ctx);
+    return true;
+}
+
+bool run_final_layer2_on_image_tokens(const HiDreamO1TensorCatalog& catalog,
+                                      const std::vector<float>& hidden_state,
+                                      int64_t hidden_size,
+                                      int64_t image_token_begin,
+                                      int64_t image_tokens,
+                                      std::vector<float>* patch_output,
+                                      int64_t* payload_bytes,
+                                      std::string* error) {
+    if (patch_output == nullptr) return false;
+    patch_output->clear();
+    if (hidden_size <= 0 || image_token_begin < 0 || image_tokens <= 0 ||
+        hidden_state.size() < static_cast<size_t>((image_token_begin + image_tokens) * hidden_size)) {
+        if (error) *error = "HiDream final layer image token shape mismatch";
+        return false;
+    }
+
+    HiDreamO1TensorInfo final_info;
+    if (!find_hidream_o1_tensor(catalog, "model.final_layer2.linear.weight", &final_info) ||
+        final_info.shape.size() != 2 || final_info.shape[1] != hidden_size) {
+        if (error) *error = "missing or invalid HiDream final_layer2.linear.weight";
+        return false;
+    }
+    uint64_t static_payload = 0;
+    for (const std::string& name : {"model.final_layer2.linear.weight", "model.final_layer2.linear.bias"}) {
+        HiDreamO1TensorInfo info;
+        if (!find_hidream_o1_tensor(catalog, name, &info)) {
+            if (error) *error = "missing HiDream final layer tensor: " + name;
+            return false;
+        }
+        static_payload += tensor_payload_bytes(info);
+    }
+
+    ggml_init_params params{};
+    params.mem_size = static_cast<size_t>(static_payload + (256ull << 20));
+    ggml_context* ctx = ggml_init(params);
+    if (ctx == nullptr) {
+        if (error) *error = "failed to allocate ggml context for HiDream final layer";
+        return false;
+    }
+
+    int64_t loaded_payload = 0;
+    ggml_tensor* final_w = nullptr;
+    ggml_tensor* final_b = nullptr;
+    bool ok = true;
+    ok = ok && load_f32_tensor_bytes(catalog, ctx, "model.final_layer2.linear.weight", 2, &final_w, &loaded_payload, error);
+    ok = ok && load_f32_tensor_bytes(catalog, ctx, "model.final_layer2.linear.bias", 1, &final_b, &loaded_payload, error);
+    if (!ok) {
+        ggml_free(ctx);
+        return false;
+    }
+
+    ggml_tensor* image_hidden = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, hidden_size, image_tokens);
+    float* image_data = static_cast<float*>(image_hidden->data);
+    for (int64_t tok = 0; tok < image_tokens; ++tok) {
+        const size_t src = static_cast<size_t>((image_token_begin + tok) * hidden_size);
+        const size_t dst = static_cast<size_t>(tok * hidden_size);
+        std::memcpy(image_data + dst, hidden_state.data() + src, static_cast<size_t>(hidden_size) * sizeof(float));
+    }
+    ggml_tensor* out = build_linear_bias(ctx, image_hidden, final_w, final_b);
+    ggml_cgraph* graph = ggml_new_graph_custom(ctx, 4096, false);
+    ggml_build_forward_expand(graph, out);
+    ggml_graph_compute_with_ctx(ctx, graph, 4);
+
+    const int64_t output_values = ggml_nelements(out);
+    const float* data = static_cast<const float*>(out->data);
+    patch_output->assign(data, data + output_values);
+    if (payload_bytes) *payload_bytes += loaded_payload;
+    ggml_free(ctx);
+    return true;
+}
+
+void mean_pool_prefix(const std::vector<float>& state,
+                      int64_t hidden_size,
+                      int64_t tokens,
+                      std::vector<float>* pooled) {
+    if (pooled == nullptr) return;
+    pooled->assign(static_cast<size_t>(hidden_size), 0.0f);
+    if (hidden_size <= 0 || tokens <= 0 || state.size() < static_cast<size_t>(hidden_size * tokens)) return;
+    for (int64_t tok = 0; tok < tokens; ++tok) {
+        for (int64_t d = 0; d < hidden_size; ++d) {
+            (*pooled)[static_cast<size_t>(d)] += state[static_cast<size_t>(tok * hidden_size + d)];
+        }
+    }
+    const float inv = 1.0f / static_cast<float>(tokens);
+    for (float& value : *pooled) value *= inv;
+}
+
+bool run_combined_sequence_predictor(const HiDreamO1NativeModelLayout& layout,
+                                     const HiDreamO1TensorCatalog& catalog,
+                                     const HiDreamO1ForwardPlan& plan,
+                                     const std::vector<uint64_t>& token_ids,
+                                     const std::vector<float>& patch_input,
+                                     float timestep,
+                                     std::vector<float>* patch_output,
+                                     HiDreamO1NativeImageRunSummary* summary,
+                                     int64_t* payload_bytes,
+                                     std::string* error) {
+    if (patch_output == nullptr || summary == nullptr) return false;
+    patch_output->clear();
+    const int64_t hidden = layout.text.hidden_size;
+    if (hidden <= 0 || plan.text_tokens <= 0 || plan.image_tokens <= 0 ||
+        plan.total_sequence_tokens <= plan.image_token_begin ||
+        token_ids.size() != static_cast<size_t>(plan.text_tokens)) {
+        if (error) *error = "HiDream combined predictor shape mismatch";
+        return false;
+    }
+
+    std::vector<float> text_embeddings;
+    if (!load_embedding_rows(catalog, token_ids, hidden, &text_embeddings, payload_bytes, error)) {
+        return false;
+    }
+
+    std::vector<float> patch_embeddings;
+    std::vector<float> timestep_embedding;
+    if (!run_generation_input_embeddings(catalog,
+                                         patch_input,
+                                         plan.image_tokens,
+                                         timestep,
+                                         &patch_embeddings,
+                                         &timestep_embedding,
+                                         payload_bytes,
+                                         error)) {
+        return false;
+    }
+    if (patch_embeddings.size() != static_cast<size_t>(hidden * plan.image_tokens) ||
+        timestep_embedding.size() != static_cast<size_t>(hidden)) {
+        if (error) *error = "HiDream combined predictor embedding output mismatch";
+        return false;
+    }
+
+    std::vector<float> state(static_cast<size_t>(hidden * plan.total_sequence_tokens), 0.0f);
+    std::memcpy(state.data(), text_embeddings.data(), text_embeddings.size() * sizeof(float));
+    for (int64_t i = 0; i < plan.image_token_begin - plan.timestep_token_begin; ++i) {
+        const size_t dst = static_cast<size_t>((plan.timestep_token_begin + i) * hidden);
+        std::memcpy(state.data() + dst, timestep_embedding.data(), static_cast<size_t>(hidden) * sizeof(float));
+    }
+    for (int64_t tok = 0; tok < plan.image_tokens; ++tok) {
+        const size_t dst = static_cast<size_t>((plan.image_token_begin + tok) * hidden);
+        const size_t src = static_cast<size_t>(tok * hidden);
+        std::memcpy(state.data() + dst, patch_embeddings.data() + src, static_cast<size_t>(hidden) * sizeof(float));
+    }
+
+    for (int layer = 0; layer < layout.text.num_hidden_layers; ++layer) {
+        std::vector<float> next;
+        HiDreamO1RealBlockRunSummary block;
+        if (!run_text_layer_from_input(layout,
+                                       catalog,
+                                       layer,
+                                       plan.total_sequence_tokens,
+                                       plan.timestep_token_begin,
+                                       state,
+                                       &next,
+                                       &block,
+                                       error)) {
+            return false;
+        }
+        if (payload_bytes) *payload_bytes += block.payload_bytes;
+        state.swap(next);
+        summary->image_transformer_layers = layer + 1;
+    }
+
+    std::vector<float> norm_weight;
+    const float eps = layout.text.rms_norm_eps > 0.0 ? static_cast<float>(layout.text.rms_norm_eps) : 1e-6f;
+    if (load_vector_tensor(catalog, "model.language_model.norm.weight", &norm_weight, payload_bytes, nullptr)) {
+        apply_text_final_norm(norm_weight, eps, hidden, plan.total_sequence_tokens, &state);
+    }
+
+    summary->text_transformer_layers = summary->image_transformer_layers;
+    std::vector<float> text_state(static_cast<size_t>(hidden * plan.text_tokens));
+    std::memcpy(text_state.data(), state.data(), text_state.size() * sizeof(float));
+    summarize_vector(text_state,
+                     &summary->text_transformer_values,
+                     &summary->text_transformer_checksum,
+                     &summary->text_transformer_l2,
+                     nullptr);
+    summarize_vector(state,
+                     &summary->image_transformer_values,
+                     &summary->image_transformer_checksum,
+                     &summary->image_transformer_l2,
+                     nullptr);
+    std::vector<float> pooled;
+    mean_pool_prefix(state, hidden, plan.text_tokens, &pooled);
+    summarize_vector(pooled,
+                     &summary->conditioning_values,
+                     &summary->conditioning_checksum,
+                     &summary->conditioning_l2,
+                     nullptr);
+
+    return run_final_layer2_on_image_tokens(catalog,
+                                            state,
+                                            hidden,
+                                            plan.image_token_begin,
+                                            plan.image_tokens,
+                                            patch_output,
+                                            payload_bytes,
+                                            error);
 }
 
 }  // namespace
@@ -1569,7 +1900,7 @@ bool hidream_o1_run_native_layer_chain(const std::string& model_dir,
     for (int layer = 0; layer < layout.text.num_hidden_layers; ++layer) {
         std::vector<float> next;
         HiDreamO1RealBlockRunSummary block;
-        if (!run_text_layer_from_input(layout, catalog, layer, text_tokens, text_state, &next, &block, error)) {
+        if (!run_text_layer_from_input(layout, catalog, layer, text_tokens, text_tokens, text_state, &next, &block, error)) {
             return false;
         }
         text_payload += block.payload_bytes;
@@ -1809,21 +2140,7 @@ bool hidream_o1_generate_native_preview_image(const std::string& model_dir,
 
     const std::vector<uint64_t> token_ids = pseudo_tokenize_official_caption(prompt);
     const int64_t text_tokens = static_cast<int64_t>(token_ids.size());
-    std::vector<float> text_conditioning;
-    int64_t transformer_payload_bytes = 0;
-    if (!run_text_transformer_conditioning(layout,
-                                           catalog,
-                                           token_ids,
-                                           &text_conditioning,
-                                           &summary->text_transformer_layers,
-                                           &summary->text_transformer_values,
-                                           &summary->text_transformer_checksum,
-                                           &summary->text_transformer_l2,
-                                           &transformer_payload_bytes,
-                                           error)) {
-        return false;
-    }
-    if (text_conditioning.empty() || text_tokens <= 0) {
+    if (token_ids.empty() || text_tokens <= 0) {
         if (error) *error = "native preview prompt conditioning failed";
         return false;
     }
@@ -1834,11 +2151,6 @@ bool hidream_o1_generate_native_preview_image(const std::string& model_dir,
     }
     summary->text_tokens = plan.text_tokens;
     summary->total_sequence_tokens = plan.total_sequence_tokens;
-    summarize_vector(text_conditioning,
-                     &summary->conditioning_values,
-                     &summary->conditioning_checksum,
-                     &summary->conditioning_l2,
-                     nullptr);
 
     std::vector<float> current(static_cast<size_t>(shape.patch_tokens) * static_cast<size_t>(shape.patch_dim), 0.0f);
     uint64_t state = splitmix64(static_cast<uint64_t>(static_cast<uint32_t>(seed + 1)) ^ 0x684d3f1b5ac9e23dull);
@@ -1853,14 +2165,16 @@ bool hidream_o1_generate_native_preview_image(const std::string& model_dir,
     for (int i = 0; i < steps; ++i) {
         std::vector<float> x0_pred;
         const float t_pixeldit = hidream_o1_t_pixeldit(timesteps[static_cast<size_t>(i)]);
-        if (!run_projection_predictor(catalog,
-                                      current,
-                                      text_conditioning,
-                                      shape.patch_tokens,
-                                      t_pixeldit,
-                                      &x0_pred,
-                                      &payload_bytes,
-                                      error)) {
+        if (!run_combined_sequence_predictor(layout,
+                                             catalog,
+                                             plan,
+                                             token_ids,
+                                             current,
+                                             t_pixeldit,
+                                             &x0_pred,
+                                             summary,
+                                             &payload_bytes,
+                                             error)) {
             return false;
         }
         const std::vector<float> model_output = hidream_o1_x0_to_model_output(x0_pred, current, sigmas[static_cast<size_t>(i)]);
