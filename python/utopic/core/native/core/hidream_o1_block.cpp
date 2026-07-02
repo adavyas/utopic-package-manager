@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <functional>
 #include <limits>
 #include <stdexcept>
 #include <string>
@@ -533,6 +534,132 @@ bool run_visual_layer_from_input(const HiDreamO1NativeModelLayout& layout,
                          &summary->output_l2,
                          &summary->output_max_abs);
     }
+    ggml_free(ctx);
+    return true;
+}
+
+bool run_projection_predictor(const HiDreamO1TensorCatalog& catalog,
+                              const std::vector<float>& patch_input,
+                              int64_t patch_tokens,
+                              float timestep,
+                              std::vector<float>* patch_output,
+                              int64_t* payload_bytes,
+                              std::string* error) {
+    if (patch_output == nullptr) return false;
+    patch_output->clear();
+
+    HiDreamO1TensorInfo x_proj1_info;
+    HiDreamO1TensorInfo t0_info;
+    HiDreamO1TensorInfo final_info;
+    if (!find_hidream_o1_tensor(catalog, "model.x_embedder.proj1.weight", &x_proj1_info) ||
+        x_proj1_info.shape.size() != 2) {
+        if (error) *error = "missing or invalid HiDream x_embedder.proj1.weight";
+        return false;
+    }
+    if (!find_hidream_o1_tensor(catalog, "model.t_embedder1.mlp.0.weight", &t0_info) ||
+        t0_info.shape.size() != 2) {
+        if (error) *error = "missing or invalid HiDream t_embedder1.mlp.0.weight";
+        return false;
+    }
+    if (!find_hidream_o1_tensor(catalog, "model.final_layer2.linear.weight", &final_info) ||
+        final_info.shape.size() != 2) {
+        if (error) *error = "missing or invalid HiDream final_layer2.linear.weight";
+        return false;
+    }
+
+    const int64_t patch_dim = x_proj1_info.shape[1];
+    const int64_t timestep_dim = t0_info.shape[1];
+    const int64_t final_patch_dim = final_info.shape[0];
+    const int64_t hidden_size = final_info.shape[1];
+    if (patch_dim <= 0 || timestep_dim <= 0 || hidden_size <= 0 || final_patch_dim != patch_dim ||
+        patch_input.size() != static_cast<size_t>(patch_dim * patch_tokens)) {
+        if (error) *error = "HiDream projection predictor shape mismatch";
+        return false;
+    }
+
+    uint64_t static_payload = 0;
+    const std::vector<std::string> names = {
+        "model.x_embedder.proj1.weight",
+        "model.x_embedder.proj2.weight",
+        "model.x_embedder.proj2.bias",
+        "model.t_embedder1.mlp.0.weight",
+        "model.t_embedder1.mlp.0.bias",
+        "model.t_embedder1.mlp.2.weight",
+        "model.t_embedder1.mlp.2.bias",
+        "model.final_layer2.linear.weight",
+        "model.final_layer2.linear.bias",
+    };
+    for (const std::string& name : names) {
+        HiDreamO1TensorInfo info;
+        if (!find_hidream_o1_tensor(catalog, name, &info)) {
+            if (error) *error = "missing HiDream projection tensor: " + name;
+            return false;
+        }
+        static_payload += tensor_payload_bytes(info);
+    }
+
+    ggml_init_params params{};
+    params.mem_size = static_cast<size_t>(static_payload + (512ull << 20));
+    ggml_context* ctx = ggml_init(params);
+    if (ctx == nullptr) {
+        if (error) *error = "failed to allocate ggml context for HiDream projection predictor";
+        return false;
+    }
+
+    int64_t loaded_payload = 0;
+    ggml_tensor* x_proj1 = nullptr;
+    ggml_tensor* x_proj2 = nullptr;
+    ggml_tensor* x_proj2_bias = nullptr;
+    ggml_tensor* t0 = nullptr;
+    ggml_tensor* t0_bias = nullptr;
+    ggml_tensor* t2 = nullptr;
+    ggml_tensor* t2_bias = nullptr;
+    ggml_tensor* final_w = nullptr;
+    ggml_tensor* final_b = nullptr;
+    bool ok = true;
+    ok = ok && load_f32_tensor_bytes(catalog, ctx, "model.x_embedder.proj1.weight", 2, &x_proj1, &loaded_payload, error);
+    ok = ok && load_f32_tensor_bytes(catalog, ctx, "model.x_embedder.proj2.weight", 2, &x_proj2, &loaded_payload, error);
+    ok = ok && load_f32_tensor_bytes(catalog, ctx, "model.x_embedder.proj2.bias", 1, &x_proj2_bias, &loaded_payload, error);
+    ok = ok && load_f32_tensor_bytes(catalog, ctx, "model.t_embedder1.mlp.0.weight", 2, &t0, &loaded_payload, error);
+    ok = ok && load_f32_tensor_bytes(catalog, ctx, "model.t_embedder1.mlp.0.bias", 1, &t0_bias, &loaded_payload, error);
+    ok = ok && load_f32_tensor_bytes(catalog, ctx, "model.t_embedder1.mlp.2.weight", 2, &t2, &loaded_payload, error);
+    ok = ok && load_f32_tensor_bytes(catalog, ctx, "model.t_embedder1.mlp.2.bias", 1, &t2_bias, &loaded_payload, error);
+    ok = ok && load_f32_tensor_bytes(catalog, ctx, "model.final_layer2.linear.weight", 2, &final_w, &loaded_payload, error);
+    ok = ok && load_f32_tensor_bytes(catalog, ctx, "model.final_layer2.linear.bias", 1, &final_b, &loaded_payload, error);
+    if (!ok) {
+        ggml_free(ctx);
+        return false;
+    }
+
+    ggml_tensor* patch_x = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, patch_dim, patch_tokens);
+    std::memcpy(patch_x->data, patch_input.data(), patch_input.size() * sizeof(float));
+    ggml_tensor* patch_hidden = build_linear_bias(ctx, build_linear(ctx, patch_x, x_proj1), x_proj2, x_proj2_bias);
+
+    ggml_tensor* t_freq = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, timestep_dim, 1);
+    float* t_data = static_cast<float*>(t_freq->data);
+    const int64_t half = timestep_dim / 2;
+    const float scaled_t = timestep * 1000.0f;
+    for (int64_t i = 0; i < half; ++i) {
+        const double freq = std::exp(-std::log(10000.0) * static_cast<double>(i) / static_cast<double>(half));
+        const double arg = static_cast<double>(scaled_t) * freq;
+        t_data[i] = static_cast<float>(std::cos(arg));
+        t_data[half + i] = static_cast<float>(std::sin(arg));
+    }
+    if (timestep_dim % 2 != 0) {
+        t_data[timestep_dim - 1] = 0.0f;
+    }
+    ggml_tensor* t_hidden = build_linear_bias(ctx, ggml_silu(ctx, build_linear_bias(ctx, t_freq, t0, t0_bias)), t2, t2_bias);
+    ggml_tensor* hidden = ggml_add(ctx, patch_hidden, ggml_reshape_2d(ctx, t_hidden, hidden_size, 1));
+    ggml_tensor* final_out = build_linear_bias(ctx, hidden, final_w, final_b);
+
+    ggml_cgraph* graph = ggml_new_graph_custom(ctx, 4096, false);
+    ggml_build_forward_expand(graph, final_out);
+    ggml_graph_compute_with_ctx(ctx, graph, 4);
+
+    const int64_t output_values = ggml_nelements(final_out);
+    const float* out = static_cast<const float*>(final_out->data);
+    patch_output->assign(out, out + output_values);
+    if (payload_bytes) *payload_bytes += loaded_payload;
     ggml_free(ctx);
     return true;
 }
@@ -1294,6 +1421,102 @@ bool hidream_o1_run_native_projection_graph(const std::string& model_dir,
                      &summary->final_output_l2,
                      nullptr);
     ggml_free(ctx);
+    return true;
+}
+
+bool hidream_o1_generate_native_preview_image(const std::string& model_dir,
+                                              const std::string& prompt,
+                                              const std::string& output_path,
+                                              int width,
+                                              int height,
+                                              int steps,
+                                              int seed,
+                                              HiDreamO1NativeImageRunSummary* summary,
+                                              std::string* error) {
+    if (summary == nullptr) return false;
+    *summary = HiDreamO1NativeImageRunSummary{};
+    summary->width = width;
+    summary->height = height;
+    summary->steps = steps;
+    summary->output_path = output_path;
+
+    const HiDreamO1RuntimeConfig cfg = default_hidream_o1_runtime_config();
+    const HiDreamO1Shape shape = hidream_o1_shape_for_size(cfg, width, height);
+    if (shape.patch_tokens <= 0 || shape.patch_dim <= 0 || width % cfg.patch_size != 0 || height % cfg.patch_size != 0) {
+        if (error) *error = "invalid HiDream native preview image shape";
+        return false;
+    }
+    if (steps <= 0) steps = 1;
+    steps = std::min<int>(steps, static_cast<int>(hidream_o1_dev_timesteps().size()));
+    summary->steps = steps;
+    summary->image_tokens = shape.patch_tokens;
+
+    HiDreamO1TensorCatalog catalog;
+    if (!load_hidream_o1_tensor_catalog(model_dir, &catalog)) {
+        if (error) *error = catalog.error;
+        return false;
+    }
+
+    std::vector<float> current(static_cast<size_t>(shape.patch_tokens) * static_cast<size_t>(shape.patch_dim), 0.0f);
+    const uint64_t prompt_hash = static_cast<uint64_t>(std::hash<std::string>{}(prompt));
+    uint64_t state = prompt_hash ^ (static_cast<uint64_t>(seed) << 32) ^ 0x9e3779b97f4a7c15ull;
+    for (float& value : current) {
+        state = state * 6364136223846793005ull + 1442695040888963407ull;
+        const uint32_t bits = static_cast<uint32_t>((state >> 32) & 0xffffffffu);
+        value = (static_cast<float>(bits) / 2147483648.0f) - 1.0f;
+    }
+
+    const std::vector<int> timesteps = hidream_o1_dev_timesteps();
+    const std::vector<float> sigmas = hidream_o1_dev_sigmas();
+    std::vector<float> final_patch_values;
+    int64_t payload_bytes = 0;
+    for (int i = 0; i < steps; ++i) {
+        std::vector<float> x0_pred;
+        const float t_pixeldit = hidream_o1_t_pixeldit(timesteps[static_cast<size_t>(i)]);
+        if (!run_projection_predictor(catalog,
+                                      current,
+                                      shape.patch_tokens,
+                                      t_pixeldit,
+                                      &x0_pred,
+                                      &payload_bytes,
+                                      error)) {
+            return false;
+        }
+        const std::vector<float> model_output = hidream_o1_x0_to_model_output(x0_pred, current, sigmas[static_cast<size_t>(i)]);
+        if (model_output.empty()) {
+            if (error) *error = "native preview predictor returned invalid shape";
+            return false;
+        }
+        const std::vector<float> noise(current.size(), 0.0f);
+        current = hidream_o1_flash_step(current,
+                                        model_output,
+                                        noise,
+                                        sigmas[static_cast<size_t>(i)],
+                                        sigmas[static_cast<size_t>(i + 1)],
+                                        cfg.default_noise_scale_start,
+                                        cfg.default_noise_clip_std);
+        if (current.empty()) {
+            if (error) *error = "native preview scheduler step failed";
+            return false;
+        }
+        final_patch_values = x0_pred;
+    }
+    if (final_patch_values.empty()) final_patch_values = current;
+    summary->patch_values = static_cast<int64_t>(final_patch_values.size());
+    summarize_vector(final_patch_values,
+                     nullptr,
+                     &summary->final_patch_checksum,
+                     &summary->final_patch_l2,
+                     nullptr);
+
+    const std::vector<unsigned char> rgb = hidream_o1_unpatch_to_rgb8(final_patch_values, width, height, cfg);
+    if (rgb.empty()) {
+        if (error) *error = "native preview unpatch produced no RGB output";
+        return false;
+    }
+    if (!hidream_o1_write_png_rgb8(output_path, rgb, width, height, error)) {
+        return false;
+    }
     return true;
 }
 

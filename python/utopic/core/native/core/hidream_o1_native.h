@@ -214,6 +214,11 @@ std::vector<unsigned char> hidream_o1_unpatch_to_rgb8(const std::vector<float>& 
                                                       int width,
                                                       int height,
                                                       const HiDreamO1RuntimeConfig& cfg);
+bool hidream_o1_write_png_rgb8(const std::string& path,
+                               const std::vector<unsigned char>& rgb,
+                               int width,
+                               int height,
+                               std::string* error);
 std::string hidream_o1_default_model_dir();
 std::string hidream_o1_default_model_path();
 std::string hidream_o1_default_sd_cli();

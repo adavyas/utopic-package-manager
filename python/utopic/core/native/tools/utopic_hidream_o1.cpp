@@ -16,7 +16,8 @@ void usage(const char* argv0) {
                  "[--native-exec-check] [--native-text-tokens N] [--native-real-block0-tokens N] "
                  "[--native-real-visual-block0-tokens N] [--native-full-chain-check] "
                  "[--native-chain-text-tokens N] [--native-chain-visual-tokens N] "
-                 "[--native-projection-patch-tokens N] [--native-projection-final-tokens N] [--native-skip-payloads] [--dry-run]\n",
+                 "[--native-projection-patch-tokens N] [--native-projection-final-tokens N] "
+                 "[--native-preview] [--native-skip-payloads] [--dry-run]\n",
                  argv0);
     std::fprintf(stderr,
                  "note: native-exec-check loads the HiDream config, safetensors catalog, forward token plan, block0 tensor payloads, and runs native block0 graph execution without invoking sd.cpp or Torch.\n");
@@ -69,6 +70,7 @@ int main(int argc, char** argv) {
     int64_t native_chain_visual_tokens = 1;
     int64_t native_projection_patch_tokens = 1;
     int64_t native_projection_final_tokens = 1;
+    bool native_preview = false;
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
         if (consume(a, "--help")) {
@@ -114,6 +116,8 @@ int main(int argc, char** argv) {
             native_projection_patch_tokens = std::atoll(argv[++i]);
         } else if (consume(a, "--native-projection-final-tokens") && i + 1 < argc) {
             native_projection_final_tokens = std::atoll(argv[++i]);
+        } else if (consume(a, "--native-preview")) {
+            native_preview = true;
         } else if (consume(a, "--native-skip-payloads")) {
             native_load_payloads = false;
         } else if (consume(a, "--dry-run")) {
@@ -135,7 +139,6 @@ int main(int argc, char** argv) {
     }
 
     const utopic::HiDreamO1Shape shape = utopic::hidream_o1_shape_for_size(cfg, req.width, req.height);
-    const std::string cmd = utopic::build_hidream_o1_command(req);
     if (native_exec_check) {
         if (!utopic::hidream_o1_dir_exists(req.model_dir)) {
             std::fprintf(stderr, "utopic_hidream_o1: missing HiDream-O1 model dir: %s\n", req.model_dir.c_str());
@@ -242,6 +245,45 @@ int main(int argc, char** argv) {
         if (dry_run) return 0;
     }
 
+    if (dry_run) {
+        return 0;
+    }
+    if (native_preview) {
+        if (!utopic::hidream_o1_dir_exists(req.model_dir)) {
+            std::fprintf(stderr, "utopic_hidream_o1: missing HiDream-O1 model dir: %s\n", req.model_dir.c_str());
+            return 1;
+        }
+        if (!ensure_parent_dir(req.output_path)) {
+            std::fprintf(stderr, "utopic_hidream_o1: failed to create output directory for: %s\n", req.output_path.c_str());
+            return 1;
+        }
+        utopic::HiDreamO1NativeImageRunSummary image_summary;
+        std::string native_error;
+        if (!utopic::hidream_o1_generate_native_preview_image(req.model_dir,
+                                                              req.prompt,
+                                                              req.output_path,
+                                                              req.width,
+                                                              req.height,
+                                                              req.steps,
+                                                              req.seed,
+                                                              &image_summary,
+                                                              &native_error)) {
+            std::fprintf(stderr, "utopic_hidream_o1: native preview generation failed: %s\n", native_error.c_str());
+            return 1;
+        }
+        std::printf("utopic_hidream_o1 native_preview=OK wrote=%s width=%d height=%d steps=%d image_tokens=%lld patch_values=%lld final_patch_l2=%.8f final_patch_checksum=%.8f backend=native-preview-no-torch-no-sdcpp\n",
+                    image_summary.output_path.c_str(),
+                    image_summary.width,
+                    image_summary.height,
+                    image_summary.steps,
+                    static_cast<long long>(image_summary.image_tokens),
+                    static_cast<long long>(image_summary.patch_values),
+                    image_summary.final_patch_l2,
+                    image_summary.final_patch_checksum);
+        return 0;
+    }
+
+    const std::string cmd = utopic::build_hidream_o1_command(req);
     std::fprintf(stderr,
                  "utopic_hidream_o1 model=%s backend=native-prep-plus-official-torch-reference-no-sdcpp model_dir=%s source_dir=%s torch_python=%s width=%d height=%d patch_tokens=%lld patch_dim=%d steps=%d cfg=%.3f seed=%d native_status=%s\n",
                  cfg.model_id,
@@ -258,9 +300,6 @@ int main(int argc, char** argv) {
                  cfg.native_status);
     std::fprintf(stderr, "utopic_hidream_o1 command=%s\n", cmd.c_str());
 
-    if (dry_run) {
-        return 0;
-    }
     if (!utopic::hidream_o1_file_exists(req.torch_python)) {
         std::fprintf(stderr, "utopic_hidream_o1: missing torch python: %s\n", req.torch_python.c_str());
         return 1;

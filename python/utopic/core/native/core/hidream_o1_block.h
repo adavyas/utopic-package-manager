@@ -115,6 +115,17 @@ struct HiDreamO1NativeProjectionRunSummary {
     double final_output_checksum = 0.0;
 };
 
+struct HiDreamO1NativeImageRunSummary {
+    int width = 0;
+    int height = 0;
+    int steps = 0;
+    int64_t image_tokens = 0;
+    int64_t patch_values = 0;
+    double final_patch_l2 = 0.0;
+    double final_patch_checksum = 0.0;
+    std::string output_path;
+};
+
 bool hidream_o1_run_real_text_block_graph(const std::string& model_dir,
                                           int layer,
                                           int64_t sequence_tokens,
@@ -136,5 +147,14 @@ bool hidream_o1_run_native_projection_graph(const std::string& model_dir,
                                             float timestep,
                                             HiDreamO1NativeProjectionRunSummary* summary,
                                             std::string* error);
+bool hidream_o1_generate_native_preview_image(const std::string& model_dir,
+                                              const std::string& prompt,
+                                              const std::string& output_path,
+                                              int width,
+                                              int height,
+                                              int steps,
+                                              int seed,
+                                              HiDreamO1NativeImageRunSummary* summary,
+                                              std::string* error);
 
 }  // namespace utopic

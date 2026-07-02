@@ -286,6 +286,43 @@ float unbiased_stddev(const std::vector<float>& values) {
     return static_cast<float>(std::sqrt(accum / static_cast<double>(values.size() - 1)));
 }
 
+uint32_t crc32_update(uint32_t crc, const unsigned char* data, size_t size) {
+    crc = ~crc;
+    for (size_t i = 0; i < size; ++i) {
+        crc ^= data[i];
+        for (int bit = 0; bit < 8; ++bit) {
+            crc = (crc >> 1) ^ (0xedb88320u & (0u - (crc & 1u)));
+        }
+    }
+    return ~crc;
+}
+
+uint32_t adler32_bytes(const std::vector<unsigned char>& data) {
+    uint32_t a = 1;
+    uint32_t b = 0;
+    for (unsigned char byte : data) {
+        a = (a + byte) % 65521u;
+        b = (b + a) % 65521u;
+    }
+    return (b << 16) | a;
+}
+
+void append_be32(std::vector<unsigned char>* out, uint32_t value) {
+    out->push_back(static_cast<unsigned char>((value >> 24) & 0xffu));
+    out->push_back(static_cast<unsigned char>((value >> 16) & 0xffu));
+    out->push_back(static_cast<unsigned char>((value >> 8) & 0xffu));
+    out->push_back(static_cast<unsigned char>(value & 0xffu));
+}
+
+void append_png_chunk(std::vector<unsigned char>* png, const char type[4], const std::vector<unsigned char>& payload) {
+    append_be32(png, static_cast<uint32_t>(payload.size()));
+    const size_t type_begin = png->size();
+    png->insert(png->end(), type, type + 4);
+    png->insert(png->end(), payload.begin(), payload.end());
+    const uint32_t crc = crc32_update(0, png->data() + type_begin, png->size() - type_begin);
+    append_be32(png, crc);
+}
+
 }  // namespace
 
 HiDreamO1RuntimeConfig default_hidream_o1_runtime_config() {
@@ -519,6 +556,75 @@ std::vector<unsigned char> hidream_o1_unpatch_to_rgb8(const std::vector<float>& 
         }
     }
     return rgb;
+}
+
+bool hidream_o1_write_png_rgb8(const std::string& path,
+                               const std::vector<unsigned char>& rgb,
+                               int width,
+                               int height,
+                               std::string* error) {
+    if (width <= 0 || height <= 0) {
+        if (error) *error = "PNG width/height must be positive";
+        return false;
+    }
+    const size_t expected = static_cast<size_t>(width) * static_cast<size_t>(height) * 3;
+    if (rgb.size() != expected) {
+        if (error) *error = "PNG RGB buffer size mismatch";
+        return false;
+    }
+
+    std::vector<unsigned char> raw;
+    raw.reserve(static_cast<size_t>(height) * (1 + static_cast<size_t>(width) * 3));
+    for (int y = 0; y < height; ++y) {
+        raw.push_back(0);  // PNG filter type 0.
+        const size_t row = static_cast<size_t>(y) * static_cast<size_t>(width) * 3;
+        raw.insert(raw.end(), rgb.begin() + row, rgb.begin() + row + static_cast<size_t>(width) * 3);
+    }
+
+    std::vector<unsigned char> zlib;
+    zlib.reserve(raw.size() + raw.size() / 65535 + 16);
+    zlib.push_back(0x78);
+    zlib.push_back(0x01);
+    size_t pos = 0;
+    while (pos < raw.size()) {
+        const size_t remaining = raw.size() - pos;
+        const uint16_t block = static_cast<uint16_t>(std::min<size_t>(remaining, 65535));
+        const bool last = pos + block == raw.size();
+        zlib.push_back(last ? 0x01 : 0x00);
+        zlib.push_back(static_cast<unsigned char>(block & 0xffu));
+        zlib.push_back(static_cast<unsigned char>((block >> 8) & 0xffu));
+        const uint16_t nlen = static_cast<uint16_t>(~block);
+        zlib.push_back(static_cast<unsigned char>(nlen & 0xffu));
+        zlib.push_back(static_cast<unsigned char>((nlen >> 8) & 0xffu));
+        zlib.insert(zlib.end(), raw.begin() + static_cast<std::ptrdiff_t>(pos), raw.begin() + static_cast<std::ptrdiff_t>(pos + block));
+        pos += block;
+    }
+    append_be32(&zlib, adler32_bytes(raw));
+
+    std::vector<unsigned char> png = {0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'};
+    std::vector<unsigned char> ihdr;
+    append_be32(&ihdr, static_cast<uint32_t>(width));
+    append_be32(&ihdr, static_cast<uint32_t>(height));
+    ihdr.push_back(8);  // bit depth
+    ihdr.push_back(2);  // RGB
+    ihdr.push_back(0);  // compression
+    ihdr.push_back(0);  // filter
+    ihdr.push_back(0);  // interlace
+    append_png_chunk(&png, "IHDR", ihdr);
+    append_png_chunk(&png, "IDAT", zlib);
+    append_png_chunk(&png, "IEND", {});
+
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    if (!out) {
+        if (error) *error = "failed to open PNG output: " + path;
+        return false;
+    }
+    out.write(reinterpret_cast<const char*>(png.data()), static_cast<std::streamsize>(png.size()));
+    if (!out) {
+        if (error) *error = "failed to write PNG output: " + path;
+        return false;
+    }
+    return true;
 }
 
 std::string hidream_o1_default_model_dir() {
