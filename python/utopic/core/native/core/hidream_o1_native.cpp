@@ -107,6 +107,49 @@ bool parse_json_string(const std::string& text, size_t* pos, std::string* out) {
     return false;
 }
 
+void skip_ws(const std::string& text, size_t* pos);
+
+bool extract_json_object(const std::string& text, const std::string& key, std::string* out) {
+    if (out == nullptr) return false;
+    const size_t key_pos = text.find("\"" + key + "\"");
+    if (key_pos == std::string::npos) return false;
+    const size_t open = text.find('{', key_pos);
+    if (open == std::string::npos) return false;
+    const size_t close = find_matching_brace(text, open);
+    if (close == std::string::npos || close <= open) return false;
+    *out = text.substr(open, close - open + 1);
+    return true;
+}
+
+bool parse_json_number(const std::string& text, const std::string& key, double* out) {
+    if (out == nullptr) return false;
+    const size_t key_pos = text.find("\"" + key + "\"");
+    if (key_pos == std::string::npos) return false;
+    size_t pos = text.find(':', key_pos);
+    if (pos == std::string::npos) return false;
+    ++pos;
+    skip_ws(text, &pos);
+    const size_t begin = pos;
+    while (pos < text.size()) {
+        const char c = text[pos];
+        if ((c >= '0' && c <= '9') || c == '-' || c == '+' || c == '.' || c == 'e' || c == 'E') {
+            ++pos;
+            continue;
+        }
+        break;
+    }
+    if (begin == pos) return false;
+    *out = std::strtod(text.substr(begin, pos - begin).c_str(), nullptr);
+    return true;
+}
+
+bool parse_json_int(const std::string& text, const std::string& key, int* out) {
+    double value = 0.0;
+    if (!parse_json_number(text, key, &value) || out == nullptr) return false;
+    *out = static_cast<int>(value);
+    return true;
+}
+
 void skip_ws(const std::string& text, size_t* pos) {
     while (pos != nullptr && *pos < text.size()) {
         const char c = text[*pos];
@@ -558,6 +601,92 @@ bool load_hidream_o1_shard_manifest(const std::string& model_dir, HiDreamO1Shard
     manifest->shard_files.assign(shards.begin(), shards.end());
     if (manifest->entries.empty()) {
         manifest->error = "weight_map is empty";
+        return false;
+    }
+    return true;
+}
+
+bool load_hidream_o1_native_model_layout(const std::string& model_dir, HiDreamO1NativeModelLayout* layout) {
+    if (layout == nullptr) return false;
+    *layout = HiDreamO1NativeModelLayout{};
+    layout->model_dir = model_dir;
+
+    std::string config_text;
+    const std::string config_path = join_path(model_dir, "config.json");
+    if (!read_text_file(config_path, &config_text)) {
+        layout->error = "missing or unreadable config: " + config_path;
+        return false;
+    }
+
+    std::string text_config;
+    std::string vision_config;
+    if (!extract_json_object(config_text, "text_config", &text_config) ||
+        !extract_json_object(config_text, "vision_config", &vision_config)) {
+        layout->error = "config is missing text_config or vision_config";
+        return false;
+    }
+
+    parse_json_int(config_text, "image_token_id", &layout->image_token_id);
+    parse_json_int(config_text, "vision_start_token_id", &layout->vision_start_token_id);
+    parse_json_int(text_config, "hidden_size", &layout->text.hidden_size);
+    parse_json_int(text_config, "intermediate_size", &layout->text.intermediate_size);
+    parse_json_int(text_config, "num_hidden_layers", &layout->text.num_hidden_layers);
+    parse_json_int(text_config, "num_attention_heads", &layout->text.num_attention_heads);
+    parse_json_int(text_config, "num_key_value_heads", &layout->text.num_key_value_heads);
+    parse_json_int(text_config, "head_dim", &layout->text.head_dim);
+    parse_json_int(text_config, "vocab_size", &layout->text.vocab_size);
+    parse_json_number(text_config, "rope_theta", &layout->text.rope_theta);
+    parse_json_number(text_config, "rms_norm_eps", &layout->text.rms_norm_eps);
+
+    parse_json_int(vision_config, "hidden_size", &layout->vision.hidden_size);
+    parse_json_int(vision_config, "intermediate_size", &layout->vision.intermediate_size);
+    parse_json_int(vision_config, "depth", &layout->vision.depth);
+    parse_json_int(vision_config, "num_heads", &layout->vision.num_heads);
+    parse_json_int(vision_config, "patch_size", &layout->vision.patch_size);
+    parse_json_int(vision_config, "temporal_patch_size", &layout->vision.temporal_patch_size);
+    parse_json_int(vision_config, "spatial_merge_size", &layout->vision.spatial_merge_size);
+    parse_json_int(vision_config, "out_hidden_size", &layout->vision.out_hidden_size);
+
+    HiDreamO1ShardManifest manifest;
+    if (!load_hidream_o1_shard_manifest(model_dir, &manifest)) {
+        layout->error = manifest.error;
+        return false;
+    }
+    layout->tensor_count = static_cast<int64_t>(manifest.entries.size());
+
+    std::set<std::string> names;
+    for (const HiDreamO1ShardEntry& entry : manifest.entries) {
+        names.insert(entry.tensor_name);
+        if (entry.tensor_name.find("model.language_model.") == 0) layout->text_tensor_count++;
+        if (entry.tensor_name.find("model.visual.") == 0) layout->vision_tensor_count++;
+        if (entry.tensor_name.find("model.t_embedder") == 0) layout->timestep_tensor_count++;
+        if (entry.tensor_name.find("model.final_layer") == 0) layout->final_layer_tensor_count++;
+        if (entry.tensor_name == "lm_head.weight") layout->lm_head_tensor_count++;
+    }
+
+    const char* required_block0[] = {
+        "model.language_model.layers.0.input_layernorm.weight",
+        "model.language_model.layers.0.self_attn.q_proj.weight",
+        "model.language_model.layers.0.self_attn.k_proj.weight",
+        "model.language_model.layers.0.self_attn.v_proj.weight",
+        "model.language_model.layers.0.self_attn.o_proj.weight",
+        "model.language_model.layers.0.self_attn.q_norm.weight",
+        "model.language_model.layers.0.self_attn.k_norm.weight",
+        "model.language_model.layers.0.post_attention_layernorm.weight",
+        "model.language_model.layers.0.mlp.gate_proj.weight",
+        "model.language_model.layers.0.mlp.up_proj.weight",
+        "model.language_model.layers.0.mlp.down_proj.weight",
+    };
+    layout->has_required_text_block0 = true;
+    for (const char* name : required_block0) {
+        if (names.find(name) == names.end()) {
+            layout->has_required_text_block0 = false;
+            break;
+        }
+    }
+
+    if (layout->text.num_hidden_layers <= 0 || layout->vision.depth <= 0 || layout->tensor_count <= 0) {
+        layout->error = "native layout has invalid dimensions or empty tensor map";
         return false;
     }
     return true;

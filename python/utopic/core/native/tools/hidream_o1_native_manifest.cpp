@@ -70,6 +70,31 @@ int main(int argc, char** argv) {
                 manifest.index_path.c_str(),
                 manifest.entries.size(),
                 manifest.shard_files.size());
+    utopic::HiDreamO1NativeModelLayout layout;
+    if (!utopic::load_hidream_o1_native_model_layout(model_dir, &layout)) {
+        std::fprintf(stderr, "hidream_o1_native_manifest: layout error: %s\n", layout.error.c_str());
+        return 1;
+    }
+    std::printf("layout text_layers=%d text_hidden=%d text_heads=%d text_kv_heads=%d text_head_dim=%d text_intermediate=%d vision_layers=%d vision_hidden=%d vision_heads=%d vision_patch=%d vision_out_hidden=%d\n",
+                layout.text.num_hidden_layers,
+                layout.text.hidden_size,
+                layout.text.num_attention_heads,
+                layout.text.num_key_value_heads,
+                layout.text.head_dim,
+                layout.text.intermediate_size,
+                layout.vision.depth,
+                layout.vision.hidden_size,
+                layout.vision.num_heads,
+                layout.vision.patch_size,
+                layout.vision.out_hidden_size);
+    std::printf("layout_tensors total=%lld text=%lld vision=%lld timestep=%lld final=%lld lm_head=%lld block0_required=%s\n",
+                static_cast<long long>(layout.tensor_count),
+                static_cast<long long>(layout.text_tensor_count),
+                static_cast<long long>(layout.vision_tensor_count),
+                static_cast<long long>(layout.timestep_tensor_count),
+                static_cast<long long>(layout.final_layer_tensor_count),
+                static_cast<long long>(layout.lm_head_tensor_count),
+                layout.has_required_text_block0 ? "yes" : "no");
     for (const std::string& shard : manifest.shard_files) {
         const std::string path = join_path(model_dir, shard);
         const bool exists = utopic::hidream_o1_file_exists(path);

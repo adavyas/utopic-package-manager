@@ -104,6 +104,45 @@ struct HiDreamO1SafetensorsHeader {
     std::string error;
 };
 
+struct HiDreamO1TextModelConfig {
+    int hidden_size = 0;
+    int intermediate_size = 0;
+    int num_hidden_layers = 0;
+    int num_attention_heads = 0;
+    int num_key_value_heads = 0;
+    int head_dim = 0;
+    int vocab_size = 0;
+    double rope_theta = 0.0;
+    double rms_norm_eps = 0.0;
+};
+
+struct HiDreamO1VisionModelConfig {
+    int hidden_size = 0;
+    int intermediate_size = 0;
+    int depth = 0;
+    int num_heads = 0;
+    int patch_size = 0;
+    int temporal_patch_size = 0;
+    int spatial_merge_size = 0;
+    int out_hidden_size = 0;
+};
+
+struct HiDreamO1NativeModelLayout {
+    std::string model_dir;
+    HiDreamO1TextModelConfig text;
+    HiDreamO1VisionModelConfig vision;
+    int image_token_id = 0;
+    int vision_start_token_id = 0;
+    int64_t tensor_count = 0;
+    int64_t text_tensor_count = 0;
+    int64_t vision_tensor_count = 0;
+    int64_t timestep_tensor_count = 0;
+    int64_t final_layer_tensor_count = 0;
+    int64_t lm_head_tensor_count = 0;
+    bool has_required_text_block0 = false;
+    std::string error;
+};
+
 HiDreamO1RuntimeConfig default_hidream_o1_runtime_config();
 HiDreamO1Shape hidream_o1_shape_for_size(const HiDreamO1RuntimeConfig& cfg, int width, int height);
 HiDreamO1ForwardPlan hidream_o1_build_t2i_forward_plan(const HiDreamO1RuntimeConfig& cfg,
@@ -145,6 +184,7 @@ bool hidream_o1_file_exists(const std::string& path);
 bool hidream_o1_dir_exists(const std::string& path);
 bool hidream_o1_patch_official_source_for_flash_env(const std::string& source_dir, std::string* error);
 bool load_hidream_o1_shard_manifest(const std::string& model_dir, HiDreamO1ShardManifest* manifest);
+bool load_hidream_o1_native_model_layout(const std::string& model_dir, HiDreamO1NativeModelLayout* layout);
 HiDreamO1SafetensorsHeader inspect_hidream_o1_safetensors_header(const std::string& file_path);
 
 }  // namespace utopic
