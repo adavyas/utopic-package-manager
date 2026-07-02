@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <fstream>
 #include <functional>
 #include <limits>
 #include <stdexcept>
@@ -129,6 +130,61 @@ uint64_t tensor_payload_bytes(const HiDreamO1TensorInfo& info) {
     return info.absolute_data_end >= info.absolute_data_begin ? info.absolute_data_end - info.absolute_data_begin : 0;
 }
 
+float bf16_to_f32(uint16_t bits) {
+    const uint32_t raw = static_cast<uint32_t>(bits) << 16;
+    float value = 0.0f;
+    std::memcpy(&value, &raw, sizeof(value));
+    return value;
+}
+
+bool decode_tensor_payload_to_f32(const HiDreamO1TensorInfo& info,
+                                  const std::vector<unsigned char>& bytes,
+                                  std::vector<float>* values,
+                                  std::string* error) {
+    if (values == nullptr) return false;
+    values->clear();
+    const int64_t n_values = shape_product(info.shape);
+    if (n_values <= 0) {
+        if (error) *error = "invalid HiDream tensor shape for " + info.tensor_name;
+        return false;
+    }
+    values->resize(static_cast<size_t>(n_values));
+    if (info.dtype == "F32") {
+        const size_t expected = static_cast<size_t>(n_values) * sizeof(float);
+        if (bytes.size() != expected) {
+            if (error) *error = "unexpected F32 tensor byte count for " + info.tensor_name;
+            return false;
+        }
+        std::memcpy(values->data(), bytes.data(), expected);
+        return true;
+    }
+    if (info.dtype == "BF16") {
+        const size_t expected = static_cast<size_t>(n_values) * sizeof(uint16_t);
+        if (bytes.size() != expected) {
+            if (error) *error = "unexpected BF16 tensor byte count for " + info.tensor_name;
+            return false;
+        }
+        for (int64_t i = 0; i < n_values; ++i) {
+            const size_t offset = static_cast<size_t>(i) * sizeof(uint16_t);
+            const uint16_t bits = static_cast<uint16_t>(bytes[offset]) |
+                                  (static_cast<uint16_t>(bytes[offset + 1]) << 8);
+            (*values)[static_cast<size_t>(i)] = bf16_to_f32(bits);
+        }
+        return true;
+    }
+    if (error) *error = "unsupported HiDream tensor dtype for native F32 decode: " + info.tensor_name + " dtype=" + info.dtype;
+    return false;
+}
+
+bool run_text_layer_from_input(const HiDreamO1NativeModelLayout& layout,
+                               const HiDreamO1TensorCatalog& catalog,
+                               int layer,
+                               int64_t sequence_tokens,
+                               const std::vector<float>& input,
+                               std::vector<float>* output,
+                               HiDreamO1RealBlockRunSummary* summary,
+                               std::string* error);
+
 void fill_deterministic_block_input(ggml_tensor* x) {
     float* data = static_cast<float*>(x->data);
     const int64_t dim = x->ne[0];
@@ -183,10 +239,6 @@ bool load_f32_tensor_bytes(const HiDreamO1TensorCatalog& catalog,
         if (error) *error = "missing HiDream tensor: " + name;
         return false;
     }
-    if (info.dtype != "F32") {
-        if (error) *error = "native HiDream block runner currently requires F32 tensor payloads: " + name + " dtype=" + info.dtype;
-        return false;
-    }
     if (static_cast<int>(info.shape.size()) != expected_rank) {
         if (error) *error = "unexpected HiDream tensor rank for " + name;
         return false;
@@ -196,7 +248,12 @@ bool load_f32_tensor_bytes(const HiDreamO1TensorCatalog& catalog,
         if (error) *error = "invalid HiDream tensor shape for " + name;
         return false;
     }
-    const uint64_t expected_bytes = static_cast<uint64_t>(values) * sizeof(float);
+    const uint64_t scalar_bytes = info.dtype == "F32" ? sizeof(float) : (info.dtype == "BF16" ? sizeof(uint16_t) : 0);
+    if (scalar_bytes == 0) {
+        if (error) *error = "native HiDream block runner cannot decode tensor dtype: " + name + " dtype=" + info.dtype;
+        return false;
+    }
+    const uint64_t expected_bytes = static_cast<uint64_t>(values) * scalar_bytes;
     if (tensor_payload_bytes(info) != expected_bytes) {
         if (error) *error = "unexpected HiDream tensor byte count for " + name;
         return false;
@@ -208,6 +265,10 @@ bool load_f32_tensor_bytes(const HiDreamO1TensorCatalog& catalog,
         if (error) *error = read_error;
         return false;
     }
+    std::vector<float> decoded;
+    if (!decode_tensor_payload_to_f32(info, bytes, &decoded, error)) {
+        return false;
+    }
     ggml_tensor* tensor = nullptr;
     if (expected_rank == 1) {
         tensor = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, info.shape[0]);
@@ -217,7 +278,7 @@ bool load_f32_tensor_bytes(const HiDreamO1TensorCatalog& catalog,
         if (error) *error = "unsupported HiDream tensor rank for " + name;
         return false;
     }
-    std::memcpy(tensor->data, bytes.data(), bytes.size());
+    std::memcpy(tensor->data, decoded.data(), decoded.size() * sizeof(float));
     ggml_set_name(tensor, name.c_str());
     *out = tensor;
     if (payload_bytes) *payload_bytes += static_cast<int64_t>(bytes.size());
@@ -409,6 +470,196 @@ std::vector<float> build_prompt_conditioning_vector(const std::string& prompt,
         value *= scale;
     }
     return conditioning;
+}
+
+bool read_tensor_range(const HiDreamO1TensorInfo& info,
+                       uint64_t absolute_begin,
+                       size_t n_bytes,
+                       std::vector<unsigned char>* bytes,
+                       std::string* error) {
+    if (bytes == nullptr) return false;
+    bytes->clear();
+    if (absolute_begin < info.absolute_data_begin || absolute_begin + n_bytes > info.absolute_data_end) {
+        if (error) *error = "tensor range outside payload: " + info.tensor_name;
+        return false;
+    }
+    std::ifstream in(info.file_path, std::ios::binary);
+    if (!in) {
+        if (error) *error = "failed to open tensor shard: " + info.file_path;
+        return false;
+    }
+    in.seekg(static_cast<std::streamoff>(absolute_begin), std::ios::beg);
+    if (!in) {
+        if (error) *error = "failed to seek tensor row: " + info.tensor_name;
+        return false;
+    }
+    bytes->assign(n_bytes, 0);
+    in.read(reinterpret_cast<char*>(bytes->data()), static_cast<std::streamsize>(bytes->size()));
+    if (in.gcount() != static_cast<std::streamsize>(bytes->size())) {
+        bytes->clear();
+        if (error) *error = "short tensor row read: " + info.tensor_name;
+        return false;
+    }
+    return true;
+}
+
+bool load_embedding_rows(const HiDreamO1TensorCatalog& catalog,
+                         const std::vector<uint64_t>& token_ids,
+                         int64_t hidden_size,
+                         std::vector<float>* embeddings,
+                         int64_t* payload_bytes,
+                         std::string* error) {
+    if (embeddings == nullptr) return false;
+    embeddings->clear();
+    HiDreamO1TensorInfo info;
+    if (!find_hidream_o1_tensor(catalog, "model.language_model.embed_tokens.weight", &info) ||
+        info.shape.size() != 2) {
+        if (error) *error = "missing or invalid HiDream embed_tokens weight";
+        return false;
+    }
+    const int64_t vocab = info.shape[0];
+    const int64_t dim = info.shape[1];
+    if (vocab <= 0 || dim <= 0 || dim != hidden_size || token_ids.empty()) {
+        if (error) *error = "HiDream embed_tokens shape mismatch";
+        return false;
+    }
+    const uint64_t scalar_bytes = info.dtype == "F32" ? sizeof(float) : (info.dtype == "BF16" ? sizeof(uint16_t) : 0);
+    if (scalar_bytes == 0) {
+        if (error) *error = "unsupported HiDream embed_tokens dtype: " + info.dtype;
+        return false;
+    }
+    const uint64_t row_bytes = static_cast<uint64_t>(dim) * scalar_bytes;
+    embeddings->resize(static_cast<size_t>(token_ids.size()) * static_cast<size_t>(dim));
+    for (size_t tok = 0; tok < token_ids.size(); ++tok) {
+        const uint64_t row = token_ids[tok] % static_cast<uint64_t>(vocab);
+        const uint64_t row_begin = info.absolute_data_begin + row * row_bytes;
+        std::vector<unsigned char> bytes;
+        if (!read_tensor_range(info, row_begin, static_cast<size_t>(row_bytes), &bytes, error)) {
+            return false;
+        }
+        if (payload_bytes) *payload_bytes += static_cast<int64_t>(bytes.size());
+        for (int64_t d = 0; d < dim; ++d) {
+            if (info.dtype == "F32") {
+                float value = 0.0f;
+                std::memcpy(&value, bytes.data() + static_cast<size_t>(d) * sizeof(float), sizeof(float));
+                (*embeddings)[tok * static_cast<size_t>(dim) + static_cast<size_t>(d)] = value;
+            } else {
+                const size_t offset = static_cast<size_t>(d) * sizeof(uint16_t);
+                const uint16_t bits = static_cast<uint16_t>(bytes[offset]) |
+                                      (static_cast<uint16_t>(bytes[offset + 1]) << 8);
+                (*embeddings)[tok * static_cast<size_t>(dim) + static_cast<size_t>(d)] = bf16_to_f32(bits);
+            }
+        }
+    }
+    return true;
+}
+
+bool load_vector_tensor(const HiDreamO1TensorCatalog& catalog,
+                        const std::string& name,
+                        std::vector<float>* values,
+                        int64_t* payload_bytes,
+                        std::string* error) {
+    if (values == nullptr) return false;
+    values->clear();
+    HiDreamO1TensorInfo info;
+    if (!find_hidream_o1_tensor(catalog, name, &info) || info.shape.size() != 1) {
+        if (error) *error = "missing or invalid HiDream vector tensor: " + name;
+        return false;
+    }
+    std::vector<unsigned char> bytes;
+    std::string read_error;
+    if (!read_hidream_o1_tensor_bytes(info, &bytes, &read_error)) {
+        if (error) *error = read_error;
+        return false;
+    }
+    if (!decode_tensor_payload_to_f32(info, bytes, values, error)) {
+        return false;
+    }
+    if (payload_bytes) *payload_bytes += static_cast<int64_t>(bytes.size());
+    return true;
+}
+
+void apply_text_final_norm(const std::vector<float>& weight,
+                           float eps,
+                           int64_t hidden_size,
+                           int64_t tokens,
+                           std::vector<float>* state) {
+    if (state == nullptr || hidden_size <= 0 || tokens <= 0 ||
+        weight.size() != static_cast<size_t>(hidden_size) ||
+        state->size() != static_cast<size_t>(hidden_size * tokens)) {
+        return;
+    }
+    for (int64_t tok = 0; tok < tokens; ++tok) {
+        double mean_sq = 0.0;
+        for (int64_t d = 0; d < hidden_size; ++d) {
+            const float v = (*state)[static_cast<size_t>(tok * hidden_size + d)];
+            mean_sq += static_cast<double>(v) * static_cast<double>(v);
+        }
+        mean_sq /= static_cast<double>(hidden_size);
+        const float inv = 1.0f / std::sqrt(static_cast<float>(mean_sq) + eps);
+        for (int64_t d = 0; d < hidden_size; ++d) {
+            const size_t idx = static_cast<size_t>(tok * hidden_size + d);
+            (*state)[idx] = (*state)[idx] * inv * weight[static_cast<size_t>(d)];
+        }
+    }
+}
+
+bool run_text_transformer_conditioning(const HiDreamO1NativeModelLayout& layout,
+                                       const HiDreamO1TensorCatalog& catalog,
+                                       const std::vector<uint64_t>& token_ids,
+                                       std::vector<float>* conditioning,
+                                       int* layers_ran,
+                                       int64_t* transformer_values,
+                                       double* transformer_checksum,
+                                       double* transformer_l2,
+                                       int64_t* payload_bytes,
+                                       std::string* error) {
+    if (conditioning == nullptr) return false;
+    conditioning->clear();
+    if (layers_ran) *layers_ran = 0;
+    if (transformer_values) *transformer_values = 0;
+    if (transformer_checksum) *transformer_checksum = 0.0;
+    if (transformer_l2) *transformer_l2 = 0.0;
+    if (layout.text.hidden_size <= 0 || layout.text.num_hidden_layers <= 0 || token_ids.empty()) {
+        if (error) *error = "invalid HiDream text transformer conditioning dimensions";
+        return false;
+    }
+
+    std::vector<float> text_state;
+    if (!load_embedding_rows(catalog, token_ids, layout.text.hidden_size, &text_state, payload_bytes, error)) {
+        return false;
+    }
+    const int64_t tokens = static_cast<int64_t>(token_ids.size());
+    for (int layer = 0; layer < layout.text.num_hidden_layers; ++layer) {
+        std::vector<float> next;
+        HiDreamO1RealBlockRunSummary block;
+        if (!run_text_layer_from_input(layout, catalog, layer, tokens, text_state, &next, &block, error)) {
+            return false;
+        }
+        if (payload_bytes) *payload_bytes += block.payload_bytes;
+        text_state.swap(next);
+        if (layers_ran) *layers_ran = layer + 1;
+    }
+
+    std::vector<float> norm_weight;
+    const float eps = layout.text.rms_norm_eps > 0.0 ? static_cast<float>(layout.text.rms_norm_eps) : 1e-6f;
+    if (load_vector_tensor(catalog, "model.language_model.norm.weight", &norm_weight, payload_bytes, nullptr)) {
+        apply_text_final_norm(norm_weight, eps, layout.text.hidden_size, tokens, &text_state);
+    }
+
+    summarize_vector(text_state, transformer_values, transformer_checksum, transformer_l2, nullptr);
+    conditioning->assign(static_cast<size_t>(layout.text.hidden_size), 0.0f);
+    for (int64_t tok = 0; tok < tokens; ++tok) {
+        for (int64_t d = 0; d < layout.text.hidden_size; ++d) {
+            (*conditioning)[static_cast<size_t>(d)] +=
+                text_state[static_cast<size_t>(tok * layout.text.hidden_size + d)];
+        }
+    }
+    const float inv_tokens = 1.0f / static_cast<float>(tokens);
+    for (float& value : *conditioning) {
+        value *= inv_tokens;
+    }
+    return true;
 }
 
 bool run_text_layer_from_input(const HiDreamO1NativeModelLayout& layout,
@@ -1556,9 +1807,22 @@ bool hidream_o1_generate_native_preview_image(const std::string& model_dir,
         return false;
     }
 
-    int64_t text_tokens = 0;
-    const std::vector<float> text_conditioning =
-        build_prompt_conditioning_vector(prompt, layout.text.hidden_size, layout.text.vocab_size, &text_tokens);
+    const std::vector<uint64_t> token_ids = pseudo_tokenize_official_caption(prompt);
+    const int64_t text_tokens = static_cast<int64_t>(token_ids.size());
+    std::vector<float> text_conditioning;
+    int64_t transformer_payload_bytes = 0;
+    if (!run_text_transformer_conditioning(layout,
+                                           catalog,
+                                           token_ids,
+                                           &text_conditioning,
+                                           &summary->text_transformer_layers,
+                                           &summary->text_transformer_values,
+                                           &summary->text_transformer_checksum,
+                                           &summary->text_transformer_l2,
+                                           &transformer_payload_bytes,
+                                           error)) {
+        return false;
+    }
     if (text_conditioning.empty() || text_tokens <= 0) {
         if (error) *error = "native preview prompt conditioning failed";
         return false;

@@ -271,7 +271,7 @@ int main(int argc, char** argv) {
             std::fprintf(stderr, "utopic_hidream_o1: native preview generation failed: %s\n", native_error.c_str());
             return 1;
         }
-        std::printf("utopic_hidream_o1 native_preview=OK wrote=%s width=%d height=%d steps=%d text_tokens=%lld image_tokens=%lld total_tokens=%lld conditioning_values=%lld conditioning_l2=%.8f conditioning_checksum=%.8f patch_values=%lld final_patch_l2=%.8f final_patch_checksum=%.8f backend=native-preview-conditioned-no-torch-no-sdcpp\n",
+        std::printf("utopic_hidream_o1 native_preview=OK wrote=%s width=%d height=%d steps=%d text_tokens=%lld image_tokens=%lld total_tokens=%lld text_transformer_layers=%d text_transformer_values=%lld text_transformer_l2=%.8f text_transformer_checksum=%.8f conditioning_values=%lld conditioning_l2=%.8f conditioning_checksum=%.8f patch_values=%lld final_patch_l2=%.8f final_patch_checksum=%.8f backend=native-preview-text-transformer-conditioned-no-torch-no-sdcpp\n",
                     image_summary.output_path.c_str(),
                     image_summary.width,
                     image_summary.height,
@@ -279,6 +279,10 @@ int main(int argc, char** argv) {
                     static_cast<long long>(image_summary.text_tokens),
                     static_cast<long long>(image_summary.image_tokens),
                     static_cast<long long>(image_summary.total_sequence_tokens),
+                    image_summary.text_transformer_layers,
+                    static_cast<long long>(image_summary.text_transformer_values),
+                    image_summary.text_transformer_l2,
+                    image_summary.text_transformer_checksum,
                     static_cast<long long>(image_summary.conditioning_values),
                     image_summary.conditioning_l2,
                     image_summary.conditioning_checksum,

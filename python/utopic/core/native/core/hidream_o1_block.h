@@ -123,9 +123,13 @@ struct HiDreamO1NativeImageRunSummary {
     int64_t total_sequence_tokens = 0;
     int64_t image_tokens = 0;
     int64_t conditioning_values = 0;
+    int text_transformer_layers = 0;
+    int64_t text_transformer_values = 0;
     int64_t patch_values = 0;
     double conditioning_l2 = 0.0;
     double conditioning_checksum = 0.0;
+    double text_transformer_l2 = 0.0;
+    double text_transformer_checksum = 0.0;
     double final_patch_l2 = 0.0;
     double final_patch_checksum = 0.0;
     std::string output_path;
