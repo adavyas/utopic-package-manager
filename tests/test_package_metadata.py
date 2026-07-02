@@ -19,7 +19,7 @@ CORE_CATALOG_PATH = (
     / "utopic_core"
     / "models.json"
 )
-EXPECTED_NATIVE_REF = "476f17870c4fd84b023297fec5a58e11e53ba1ed"
+EXPECTED_NATIVE_REF = "eea179e59787035373c958e37fd8bf423c973e48"
 
 REQUIRED_NATIVE_RUNNER_FILES = {
     "runner.cpp",
@@ -35,6 +35,8 @@ REQUIRED_NATIVE_RUNNER_FILES = {
     "sherpa_tts_plugin.cpp",
     "image_engine.cpp",
     "image_engine.h",
+    "core/hidream_o1_block.cpp",
+    "core/hidream_o1_block.h",
     "core/hidream_o1_native.cpp",
     "core/hidream_o1_native.h",
     "tools/utopic_hidream_o1.cpp",

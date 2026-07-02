@@ -1,4 +1,5 @@
 #include "core/hidream_o1_native.h"
+#include "core/hidream_o1_block.h"
 
 #include <cerrno>
 #include <cstdio>
@@ -128,7 +129,13 @@ int main(int argc, char** argv) {
             std::fprintf(stderr, "utopic_hidream_o1: native execution prep failed: %s\n", native_error.c_str());
             return 1;
         }
-        std::printf("utopic_hidream_o1 native_exec_check=OK model_dir=%s width=%d height=%d text_tokens=%lld image_tokens=%lld total_tokens=%lld text_layers=%d text_hidden=%d tensors=%lld catalog_tensors=%lld missing=%lld block0_tensors=%lld block0_payloads_loaded=%s block0_payload_bytes=%llu\n",
+        double block_graph_max_diff = 0.0;
+        std::string block_graph_error;
+        if (!utopic::hidream_o1_qwen3vl_text_block_self_check(&block_graph_max_diff, &block_graph_error)) {
+            std::fprintf(stderr, "utopic_hidream_o1: native block graph self-check failed: %s\n", block_graph_error.c_str());
+            return 1;
+        }
+        std::printf("utopic_hidream_o1 native_exec_check=OK model_dir=%s width=%d height=%d text_tokens=%lld image_tokens=%lld total_tokens=%lld text_layers=%d text_hidden=%d tensors=%lld catalog_tensors=%lld missing=%lld block0_tensors=%lld block0_payloads_loaded=%s block0_payload_bytes=%llu block_graph=qwen3vl_text_decoder block_graph_max_diff=%.8f\n",
                     summary.model_dir.c_str(),
                     summary.width,
                     summary.height,
@@ -142,7 +149,8 @@ int main(int argc, char** argv) {
                     static_cast<long long>(summary.catalog_missing_tensor_count),
                     static_cast<long long>(summary.block0_tensor_count),
                     summary.block0_payloads_loaded ? "yes" : "no",
-                    static_cast<unsigned long long>(summary.block0_payload_bytes));
+                    static_cast<unsigned long long>(summary.block0_payload_bytes),
+                    block_graph_max_diff);
         if (dry_run) return 0;
     }
 

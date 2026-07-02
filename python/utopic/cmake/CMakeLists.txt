@@ -210,8 +210,14 @@ set_target_properties(utopic_ace PROPERTIES
 # HiDream-O1 oracle wrapper and native Dev-2604 manifest inspector.
 add_executable(utopic_hidream_o1
   "${UTOPIC_NATIVE_SOURCE_DIR}/tools/utopic_hidream_o1.cpp"
-  "${UTOPIC_NATIVE_SOURCE_DIR}/core/hidream_o1_native.cpp")
-target_include_directories(utopic_hidream_o1 PRIVATE "${UTOPIC_NATIVE_SOURCE_DIR}")
+  "${UTOPIC_NATIVE_SOURCE_DIR}/core/hidream_o1_native.cpp"
+  "${UTOPIC_NATIVE_SOURCE_DIR}/core/hidream_o1_block.cpp")
+target_include_directories(utopic_hidream_o1 PRIVATE
+  ${UTOPIC_INCLUDES}
+  "${UTOPIC_NATIVE_SOURCE_DIR}")
+target_compile_definitions(utopic_hidream_o1 PRIVATE ${UTOPIC_LLAMA_DEFINES})
+target_link_directories(utopic_hidream_o1 PRIVATE "${LLAMA_BIN}")
+target_link_libraries(utopic_hidream_o1 PRIVATE ggml ggml-base ggml-cpu Threads::Threads)
 set_target_properties(utopic_hidream_o1 PROPERTIES
   BUILD_RPATH "${LLAMA_BIN}" INSTALL_RPATH "${LLAMA_BIN}")
 

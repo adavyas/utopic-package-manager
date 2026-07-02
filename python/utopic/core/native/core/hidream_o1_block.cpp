@@ -1,0 +1,318 @@
+#include "hidream_o1_block.h"
+
+#include "ggml.h"
+#include "ggml-cpu.h"
+
+#include <algorithm>
+#include <cmath>
+#include <cstring>
+#include <stdexcept>
+#include <string>
+#include <vector>
+
+namespace utopic {
+
+namespace {
+
+void require_tensor(ggml_tensor* t, const char* name) {
+    if (t == nullptr) {
+        throw std::invalid_argument(std::string("missing HiDream tensor: ") + name);
+    }
+}
+
+void require_config(const HiDreamO1TextBlockGraphConfig& c) {
+    if (c.hidden_size <= 0 || c.intermediate_size <= 0 || c.num_attention_heads <= 0 ||
+        c.num_key_value_heads <= 0 || c.head_dim <= 0 || c.sequence_tokens <= 0) {
+        throw std::invalid_argument("invalid HiDream text block graph dimensions");
+    }
+    if (c.hidden_size != c.num_attention_heads * c.head_dim) {
+        throw std::invalid_argument("HiDream hidden size must equal heads * head_dim");
+    }
+    if (c.num_attention_heads % c.num_key_value_heads != 0) {
+        throw std::invalid_argument("HiDream attention heads must be divisible by KV heads");
+    }
+    if (c.ar_prefix_tokens < 0 || c.ar_prefix_tokens > c.sequence_tokens) {
+        throw std::invalid_argument("HiDream AR prefix token count is out of range");
+    }
+}
+
+ggml_tensor* build_linear(ggml_context* ctx, ggml_tensor* x, ggml_tensor* weight) {
+    require_tensor(x, "linear.x");
+    require_tensor(weight, "linear.weight");
+    ggml_tensor* y = ggml_mul_mat(ctx, weight, x);
+    ggml_mul_mat_set_prec(y, GGML_PREC_F32);
+    return y;
+}
+
+ggml_tensor* build_weighted_rms(ggml_context* ctx, ggml_tensor* x, ggml_tensor* weight, float eps) {
+    require_tensor(x, "rms.x");
+    require_tensor(weight, "rms.weight");
+    return ggml_mul(ctx, ggml_rms_norm(ctx, x, eps), weight);
+}
+
+ggml_tensor* build_head_rms(ggml_context* ctx,
+                            ggml_tensor* x,
+                            ggml_tensor* weight,
+                            int64_t head_dim,
+                            float eps) {
+    require_tensor(x, "head_rms.x");
+    require_tensor(weight, "head_rms.weight");
+    return ggml_mul(ctx, ggml_rms_norm(ctx, x, eps), ggml_reshape_3d(ctx, weight, head_dim, 1, 1));
+}
+
+ggml_tensor* build_interleaved_rope(ggml_context* ctx,
+                                    ggml_tensor* x,
+                                    ggml_tensor* cos,
+                                    ggml_tensor* sin,
+                                    int64_t heads,
+                                    int64_t head_dim,
+                                    int64_t tokens) {
+    require_tensor(x, "rope.x");
+    require_tensor(cos, "rope.cos");
+    require_tensor(sin, "rope.sin");
+
+    ggml_tensor* x4 = ggml_reshape_4d(ctx, x, 2, head_dim / 2, heads, tokens);
+    ggml_tensor* x0 = ggml_cont(ctx, ggml_view_4d(ctx, x4, 1, head_dim / 2, heads, tokens,
+                                                  x4->nb[1], x4->nb[2], x4->nb[3], 0));
+    ggml_tensor* x1 = ggml_cont(ctx, ggml_view_4d(ctx, x4, 1, head_dim / 2, heads, tokens,
+                                                  x4->nb[1], x4->nb[2], x4->nb[3], x4->nb[0]));
+    ggml_tensor* rot = ggml_reshape_3d(ctx, ggml_concat(ctx, ggml_neg(ctx, x1), x0, 0), head_dim, heads, tokens);
+    return ggml_add(ctx, ggml_mul(ctx, x, cos), ggml_mul(ctx, rot, sin));
+}
+
+ggml_tensor* view_token_prefix(ggml_context* ctx, ggml_tensor* x, int64_t tokens) {
+    return ggml_view_3d(ctx, x, x->ne[0], tokens, x->ne[2], x->nb[1], x->nb[2], 0);
+}
+
+ggml_tensor* view_token_suffix_2d(ggml_context* ctx, ggml_tensor* x, int64_t begin_token) {
+    const int64_t tokens = x->ne[1] - begin_token;
+    return ggml_cont(ctx, ggml_view_2d(ctx, x, x->ne[0], tokens, x->nb[1], begin_token * x->nb[1]));
+}
+
+ggml_tensor* build_attention_from_permuted(ggml_context* ctx,
+                                           ggml_tensor* q,
+                                           ggml_tensor* k,
+                                           ggml_tensor* v,
+                                           const HiDreamO1TextBlockGraphConfig& c,
+                                           int64_t q_tokens,
+                                           int64_t kv_tokens,
+                                           bool causal) {
+    const int64_t kv_groups = c.num_attention_heads / c.num_key_value_heads;
+    ggml_tensor* kx = ggml_reshape_3d(
+        ctx,
+        ggml_repeat(ctx,
+                    ggml_reshape_4d(ctx, k, c.head_dim, kv_tokens, 1, c.num_key_value_heads),
+                    ggml_new_tensor_4d(ctx, GGML_TYPE_F32, c.head_dim, kv_tokens, kv_groups, c.num_key_value_heads)),
+        c.head_dim,
+        kv_tokens,
+        c.num_attention_heads);
+    ggml_tensor* vx = ggml_reshape_3d(
+        ctx,
+        ggml_repeat(ctx,
+                    ggml_reshape_4d(ctx, v, c.head_dim, kv_tokens, 1, c.num_key_value_heads),
+                    ggml_new_tensor_4d(ctx, GGML_TYPE_F32, c.head_dim, kv_tokens, kv_groups, c.num_key_value_heads)),
+        c.head_dim,
+        kv_tokens,
+        c.num_attention_heads);
+
+    ggml_tensor* scores = ggml_mul_mat(ctx, kx, q);
+    ggml_mul_mat_set_prec(scores, GGML_PREC_F32);
+    scores = ggml_scale(ctx, scores, 1.0f / std::sqrt(static_cast<float>(c.head_dim)));
+    if (causal) {
+        scores = ggml_diag_mask_inf(ctx, scores, 0);
+    }
+    scores = ggml_soft_max(ctx, scores);
+    ggml_tensor* vt = ggml_cont(ctx, ggml_permute(ctx, vx, 1, 0, 2, 3));
+    ggml_tensor* out = ggml_mul_mat(ctx, vt, scores);
+    out = ggml_cont(ctx, ggml_permute(ctx, out, 0, 2, 1, 3));
+    return ggml_reshape_2d(ctx, out, c.hidden_size, q_tokens);
+}
+
+ggml_tensor* build_mixed_attention(ggml_context* ctx,
+                                   ggml_tensor* q,
+                                   ggml_tensor* k,
+                                   ggml_tensor* v,
+                                   const HiDreamO1TextBlockGraphConfig& c) {
+    q = ggml_cont(ctx, ggml_permute(ctx, q, 0, 2, 1, 3));
+    k = ggml_cont(ctx, ggml_permute(ctx, k, 0, 2, 1, 3));
+    v = ggml_cont(ctx, ggml_permute(ctx, v, 0, 2, 1, 3));
+
+    ggml_tensor* full = build_attention_from_permuted(ctx, q, k, v, c, c.sequence_tokens, c.sequence_tokens, false);
+    if (c.ar_prefix_tokens == 0) {
+        return full;
+    }
+    ggml_tensor* q_ar = view_token_prefix(ctx, q, c.ar_prefix_tokens);
+    ggml_tensor* k_ar = view_token_prefix(ctx, k, c.ar_prefix_tokens);
+    ggml_tensor* v_ar = view_token_prefix(ctx, v, c.ar_prefix_tokens);
+    ggml_tensor* ar = build_attention_from_permuted(ctx, q_ar, k_ar, v_ar, c, c.ar_prefix_tokens, c.ar_prefix_tokens, true);
+    if (c.ar_prefix_tokens == c.sequence_tokens) {
+        return ar;
+    }
+    ggml_tensor* gen = view_token_suffix_2d(ctx, full, c.ar_prefix_tokens);
+    return ggml_concat(ctx, ar, gen, 1);
+}
+
+}  // namespace
+
+ggml_tensor* build_hidream_o1_qwen3vl_text_block(ggml_context* ctx,
+                                                 const HiDreamO1TextBlockGraphConfig& config,
+                                                 const HiDreamO1TextBlockGraphTensors& t) {
+    if (ctx == nullptr) throw std::invalid_argument("missing ggml context for HiDream text block");
+    require_config(config);
+    require_tensor(t.x, "x");
+    require_tensor(t.input_layernorm_weight, "input_layernorm_weight");
+    require_tensor(t.q_proj_weight, "q_proj_weight");
+    require_tensor(t.k_proj_weight, "k_proj_weight");
+    require_tensor(t.v_proj_weight, "v_proj_weight");
+    require_tensor(t.o_proj_weight, "o_proj_weight");
+    require_tensor(t.q_norm_weight, "q_norm_weight");
+    require_tensor(t.k_norm_weight, "k_norm_weight");
+    require_tensor(t.post_attention_layernorm_weight, "post_attention_layernorm_weight");
+    require_tensor(t.gate_proj_weight, "gate_proj_weight");
+    require_tensor(t.up_proj_weight, "up_proj_weight");
+    require_tensor(t.down_proj_weight, "down_proj_weight");
+    require_tensor(t.rope_cos, "rope_cos");
+    require_tensor(t.rope_sin, "rope_sin");
+
+    ggml_tensor* h = build_weighted_rms(ctx, t.x, t.input_layernorm_weight, config.rms_norm_eps);
+    ggml_tensor* q = build_linear(ctx, h, t.q_proj_weight);
+    ggml_tensor* k = build_linear(ctx, h, t.k_proj_weight);
+    ggml_tensor* v = build_linear(ctx, h, t.v_proj_weight);
+    q = ggml_reshape_3d(ctx, q, config.head_dim, config.num_attention_heads, config.sequence_tokens);
+    k = ggml_reshape_3d(ctx, k, config.head_dim, config.num_key_value_heads, config.sequence_tokens);
+    v = ggml_reshape_3d(ctx, v, config.head_dim, config.num_key_value_heads, config.sequence_tokens);
+    q = build_head_rms(ctx, q, t.q_norm_weight, config.head_dim, config.rms_norm_eps);
+    k = build_head_rms(ctx, k, t.k_norm_weight, config.head_dim, config.rms_norm_eps);
+    q = build_interleaved_rope(ctx, q, t.rope_cos, t.rope_sin, config.num_attention_heads, config.head_dim, config.sequence_tokens);
+    k = build_interleaved_rope(ctx, k, t.rope_cos, t.rope_sin, config.num_key_value_heads, config.head_dim, config.sequence_tokens);
+
+    ggml_tensor* attn = build_mixed_attention(ctx, q, k, v, config);
+    attn = build_linear(ctx, attn, t.o_proj_weight);
+    ggml_tensor* x = ggml_add(ctx, t.x, attn);
+
+    h = build_weighted_rms(ctx, x, t.post_attention_layernorm_weight, config.rms_norm_eps);
+    ggml_tensor* gate = build_linear(ctx, h, t.gate_proj_weight);
+    ggml_tensor* up = build_linear(ctx, h, t.up_proj_weight);
+    ggml_tensor* mlp = build_linear(ctx, ggml_mul(ctx, ggml_silu(ctx, gate), up), t.down_proj_weight);
+    x = ggml_add(ctx, x, mlp);
+    x = ggml_cont(ctx, x);
+    ggml_set_name(x, "hidream_qwen3vl_text_block_out");
+    return x;
+}
+
+bool hidream_o1_qwen3vl_text_block_self_check(double* max_diff, std::string* error) {
+    constexpr int64_t dim = 4;
+    constexpr int64_t inter = 4;
+    constexpr int64_t heads = 2;
+    constexpr int64_t kv_heads = 1;
+    constexpr int64_t head_dim = 2;
+    constexpr int64_t tokens = 3;
+    constexpr int64_t ar_tokens = 2;
+    constexpr float eps = 1e-6f;
+
+    ggml_init_params params{};
+    params.mem_size = 64ull << 20;
+    ggml_context* ctx = ggml_init(params);
+    if (ctx == nullptr) {
+        if (error) *error = "failed to allocate ggml context";
+        return false;
+    }
+
+    auto make_1d = [&](int64_t n, float value) {
+        ggml_tensor* tensor = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, n);
+        float* data = static_cast<float*>(tensor->data);
+        for (int64_t i = 0; i < n; ++i) data[i] = value;
+        return tensor;
+    };
+    auto make_matrix = [&](int64_t in, int64_t out, float value) {
+        ggml_tensor* tensor = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, in, out);
+        float* data = static_cast<float*>(tensor->data);
+        for (int64_t i = 0; i < in * out; ++i) data[i] = value;
+        return tensor;
+    };
+    auto make_identity = [&](int64_t n) {
+        ggml_tensor* tensor = make_matrix(n, n, 0.0f);
+        float* data = static_cast<float*>(tensor->data);
+        for (int64_t i = 0; i < n; ++i) data[i + n * i] = 1.0f;
+        return tensor;
+    };
+
+    std::vector<float> x_data = {
+        0.10f, -0.20f, 0.30f, -0.40f,
+        0.50f, 0.25f, -0.75f, 1.00f,
+        -1.00f, 0.60f, 0.20f, -0.10f,
+    };
+    ggml_tensor* x = ggml_new_tensor_2d(ctx, GGML_TYPE_F32, dim, tokens);
+    std::memcpy(x->data, x_data.data(), x_data.size() * sizeof(float));
+
+    ggml_tensor* rope_cos = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, head_dim, 1, tokens);
+    ggml_tensor* rope_sin = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, head_dim, 1, tokens);
+    float* cos_data = static_cast<float*>(rope_cos->data);
+    float* sin_data = static_cast<float*>(rope_sin->data);
+    for (int64_t i = 0; i < head_dim * tokens; ++i) {
+        cos_data[i] = 1.0f;
+        sin_data[i] = 0.0f;
+    }
+
+    HiDreamO1TextBlockGraphConfig config;
+    config.hidden_size = dim;
+    config.intermediate_size = inter;
+    config.num_attention_heads = heads;
+    config.num_key_value_heads = kv_heads;
+    config.head_dim = head_dim;
+    config.sequence_tokens = tokens;
+    config.ar_prefix_tokens = ar_tokens;
+    config.rms_norm_eps = eps;
+
+    HiDreamO1TextBlockGraphTensors t;
+    t.x = x;
+    t.input_layernorm_weight = make_1d(dim, 1.0f);
+    t.q_proj_weight = make_matrix(dim, dim, 0.0f);
+    t.k_proj_weight = make_matrix(dim, head_dim * kv_heads, 0.0f);
+    t.v_proj_weight = make_matrix(dim, head_dim * kv_heads, 0.0f);
+    t.o_proj_weight = make_matrix(dim, dim, 0.0f);
+    t.q_norm_weight = make_1d(head_dim, 1.0f);
+    t.k_norm_weight = make_1d(head_dim, 1.0f);
+    t.post_attention_layernorm_weight = make_1d(dim, 1.0f);
+    t.gate_proj_weight = make_identity(dim);
+    t.up_proj_weight = make_identity(dim);
+    t.down_proj_weight = make_identity(dim);
+    t.rope_cos = rope_cos;
+    t.rope_sin = rope_sin;
+
+    ggml_tensor* out = build_hidream_o1_qwen3vl_text_block(ctx, config, t);
+    ggml_cgraph* graph = ggml_new_graph_custom(ctx, 4096, false);
+    ggml_build_forward_expand(graph, out);
+    ggml_graph_compute_with_ctx(ctx, graph, 4);
+
+    std::vector<float> expected(x_data.size(), 0.0f);
+    for (int64_t tok = 0; tok < tokens; ++tok) {
+        double mean_sq = 0.0;
+        for (int64_t d = 0; d < dim; ++d) {
+            const float v = x_data[static_cast<size_t>(tok * dim + d)];
+            mean_sq += static_cast<double>(v) * static_cast<double>(v);
+        }
+        mean_sq /= static_cast<double>(dim);
+        const float inv = 1.0f / std::sqrt(static_cast<float>(mean_sq) + eps);
+        for (int64_t d = 0; d < dim; ++d) {
+            const size_t idx = static_cast<size_t>(tok * dim + d);
+            const float h = x_data[idx] * inv;
+            expected[idx] = x_data[idx] + (1.0f / (1.0f + std::exp(-h))) * h * h;
+        }
+    }
+
+    const float* actual = static_cast<const float*>(out->data);
+    double diff = 0.0;
+    for (size_t i = 0; i < expected.size(); ++i) {
+        diff = std::max(diff, std::abs(static_cast<double>(actual[i]) - static_cast<double>(expected[i])));
+    }
+    if (max_diff) *max_diff = diff;
+    ggml_free(ctx);
+    if (diff > 1e-5) {
+        if (error) *error = "HiDream Qwen3-VL text block self-check output mismatch";
+        return false;
+    }
+    return true;
+}
+
+}  // namespace utopic
