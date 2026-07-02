@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 struct ggml_context;
 struct ggml_tensor;
@@ -36,9 +37,60 @@ struct HiDreamO1TextBlockGraphTensors {
     ggml_tensor* rope_sin = nullptr;
 };
 
+struct HiDreamO1VisualBlockGraphConfig {
+    int64_t hidden_size = 0;
+    int64_t intermediate_size = 0;
+    int64_t num_heads = 0;
+    int64_t sequence_tokens = 0;
+    float norm_eps = 1e-6f;
+};
+
+struct HiDreamO1VisualBlockGraphTensors {
+    ggml_tensor* x = nullptr;
+    ggml_tensor* norm1_weight = nullptr;
+    ggml_tensor* norm1_bias = nullptr;
+    ggml_tensor* qkv_weight = nullptr;
+    ggml_tensor* qkv_bias = nullptr;
+    ggml_tensor* proj_weight = nullptr;
+    ggml_tensor* proj_bias = nullptr;
+    ggml_tensor* norm2_weight = nullptr;
+    ggml_tensor* norm2_bias = nullptr;
+    ggml_tensor* fc1_weight = nullptr;
+    ggml_tensor* fc1_bias = nullptr;
+    ggml_tensor* fc2_weight = nullptr;
+    ggml_tensor* fc2_bias = nullptr;
+};
+
 ggml_tensor* build_hidream_o1_qwen3vl_text_block(ggml_context* ctx,
                                                  const HiDreamO1TextBlockGraphConfig& config,
                                                  const HiDreamO1TextBlockGraphTensors& tensors);
+ggml_tensor* build_hidream_o1_pixeldit_visual_block(ggml_context* ctx,
+                                                    const HiDreamO1VisualBlockGraphConfig& config,
+                                                    const HiDreamO1VisualBlockGraphTensors& tensors);
 bool hidream_o1_qwen3vl_text_block_self_check(double* max_diff, std::string* error);
+
+struct HiDreamO1RealBlockRunSummary {
+    int layer = 0;
+    int64_t sequence_tokens = 0;
+    int64_t ar_prefix_tokens = 0;
+    int64_t hidden_size = 0;
+    int64_t intermediate_size = 0;
+    int64_t payload_bytes = 0;
+    int64_t output_values = 0;
+    double output_checksum = 0.0;
+    double output_l2 = 0.0;
+    double output_max_abs = 0.0;
+};
+
+bool hidream_o1_run_real_text_block_graph(const std::string& model_dir,
+                                          int layer,
+                                          int64_t sequence_tokens,
+                                          HiDreamO1RealBlockRunSummary* summary,
+                                          std::string* error);
+bool hidream_o1_run_real_visual_block_graph(const std::string& model_dir,
+                                            int layer,
+                                            int64_t sequence_tokens,
+                                            HiDreamO1RealBlockRunSummary* summary,
+                                            std::string* error);
 
 }  // namespace utopic

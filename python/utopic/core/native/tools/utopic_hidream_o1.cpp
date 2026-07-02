@@ -13,10 +13,11 @@ void usage(const char* argv0) {
     std::fprintf(stderr,
                  "usage: %s --prompt TEXT --out image.png [--model-dir DIR] [--source-dir DIR] [--torch-python PY] "
                  "[--width 1024] [--height 1024] [--steps 28] [--seed 42] [--extra-args ARGS] "
-                 "[--native-exec-check] [--native-text-tokens N] [--native-skip-payloads] [--dry-run]\n",
+                 "[--native-exec-check] [--native-text-tokens N] [--native-real-block0-tokens N] "
+                 "[--native-real-visual-block0-tokens N] [--native-skip-payloads] [--dry-run]\n",
                  argv0);
     std::fprintf(stderr,
-                 "note: native-exec-check loads the HiDream config, safetensors catalog, forward token plan, and block0 tensor payloads without invoking sd.cpp or Torch.\n");
+                 "note: native-exec-check loads the HiDream config, safetensors catalog, forward token plan, block0 tensor payloads, and runs native block0 graph execution without invoking sd.cpp or Torch.\n");
 }
 
 bool consume(std::string arg, const char* name) {
@@ -59,6 +60,8 @@ int main(int argc, char** argv) {
     bool native_exec_check = false;
     bool native_load_payloads = true;
     int64_t native_text_tokens = 256;
+    int64_t native_real_block0_tokens = 1;
+    int64_t native_real_visual_block0_tokens = 1;
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
         if (consume(a, "--help")) {
@@ -90,6 +93,10 @@ int main(int argc, char** argv) {
             native_exec_check = true;
         } else if (consume(a, "--native-text-tokens") && i + 1 < argc) {
             native_text_tokens = std::atoll(argv[++i]);
+        } else if (consume(a, "--native-real-block0-tokens") && i + 1 < argc) {
+            native_real_block0_tokens = std::atoll(argv[++i]);
+        } else if (consume(a, "--native-real-visual-block0-tokens") && i + 1 < argc) {
+            native_real_visual_block0_tokens = std::atoll(argv[++i]);
         } else if (consume(a, "--native-skip-payloads")) {
             native_load_payloads = false;
         } else if (consume(a, "--dry-run")) {
@@ -129,13 +136,27 @@ int main(int argc, char** argv) {
             std::fprintf(stderr, "utopic_hidream_o1: native execution prep failed: %s\n", native_error.c_str());
             return 1;
         }
-        double block_graph_max_diff = 0.0;
-        std::string block_graph_error;
-        if (!utopic::hidream_o1_qwen3vl_text_block_self_check(&block_graph_max_diff, &block_graph_error)) {
-            std::fprintf(stderr, "utopic_hidream_o1: native block graph self-check failed: %s\n", block_graph_error.c_str());
-            return 1;
+        utopic::HiDreamO1RealBlockRunSummary block_summary;
+        utopic::HiDreamO1RealBlockRunSummary visual_block_summary;
+        if (native_load_payloads) {
+            if (!utopic::hidream_o1_run_real_text_block_graph(req.model_dir,
+                                                              0,
+                                                              native_real_block0_tokens,
+                                                              &block_summary,
+                                                              &native_error)) {
+                std::fprintf(stderr, "utopic_hidream_o1: native real block0 execution failed: %s\n", native_error.c_str());
+                return 1;
+            }
+            if (!utopic::hidream_o1_run_real_visual_block_graph(req.model_dir,
+                                                                0,
+                                                                native_real_visual_block0_tokens,
+                                                                &visual_block_summary,
+                                                                &native_error)) {
+                std::fprintf(stderr, "utopic_hidream_o1: native real visual block0 execution failed: %s\n", native_error.c_str());
+                return 1;
+            }
         }
-        std::printf("utopic_hidream_o1 native_exec_check=OK model_dir=%s width=%d height=%d text_tokens=%lld image_tokens=%lld total_tokens=%lld text_layers=%d text_hidden=%d tensors=%lld catalog_tensors=%lld missing=%lld block0_tensors=%lld block0_payloads_loaded=%s block0_payload_bytes=%llu block_graph=qwen3vl_text_decoder block_graph_max_diff=%.8f\n",
+        std::printf("utopic_hidream_o1 native_exec_check=OK model_dir=%s width=%d height=%d text_tokens=%lld image_tokens=%lld total_tokens=%lld text_layers=%d text_hidden=%d tensors=%lld catalog_tensors=%lld missing=%lld block0_tensors=%lld block0_payloads_loaded=%s block0_payload_bytes=%llu real_block0=%s real_block0_tokens=%lld real_block0_output_values=%lld real_block0_payload_bytes=%lld real_block0_l2=%.8f real_block0_max_abs=%.8f real_block0_checksum=%.8f real_visual_block0=%s real_visual_block0_tokens=%lld real_visual_block0_output_values=%lld real_visual_block0_payload_bytes=%lld real_visual_block0_l2=%.8f real_visual_block0_max_abs=%.8f real_visual_block0_checksum=%.8f\n",
                     summary.model_dir.c_str(),
                     summary.width,
                     summary.height,
@@ -150,7 +171,20 @@ int main(int argc, char** argv) {
                     static_cast<long long>(summary.block0_tensor_count),
                     summary.block0_payloads_loaded ? "yes" : "no",
                     static_cast<unsigned long long>(summary.block0_payload_bytes),
-                    block_graph_max_diff);
+                    native_load_payloads ? "OK" : "skipped",
+                    static_cast<long long>(block_summary.sequence_tokens),
+                    static_cast<long long>(block_summary.output_values),
+                    static_cast<long long>(block_summary.payload_bytes),
+                    block_summary.output_l2,
+                    block_summary.output_max_abs,
+                    block_summary.output_checksum,
+                    native_load_payloads ? "OK" : "skipped",
+                    static_cast<long long>(visual_block_summary.sequence_tokens),
+                    static_cast<long long>(visual_block_summary.output_values),
+                    static_cast<long long>(visual_block_summary.payload_bytes),
+                    visual_block_summary.output_l2,
+                    visual_block_summary.output_max_abs,
+                    visual_block_summary.output_checksum);
         if (dry_run) return 0;
     }
 
