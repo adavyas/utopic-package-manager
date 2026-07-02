@@ -82,6 +82,39 @@ struct HiDreamO1RealBlockRunSummary {
     double output_max_abs = 0.0;
 };
 
+struct HiDreamO1NativeChainRunSummary {
+    int text_layers = 0;
+    int visual_layers = 0;
+    int64_t text_tokens = 0;
+    int64_t visual_tokens = 0;
+    int64_t text_payload_bytes = 0;
+    int64_t visual_payload_bytes = 0;
+    int64_t text_output_values = 0;
+    int64_t visual_output_values = 0;
+    double text_output_checksum = 0.0;
+    double visual_output_checksum = 0.0;
+    double text_output_l2 = 0.0;
+    double visual_output_l2 = 0.0;
+    double text_output_max_abs = 0.0;
+    double visual_output_max_abs = 0.0;
+};
+
+struct HiDreamO1NativeProjectionRunSummary {
+    int64_t patch_tokens = 0;
+    int64_t timestep_embedding_values = 0;
+    int64_t final_tokens = 0;
+    int64_t patch_output_values = 0;
+    int64_t timestep_output_values = 0;
+    int64_t final_output_values = 0;
+    int64_t payload_bytes = 0;
+    double patch_output_l2 = 0.0;
+    double timestep_output_l2 = 0.0;
+    double final_output_l2 = 0.0;
+    double patch_output_checksum = 0.0;
+    double timestep_output_checksum = 0.0;
+    double final_output_checksum = 0.0;
+};
+
 bool hidream_o1_run_real_text_block_graph(const std::string& model_dir,
                                           int layer,
                                           int64_t sequence_tokens,
@@ -91,6 +124,17 @@ bool hidream_o1_run_real_visual_block_graph(const std::string& model_dir,
                                             int layer,
                                             int64_t sequence_tokens,
                                             HiDreamO1RealBlockRunSummary* summary,
+                                            std::string* error);
+bool hidream_o1_run_native_layer_chain(const std::string& model_dir,
+                                       int64_t text_tokens,
+                                       int64_t visual_tokens,
+                                       HiDreamO1NativeChainRunSummary* summary,
+                                       std::string* error);
+bool hidream_o1_run_native_projection_graph(const std::string& model_dir,
+                                            int64_t patch_tokens,
+                                            int64_t final_tokens,
+                                            float timestep,
+                                            HiDreamO1NativeProjectionRunSummary* summary,
                                             std::string* error);
 
 }  // namespace utopic

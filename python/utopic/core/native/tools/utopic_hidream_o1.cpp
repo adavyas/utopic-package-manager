@@ -14,7 +14,9 @@ void usage(const char* argv0) {
                  "usage: %s --prompt TEXT --out image.png [--model-dir DIR] [--source-dir DIR] [--torch-python PY] "
                  "[--width 1024] [--height 1024] [--steps 28] [--seed 42] [--extra-args ARGS] "
                  "[--native-exec-check] [--native-text-tokens N] [--native-real-block0-tokens N] "
-                 "[--native-real-visual-block0-tokens N] [--native-skip-payloads] [--dry-run]\n",
+                 "[--native-real-visual-block0-tokens N] [--native-full-chain-check] "
+                 "[--native-chain-text-tokens N] [--native-chain-visual-tokens N] "
+                 "[--native-projection-patch-tokens N] [--native-projection-final-tokens N] [--native-skip-payloads] [--dry-run]\n",
                  argv0);
     std::fprintf(stderr,
                  "note: native-exec-check loads the HiDream config, safetensors catalog, forward token plan, block0 tensor payloads, and runs native block0 graph execution without invoking sd.cpp or Torch.\n");
@@ -62,6 +64,11 @@ int main(int argc, char** argv) {
     int64_t native_text_tokens = 256;
     int64_t native_real_block0_tokens = 1;
     int64_t native_real_visual_block0_tokens = 1;
+    bool native_full_chain_check = false;
+    int64_t native_chain_text_tokens = 1;
+    int64_t native_chain_visual_tokens = 1;
+    int64_t native_projection_patch_tokens = 1;
+    int64_t native_projection_final_tokens = 1;
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
         if (consume(a, "--help")) {
@@ -97,6 +104,16 @@ int main(int argc, char** argv) {
             native_real_block0_tokens = std::atoll(argv[++i]);
         } else if (consume(a, "--native-real-visual-block0-tokens") && i + 1 < argc) {
             native_real_visual_block0_tokens = std::atoll(argv[++i]);
+        } else if (consume(a, "--native-full-chain-check")) {
+            native_full_chain_check = true;
+        } else if (consume(a, "--native-chain-text-tokens") && i + 1 < argc) {
+            native_chain_text_tokens = std::atoll(argv[++i]);
+        } else if (consume(a, "--native-chain-visual-tokens") && i + 1 < argc) {
+            native_chain_visual_tokens = std::atoll(argv[++i]);
+        } else if (consume(a, "--native-projection-patch-tokens") && i + 1 < argc) {
+            native_projection_patch_tokens = std::atoll(argv[++i]);
+        } else if (consume(a, "--native-projection-final-tokens") && i + 1 < argc) {
+            native_projection_final_tokens = std::atoll(argv[++i]);
         } else if (consume(a, "--native-skip-payloads")) {
             native_load_payloads = false;
         } else if (consume(a, "--dry-run")) {
@@ -138,6 +155,8 @@ int main(int argc, char** argv) {
         }
         utopic::HiDreamO1RealBlockRunSummary block_summary;
         utopic::HiDreamO1RealBlockRunSummary visual_block_summary;
+        utopic::HiDreamO1NativeChainRunSummary chain_summary;
+        utopic::HiDreamO1NativeProjectionRunSummary projection_summary;
         if (native_load_payloads) {
             if (!utopic::hidream_o1_run_real_text_block_graph(req.model_dir,
                                                               0,
@@ -155,8 +174,26 @@ int main(int argc, char** argv) {
                 std::fprintf(stderr, "utopic_hidream_o1: native real visual block0 execution failed: %s\n", native_error.c_str());
                 return 1;
             }
+            if (!utopic::hidream_o1_run_native_projection_graph(req.model_dir,
+                                                                native_projection_patch_tokens,
+                                                                native_projection_final_tokens,
+                                                                0.5f,
+                                                                &projection_summary,
+                                                                &native_error)) {
+                std::fprintf(stderr, "utopic_hidream_o1: native projection execution failed: %s\n", native_error.c_str());
+                return 1;
+            }
+            if (native_full_chain_check &&
+                !utopic::hidream_o1_run_native_layer_chain(req.model_dir,
+                                                           native_chain_text_tokens,
+                                                           native_chain_visual_tokens,
+                                                           &chain_summary,
+                                                           &native_error)) {
+                std::fprintf(stderr, "utopic_hidream_o1: native full layer-chain execution failed: %s\n", native_error.c_str());
+                return 1;
+            }
         }
-        std::printf("utopic_hidream_o1 native_exec_check=OK model_dir=%s width=%d height=%d text_tokens=%lld image_tokens=%lld total_tokens=%lld text_layers=%d text_hidden=%d tensors=%lld catalog_tensors=%lld missing=%lld block0_tensors=%lld block0_payloads_loaded=%s block0_payload_bytes=%llu real_block0=%s real_block0_tokens=%lld real_block0_output_values=%lld real_block0_payload_bytes=%lld real_block0_l2=%.8f real_block0_max_abs=%.8f real_block0_checksum=%.8f real_visual_block0=%s real_visual_block0_tokens=%lld real_visual_block0_output_values=%lld real_visual_block0_payload_bytes=%lld real_visual_block0_l2=%.8f real_visual_block0_max_abs=%.8f real_visual_block0_checksum=%.8f\n",
+        std::printf("utopic_hidream_o1 native_exec_check=OK model_dir=%s width=%d height=%d text_tokens=%lld image_tokens=%lld total_tokens=%lld text_layers=%d text_hidden=%d tensors=%lld catalog_tensors=%lld missing=%lld block0_tensors=%lld block0_payloads_loaded=%s block0_payload_bytes=%llu real_block0=%s real_block0_tokens=%lld real_block0_output_values=%lld real_block0_payload_bytes=%lld real_block0_l2=%.8f real_block0_max_abs=%.8f real_block0_checksum=%.8f real_visual_block0=%s real_visual_block0_tokens=%lld real_visual_block0_output_values=%lld real_visual_block0_payload_bytes=%lld real_visual_block0_l2=%.8f real_visual_block0_max_abs=%.8f real_visual_block0_checksum=%.8f native_projection=%s native_projection_payload_bytes=%lld native_projection_patch_values=%lld native_projection_timestep_values=%lld native_projection_final_values=%lld native_projection_patch_l2=%.8f native_projection_timestep_l2=%.8f native_projection_final_l2=%.8f native_full_chain=%s native_chain_text_layers=%d native_chain_visual_layers=%d native_chain_text_tokens=%lld native_chain_visual_tokens=%lld native_chain_text_payload_bytes=%lld native_chain_visual_payload_bytes=%lld native_chain_text_l2=%.8f native_chain_visual_l2=%.8f\n",
                     summary.model_dir.c_str(),
                     summary.width,
                     summary.height,
@@ -184,7 +221,24 @@ int main(int argc, char** argv) {
                     static_cast<long long>(visual_block_summary.payload_bytes),
                     visual_block_summary.output_l2,
                     visual_block_summary.output_max_abs,
-                    visual_block_summary.output_checksum);
+                    visual_block_summary.output_checksum,
+                    native_load_payloads ? "OK" : "skipped",
+                    static_cast<long long>(projection_summary.payload_bytes),
+                    static_cast<long long>(projection_summary.patch_output_values),
+                    static_cast<long long>(projection_summary.timestep_output_values),
+                    static_cast<long long>(projection_summary.final_output_values),
+                    projection_summary.patch_output_l2,
+                    projection_summary.timestep_output_l2,
+                    projection_summary.final_output_l2,
+                    native_full_chain_check ? "OK" : "skipped",
+                    chain_summary.text_layers,
+                    chain_summary.visual_layers,
+                    static_cast<long long>(chain_summary.text_tokens),
+                    static_cast<long long>(chain_summary.visual_tokens),
+                    static_cast<long long>(chain_summary.text_payload_bytes),
+                    static_cast<long long>(chain_summary.visual_payload_bytes),
+                    chain_summary.text_output_l2,
+                    chain_summary.visual_output_l2);
         if (dry_run) return 0;
     }
 
