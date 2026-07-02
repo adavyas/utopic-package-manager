@@ -6,14 +6,18 @@
 #include "ggml-cpu.h"
 
 #include <algorithm>
+#include <array>
+#include <cctype>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <fstream>
 #include <functional>
 #include <limits>
+#include <sstream>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace utopic {
@@ -98,12 +102,16 @@ ggml_tensor* build_interleaved_rope(ggml_context* ctx,
     require_tensor(cos, "rope.cos");
     require_tensor(sin, "rope.sin");
 
-    ggml_tensor* x4 = ggml_reshape_4d(ctx, x, 2, head_dim / 2, heads, tokens);
-    ggml_tensor* x0 = ggml_cont(ctx, ggml_view_4d(ctx, x4, 1, head_dim / 2, heads, tokens,
-                                                  x4->nb[1], x4->nb[2], x4->nb[3], 0));
-    ggml_tensor* x1 = ggml_cont(ctx, ggml_view_4d(ctx, x4, 1, head_dim / 2, heads, tokens,
-                                                  x4->nb[1], x4->nb[2], x4->nb[3], x4->nb[0]));
-    ggml_tensor* rot = ggml_reshape_3d(ctx, ggml_concat(ctx, ggml_neg(ctx, x1), x0, 0), head_dim, heads, tokens);
+    ggml_tensor* x0 = ggml_cont(ctx, ggml_view_3d(ctx, x, head_dim / 2, heads, tokens, x->nb[1], x->nb[2], 0));
+    ggml_tensor* x1 = ggml_cont(ctx, ggml_view_3d(ctx,
+                                                  x,
+                                                  head_dim / 2,
+                                                  heads,
+                                                  tokens,
+                                                  x->nb[1],
+                                                  x->nb[2],
+                                                  static_cast<size_t>(head_dim / 2) * x->nb[0]));
+    ggml_tensor* rot = ggml_concat(ctx, ggml_neg(ctx, x1), x0, 0);
     return ggml_add(ctx, ggml_mul(ctx, x, cos), ggml_mul(ctx, rot, sin));
 }
 
@@ -181,6 +189,7 @@ bool run_text_layer_from_input(const HiDreamO1NativeModelLayout& layout,
                                int layer,
                                int64_t sequence_tokens,
                                int64_t ar_prefix_tokens,
+                               const HiDreamO1ForwardPlan* forward_plan,
                                const std::vector<float>& input,
                                std::vector<float>* output,
                                HiDreamO1RealBlockRunSummary* summary,
@@ -216,12 +225,55 @@ void fill_rope_tables(ggml_tensor* cos_tensor, ggml_tensor* sin_tensor, double t
             const double angle = static_cast<double>(tok) * inv_freq;
             const float c = static_cast<float>(std::cos(angle));
             const float s = static_cast<float>(std::sin(angle));
-            const int64_t d0 = 2 * i;
-            const int64_t d1 = d0 + 1;
-            cos_data[tok * head_dim + d0] = c;
-            cos_data[tok * head_dim + d1] = c;
-            sin_data[tok * head_dim + d0] = s;
-            sin_data[tok * head_dim + d1] = s;
+            cos_data[tok * head_dim + i] = c;
+            cos_data[tok * head_dim + head_dim / 2 + i] = c;
+            sin_data[tok * head_dim + i] = s;
+            sin_data[tok * head_dim + head_dim / 2 + i] = s;
+        }
+    }
+}
+
+int64_t mrope_axis_position(const HiDreamO1ForwardPlan& plan,
+                            const HiDreamO1NativeModelLayout& layout,
+                            int64_t tok,
+                            int64_t freq_index,
+                            int64_t half_dim) {
+    if (tok < 0 || static_cast<size_t>(tok) >= plan.mrope_position_ids_t.size()) return tok;
+    const int mt = layout.text.mrope_section_t;
+    const int mh = layout.text.mrope_section_h;
+    const int mw = layout.text.mrope_section_w;
+    if (mt > 0 && mh > 0 && mw > 0 && mt + mh + mw == half_dim) {
+        if (freq_index < mh * 3 && freq_index % 3 == 1) {
+            return plan.mrope_position_ids_h[static_cast<size_t>(tok)];
+        }
+        if (freq_index < mw * 3 && freq_index % 3 == 2) {
+            return plan.mrope_position_ids_w[static_cast<size_t>(tok)];
+        }
+    }
+    return plan.mrope_position_ids_t[static_cast<size_t>(tok)];
+}
+
+void fill_rope_tables_mrope(ggml_tensor* cos_tensor,
+                            ggml_tensor* sin_tensor,
+                            const HiDreamO1ForwardPlan& plan,
+                            const HiDreamO1NativeModelLayout& layout) {
+    float* cos_data = static_cast<float*>(cos_tensor->data);
+    float* sin_data = static_cast<float*>(sin_tensor->data);
+    const int64_t head_dim = cos_tensor->ne[0];
+    const int64_t tokens = cos_tensor->ne[2];
+    const int64_t half = head_dim / 2;
+    const double base = layout.text.rope_theta > 0.0 ? layout.text.rope_theta : 1000000.0;
+    for (int64_t tok = 0; tok < tokens; ++tok) {
+        for (int64_t i = 0; i < half; ++i) {
+            const int64_t pos = mrope_axis_position(plan, layout, tok, i, half);
+            const double inv_freq = std::pow(base, -static_cast<double>(2 * i) / static_cast<double>(head_dim));
+            const double angle = static_cast<double>(pos) * inv_freq;
+            const float c = static_cast<float>(std::cos(angle));
+            const float s = static_cast<float>(std::sin(angle));
+            cos_data[tok * head_dim + i] = c;
+            cos_data[tok * head_dim + half + i] = c;
+            sin_data[tok * head_dim + i] = s;
+            sin_data[tok * head_dim + half + i] = s;
         }
     }
 }
@@ -418,12 +470,320 @@ float normal01(uint64_t* state) {
     return static_cast<float>(std::sqrt(-2.0 * std::log(u1)) * std::cos(6.2831853071795864769 * u2));
 }
 
-std::string build_official_t2i_caption_prefix(const std::string& prompt) {
-    return "<|im_start|>user\n" + prompt + "<|im_end|>\n<|im_start|>assistant\n<|boi_token|>";
+std::string join_path_local(const std::string& a, const std::string& b) {
+    if (a.empty()) return b;
+    if (a.back() == '/') return a + b;
+    return a + "/" + b;
+}
+
+bool read_text_local(const std::string& path, std::string* out) {
+    if (out == nullptr) return false;
+    std::ifstream in(path, std::ios::binary);
+    if (!in) return false;
+    *out = std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+    return true;
+}
+
+std::string json_unescape_string(const std::string& text, size_t* pos) {
+    std::string out;
+    if (pos == nullptr || *pos >= text.size() || text[*pos] != '"') return out;
+    ++(*pos);
+    while (*pos < text.size()) {
+        const char c = text[(*pos)++];
+        if (c == '"') break;
+        if (c != '\\' || *pos >= text.size()) {
+            out.push_back(c);
+            continue;
+        }
+        const char e = text[(*pos)++];
+        switch (e) {
+            case '"': out.push_back('"'); break;
+            case '\\': out.push_back('\\'); break;
+            case '/': out.push_back('/'); break;
+            case 'b': out.push_back('\b'); break;
+            case 'f': out.push_back('\f'); break;
+            case 'n': out.push_back('\n'); break;
+            case 'r': out.push_back('\r'); break;
+            case 't': out.push_back('\t'); break;
+            default: out.push_back(e); break;
+        }
+    }
+    return out;
+}
+
+void skip_json_ws(const std::string& text, size_t* pos) {
+    while (pos && *pos < text.size() && std::isspace(static_cast<unsigned char>(text[*pos]))) ++(*pos);
+}
+
+std::string utf8_from_codepoint(uint32_t cp) {
+    std::string out;
+    if (cp <= 0x7f) {
+        out.push_back(static_cast<char>(cp));
+    } else if (cp <= 0x7ff) {
+        out.push_back(static_cast<char>(0xc0 | (cp >> 6)));
+        out.push_back(static_cast<char>(0x80 | (cp & 0x3f)));
+    } else if (cp <= 0xffff) {
+        out.push_back(static_cast<char>(0xe0 | (cp >> 12)));
+        out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3f)));
+        out.push_back(static_cast<char>(0x80 | (cp & 0x3f)));
+    } else {
+        out.push_back(static_cast<char>(0xf0 | (cp >> 18)));
+        out.push_back(static_cast<char>(0x80 | ((cp >> 12) & 0x3f)));
+        out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3f)));
+        out.push_back(static_cast<char>(0x80 | (cp & 0x3f)));
+    }
+    return out;
+}
+
+const std::array<std::string, 256>& byte_encoder() {
+    static const std::array<std::string, 256> table = [] {
+        std::array<std::string, 256> t{};
+        std::vector<int> bs;
+        for (int i = 33; i <= 126; ++i) bs.push_back(i);
+        for (int i = 161; i <= 172; ++i) bs.push_back(i);
+        for (int i = 174; i <= 255; ++i) bs.push_back(i);
+        std::vector<int> cs = bs;
+        int n = 0;
+        for (int b = 0; b < 256; ++b) {
+            if (std::find(bs.begin(), bs.end(), b) == bs.end()) {
+                bs.push_back(b);
+                cs.push_back(256 + n++);
+            }
+        }
+        for (size_t i = 0; i < bs.size(); ++i) {
+            t[static_cast<size_t>(bs[i])] = utf8_from_codepoint(static_cast<uint32_t>(cs[i]));
+        }
+        return t;
+    }();
+    return table;
+}
+
+struct HiDreamO1BpeTokenizer {
+    std::unordered_map<std::string, uint64_t> vocab;
+    std::unordered_map<std::string, int> ranks;
+    std::vector<std::pair<std::string, uint64_t>> specials;
+    bool loaded = false;
+};
+
+bool load_vocab_json(const std::string& path, std::unordered_map<std::string, uint64_t>* vocab, std::string* error) {
+    std::string text;
+    if (!read_text_local(path, &text)) {
+        if (error) *error = "missing tokenizer vocab: " + path;
+        return false;
+    }
+    size_t pos = 0;
+    skip_json_ws(text, &pos);
+    if (pos >= text.size() || text[pos] != '{') {
+        if (error) *error = "invalid tokenizer vocab JSON";
+        return false;
+    }
+    ++pos;
+    while (pos < text.size()) {
+        skip_json_ws(text, &pos);
+        if (pos < text.size() && text[pos] == '}') break;
+        const std::string key = json_unescape_string(text, &pos);
+        skip_json_ws(text, &pos);
+        if (pos >= text.size() || text[pos] != ':') {
+            if (error) *error = "invalid tokenizer vocab entry";
+            return false;
+        }
+        ++pos;
+        skip_json_ws(text, &pos);
+        uint64_t value = 0;
+        bool any = false;
+        while (pos < text.size() && std::isdigit(static_cast<unsigned char>(text[pos]))) {
+            any = true;
+            value = value * 10 + static_cast<uint64_t>(text[pos] - '0');
+            ++pos;
+        }
+        if (!any) {
+            if (error) *error = "invalid tokenizer vocab id";
+            return false;
+        }
+        (*vocab)[key] = value;
+        skip_json_ws(text, &pos);
+        if (pos < text.size() && text[pos] == ',') ++pos;
+    }
+    return true;
+}
+
+bool load_merges_txt(const std::string& path, std::unordered_map<std::string, int>* ranks, std::string* error) {
+    std::ifstream in(path);
+    if (!in) {
+        if (error) *error = "missing tokenizer merges: " + path;
+        return false;
+    }
+    std::string line;
+    int rank = 0;
+    while (std::getline(in, line)) {
+        if (line.empty() || line[0] == '#') continue;
+        const size_t sp = line.find(' ');
+        if (sp == std::string::npos) continue;
+        const std::string left = line.substr(0, sp);
+        const std::string right = line.substr(sp + 1);
+        (*ranks)[left + "\n" + right] = rank++;
+    }
+    return true;
+}
+
+bool load_hidream_o1_bpe_tokenizer(const std::string& model_dir, HiDreamO1BpeTokenizer* tok, std::string* error) {
+    if (tok == nullptr) return false;
+    tok->vocab.clear();
+    tok->ranks.clear();
+    tok->specials = {
+        {"<|endoftext|>", 151643}, {"<|im_start|>", 151644}, {"<|im_end|>", 151645},
+        {"<|vision_start|>", 151652}, {"<|vision_end|>", 151653}, {"<|vision_pad|>", 151654},
+        {"<|image_pad|>", 151655}, {"<|video_pad|>", 151656}, {"<|boi_token|>", 151669},
+        {"<|eoi_token|>", 151670}, {"<|tms_token|>", 151673},
+    };
+    std::sort(tok->specials.begin(), tok->specials.end(), [](const auto& a, const auto& b) {
+        return a.first.size() > b.first.size();
+    });
+    if (!load_vocab_json(join_path_local(model_dir, "vocab.json"), &tok->vocab, error)) return false;
+    if (!load_merges_txt(join_path_local(model_dir, "merges.txt"), &tok->ranks, error)) return false;
+    tok->loaded = true;
+    return true;
+}
+
+bool is_ascii_letter(char c) {
+    return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
+}
+
+bool is_ascii_digit(char c) {
+    return c >= '0' && c <= '9';
+}
+
+bool is_ascii_space(char c) {
+    return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v';
+}
+
+std::vector<std::string> qwen_pretokenize_ascii(const std::string& text) {
+    std::vector<std::string> out;
+    size_t i = 0;
+    while (i < text.size()) {
+        const size_t start = i;
+        if (text[i] == '\'' && i + 1 < text.size()) {
+            std::string lower;
+            size_t j = i + 1;
+            while (j < text.size() && is_ascii_letter(text[j]) && lower.size() < 2) {
+                lower.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(text[j++]))));
+            }
+            if (lower == "s" || lower == "t" || lower == "m" || lower == "d" ||
+                lower == "re" || lower == "ve" || lower == "ll") {
+                out.push_back(text.substr(i, 1 + lower.size()));
+                i += 1 + lower.size();
+                continue;
+            }
+        }
+        if (is_ascii_digit(text[i])) {
+            out.push_back(text.substr(i++, 1));
+            continue;
+        }
+        if (is_ascii_letter(text[i]) ||
+            (text[i] != '\r' && text[i] != '\n' && !is_ascii_letter(text[i]) && !is_ascii_digit(text[i]) &&
+             i + 1 < text.size() && is_ascii_letter(text[i + 1]))) {
+            if (!is_ascii_letter(text[i])) ++i;
+            while (i < text.size() && is_ascii_letter(text[i])) ++i;
+            out.push_back(text.substr(start, i - start));
+            continue;
+        }
+        if ((text[i] == ' ' && i + 1 < text.size() && !is_ascii_space(text[i + 1]) &&
+             !is_ascii_letter(text[i + 1]) && !is_ascii_digit(text[i + 1])) ||
+            (!is_ascii_space(text[i]) && !is_ascii_letter(text[i]) && !is_ascii_digit(text[i]))) {
+            if (text[i] == ' ') ++i;
+            while (i < text.size() && !is_ascii_space(text[i]) && !is_ascii_letter(text[i]) && !is_ascii_digit(text[i])) ++i;
+            while (i < text.size() && (text[i] == '\r' || text[i] == '\n')) ++i;
+            out.push_back(text.substr(start, i - start));
+            continue;
+        }
+        if (is_ascii_space(text[i])) {
+            while (i < text.size() && is_ascii_space(text[i])) ++i;
+            out.push_back(text.substr(start, i - start));
+            continue;
+        }
+        out.push_back(text.substr(i++, 1));
+    }
+    return out;
+}
+
+std::vector<std::string> byte_level_chars(const std::string& piece) {
+    std::vector<std::string> chars;
+    const auto& enc = byte_encoder();
+    chars.reserve(piece.size());
+    for (unsigned char c : piece) chars.push_back(enc[static_cast<size_t>(c)]);
+    return chars;
+}
+
+std::vector<uint64_t> bpe_encode_piece(const HiDreamO1BpeTokenizer& tok, const std::string& piece, std::string* error) {
+    std::vector<std::string> parts = byte_level_chars(piece);
+    if (parts.empty()) return {};
+    while (parts.size() > 1) {
+        int best_rank = std::numeric_limits<int>::max();
+        size_t best = std::numeric_limits<size_t>::max();
+        for (size_t i = 0; i + 1 < parts.size(); ++i) {
+            const auto it = tok.ranks.find(parts[i] + "\n" + parts[i + 1]);
+            if (it != tok.ranks.end() && it->second < best_rank) {
+                best_rank = it->second;
+                best = i;
+            }
+        }
+        if (best == std::numeric_limits<size_t>::max()) break;
+        std::vector<std::string> merged;
+        for (size_t i = 0; i < parts.size();) {
+            if (i + 1 < parts.size() && parts[i] == parts[best] && parts[i + 1] == parts[best + 1]) {
+                merged.push_back(parts[i] + parts[i + 1]);
+                i += 2;
+            } else {
+                merged.push_back(parts[i++]);
+            }
+        }
+        parts.swap(merged);
+    }
+    std::vector<uint64_t> ids;
+    ids.reserve(parts.size());
+    for (const std::string& part : parts) {
+        const auto it = tok.vocab.find(part);
+        if (it == tok.vocab.end()) {
+            if (error) *error = "tokenizer piece missing from vocab: " + part;
+            return {};
+        }
+        ids.push_back(it->second);
+    }
+    return ids;
+}
+
+std::vector<uint64_t> tokenize_with_bpe(const HiDreamO1BpeTokenizer& tok, const std::string& text, std::string* error) {
+    std::vector<uint64_t> ids;
+    for (size_t i = 0; i < text.size();) {
+        bool matched_special = false;
+        for (const auto& special : tok.specials) {
+            if (text.compare(i, special.first.size(), special.first) == 0) {
+                ids.push_back(special.second);
+                i += special.first.size();
+                matched_special = true;
+                break;
+            }
+        }
+        if (matched_special) continue;
+        size_t next_special = std::string::npos;
+        for (const auto& special : tok.specials) {
+            const size_t p = text.find(special.first, i);
+            if (p != std::string::npos) next_special = std::min(next_special, p);
+        }
+        const size_t end = next_special == std::string::npos ? text.size() : next_special;
+        const std::string span = text.substr(i, end - i);
+        for (const std::string& pre : qwen_pretokenize_ascii(span)) {
+            std::vector<uint64_t> piece_ids = bpe_encode_piece(tok, pre, error);
+            if (!piece_ids.empty()) ids.insert(ids.end(), piece_ids.begin(), piece_ids.end());
+            else if (error && !error->empty()) return {};
+        }
+        i = end;
+    }
+    return ids;
 }
 
 std::vector<uint64_t> pseudo_tokenize_official_caption(const std::string& prompt) {
-    const std::string caption = build_official_t2i_caption_prefix(prompt);
+    const std::string caption = hidream_o1_build_official_t2i_text(prompt);
     std::vector<uint64_t> tokens;
     tokens.reserve(caption.size() / 4 + 8);
     for (size_t i = 0; i < caption.size();) {
@@ -434,7 +794,10 @@ std::vector<uint64_t> pseudo_tokenize_official_caption(const std::string& prompt
             tokens.push_back(151645);
             i += 10;
         } else if (caption.compare(i, 13, "<|boi_token|>") == 0) {
-            tokens.push_back(151647);
+            tokens.push_back(151669);
+            i += 13;
+        } else if (caption.compare(i, 13, "<|tms_token|>") == 0) {
+            tokens.push_back(151673);
             i += 13;
         } else {
             size_t next = caption.find("<|", i);
@@ -637,7 +1000,7 @@ bool run_text_transformer_conditioning(const HiDreamO1NativeModelLayout& layout,
     for (int layer = 0; layer < layout.text.num_hidden_layers; ++layer) {
         std::vector<float> next;
         HiDreamO1RealBlockRunSummary block;
-        if (!run_text_layer_from_input(layout, catalog, layer, tokens, tokens, text_state, &next, &block, error)) {
+        if (!run_text_layer_from_input(layout, catalog, layer, tokens, tokens, nullptr, text_state, &next, &block, error)) {
             return false;
         }
         if (payload_bytes) *payload_bytes += block.payload_bytes;
@@ -671,6 +1034,7 @@ bool run_text_layer_from_input(const HiDreamO1NativeModelLayout& layout,
                                int layer,
                                int64_t sequence_tokens,
                                int64_t ar_prefix_tokens,
+                               const HiDreamO1ForwardPlan* forward_plan,
                                const std::vector<float>& input,
                                std::vector<float>* output,
                                HiDreamO1RealBlockRunSummary* summary,
@@ -718,7 +1082,12 @@ bool run_text_layer_from_input(const HiDreamO1NativeModelLayout& layout,
     std::memcpy(t.x->data, input.data(), input.size() * sizeof(float));
     t.rope_cos = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, config.head_dim, 1, sequence_tokens);
     t.rope_sin = ggml_new_tensor_3d(ctx, GGML_TYPE_F32, config.head_dim, 1, sequence_tokens);
-    fill_rope_tables(t.rope_cos, t.rope_sin, layout.text.rope_theta);
+    if (forward_plan != nullptr &&
+        forward_plan->mrope_position_ids_t.size() == static_cast<size_t>(sequence_tokens)) {
+        fill_rope_tables_mrope(t.rope_cos, t.rope_sin, *forward_plan, layout);
+    } else {
+        fill_rope_tables(t.rope_cos, t.rope_sin, layout.text.rope_theta);
+    }
 
     const std::string prefix = "model.language_model.layers." + std::to_string(layer) + ".";
     int64_t loaded_payload_bytes = 0;
@@ -1292,6 +1661,7 @@ bool run_combined_sequence_predictor(const HiDreamO1NativeModelLayout& layout,
                                        layer,
                                        plan.total_sequence_tokens,
                                        plan.timestep_token_begin,
+                                       &plan,
                                        state,
                                        &next,
                                        &block,
@@ -1341,6 +1711,35 @@ bool run_combined_sequence_predictor(const HiDreamO1NativeModelLayout& layout,
 }
 
 }  // namespace
+
+std::string hidream_o1_build_official_t2i_text(const std::string& prompt) {
+    return "<|im_start|>user\n" + prompt + "<|im_end|>\n<|im_start|>assistant\n<|boi_token|><|tms_token|>";
+}
+
+bool hidream_o1_tokenize_t2i_prompt(const std::string& model_dir,
+                                    const std::string& prompt,
+                                    std::vector<uint64_t>* token_ids,
+                                    bool* exact,
+                                    std::string* error) {
+    if (token_ids == nullptr) return false;
+    token_ids->clear();
+    if (exact) *exact = false;
+    HiDreamO1BpeTokenizer tokenizer;
+    std::string load_error;
+    if (!load_hidream_o1_bpe_tokenizer(model_dir, &tokenizer, &load_error)) {
+        if (error) *error = load_error;
+        return false;
+    }
+    std::string tokenize_error;
+    std::vector<uint64_t> ids = tokenize_with_bpe(tokenizer, hidream_o1_build_official_t2i_text(prompt), &tokenize_error);
+    if (!tokenize_error.empty() || ids.empty()) {
+        if (error) *error = tokenize_error.empty() ? "HiDream tokenizer returned no IDs" : tokenize_error;
+        return false;
+    }
+    *token_ids = std::move(ids);
+    if (exact) *exact = true;
+    return true;
+}
 
 ggml_tensor* build_hidream_o1_qwen3vl_text_block(ggml_context* ctx,
                                                  const HiDreamO1TextBlockGraphConfig& config,
@@ -1900,7 +2299,7 @@ bool hidream_o1_run_native_layer_chain(const std::string& model_dir,
     for (int layer = 0; layer < layout.text.num_hidden_layers; ++layer) {
         std::vector<float> next;
         HiDreamO1RealBlockRunSummary block;
-        if (!run_text_layer_from_input(layout, catalog, layer, text_tokens, text_tokens, text_state, &next, &block, error)) {
+        if (!run_text_layer_from_input(layout, catalog, layer, text_tokens, text_tokens, nullptr, text_state, &next, &block, error)) {
             return false;
         }
         text_payload += block.payload_bytes;
@@ -2138,7 +2537,18 @@ bool hidream_o1_generate_native_preview_image(const std::string& model_dir,
         return false;
     }
 
-    const std::vector<uint64_t> token_ids = pseudo_tokenize_official_caption(prompt);
+    std::vector<uint64_t> token_ids;
+    bool exact_tokenizer = false;
+    std::string tokenize_error;
+    if (!hidream_o1_tokenize_t2i_prompt(model_dir, prompt, &token_ids, &exact_tokenizer, &tokenize_error)) {
+        const std::string vocab_path = join_path_local(model_dir, "vocab.json");
+        std::ifstream vocab_probe(vocab_path, std::ios::binary);
+        if (vocab_probe.good()) {
+            if (error) *error = tokenize_error;
+            return false;
+        }
+        token_ids = pseudo_tokenize_official_caption(prompt);
+    }
     const int64_t text_tokens = static_cast<int64_t>(token_ids.size());
     if (token_ids.empty() || text_tokens <= 0) {
         if (error) *error = "native preview prompt conditioning failed";

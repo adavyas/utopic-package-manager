@@ -51,6 +51,10 @@ struct HiDreamO1ForwardPlan {
     std::vector<int> raw_token_types;
     std::vector<unsigned char> token_types_bin;
     std::vector<unsigned char> vinput_mask;
+    std::vector<int64_t> mrope_position_ids_t;
+    std::vector<int64_t> mrope_position_ids_h;
+    std::vector<int64_t> mrope_position_ids_w;
+    int64_t mrope_position_delta = 0;
 };
 
 struct HiDreamO1ForwardTraceStep {
@@ -131,6 +135,9 @@ struct HiDreamO1TextModelConfig {
     int num_key_value_heads = 0;
     int head_dim = 0;
     int vocab_size = 0;
+    int mrope_section_t = 24;
+    int mrope_section_h = 20;
+    int mrope_section_w = 20;
     double rope_theta = 0.0;
     double rms_norm_eps = 0.0;
 };

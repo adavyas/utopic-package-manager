@@ -19,7 +19,7 @@ CORE_CATALOG_PATH = (
     / "utopic_core"
     / "models.json"
 )
-EXPECTED_NATIVE_REF = "34a5b1d5c16eedd16d433ddef260a415c9bbb7f2"
+EXPECTED_NATIVE_REF = "141e6c48e82d770dbcdbfc6d3c0a008e163ab816"
 
 REQUIRED_NATIVE_RUNNER_FILES = {
     "runner.cpp",

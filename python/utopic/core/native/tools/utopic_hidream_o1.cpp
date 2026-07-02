@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <string>
 #include <sys/stat.h>
+#include <vector>
 
 namespace {
 
@@ -17,7 +18,7 @@ void usage(const char* argv0) {
                  "[--native-real-visual-block0-tokens N] [--native-full-chain-check] "
                  "[--native-chain-text-tokens N] [--native-chain-visual-tokens N] "
                  "[--native-projection-patch-tokens N] [--native-projection-final-tokens N] "
-                 "[--native-preview] [--native-skip-payloads] [--dry-run]\n",
+                 "[--native-preview] [--native-tokenizer-check] [--native-skip-payloads] [--dry-run]\n",
                  argv0);
     std::fprintf(stderr,
                  "note: native-exec-check loads the HiDream config, safetensors catalog, forward token plan, block0 tensor payloads, and runs native block0 graph execution without invoking sd.cpp or Torch.\n");
@@ -71,6 +72,7 @@ int main(int argc, char** argv) {
     int64_t native_projection_patch_tokens = 1;
     int64_t native_projection_final_tokens = 1;
     bool native_preview = false;
+    bool native_tokenizer_check = false;
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
         if (consume(a, "--help")) {
@@ -118,6 +120,8 @@ int main(int argc, char** argv) {
             native_projection_final_tokens = std::atoll(argv[++i]);
         } else if (consume(a, "--native-preview")) {
             native_preview = true;
+        } else if (consume(a, "--native-tokenizer-check")) {
+            native_tokenizer_check = true;
         } else if (consume(a, "--native-skip-payloads")) {
             native_load_payloads = false;
         } else if (consume(a, "--dry-run")) {
@@ -129,7 +133,7 @@ int main(int argc, char** argv) {
         }
     }
 
-    if (req.prompt.empty() || req.output_path.empty()) {
+    if (req.prompt.empty() || (req.output_path.empty() && !native_tokenizer_check)) {
         usage(argv[0]);
         return 2;
     }
@@ -139,6 +143,48 @@ int main(int argc, char** argv) {
     }
 
     const utopic::HiDreamO1Shape shape = utopic::hidream_o1_shape_for_size(cfg, req.width, req.height);
+    if (native_tokenizer_check) {
+        if (!utopic::hidream_o1_dir_exists(req.model_dir)) {
+            std::fprintf(stderr, "utopic_hidream_o1: missing HiDream-O1 model dir: %s\n", req.model_dir.c_str());
+            return 1;
+        }
+        std::vector<uint64_t> token_ids;
+        bool exact = false;
+        std::string native_error;
+        if (!utopic::hidream_o1_tokenize_t2i_prompt(req.model_dir, req.prompt, &token_ids, &exact, &native_error)) {
+            std::fprintf(stderr, "utopic_hidream_o1: native tokenizer failed: %s\n", native_error.c_str());
+            return 1;
+        }
+        const utopic::HiDreamO1ForwardPlan plan =
+            utopic::hidream_o1_build_t2i_forward_plan(cfg, req.width, req.height, static_cast<int64_t>(token_ids.size()));
+        std::printf("utopic_hidream_o1 native_tokenizer_check=OK exact=%s text_tokens=%lld image_tokens=%lld total_tokens=%lld timestep_begin=%lld image_begin=%lld mrope_delta=%lld ids=",
+                    exact ? "yes" : "no",
+                    static_cast<long long>(token_ids.size()),
+                    static_cast<long long>(plan.image_tokens),
+                    static_cast<long long>(plan.total_sequence_tokens),
+                    static_cast<long long>(plan.timestep_token_begin),
+                    static_cast<long long>(plan.image_token_begin),
+                    static_cast<long long>(plan.mrope_position_delta));
+        for (size_t i = 0; i < token_ids.size(); ++i) {
+            if (i > 0) std::printf(",");
+            std::printf("%llu", static_cast<unsigned long long>(token_ids[i]));
+        }
+        if (!plan.mrope_position_ids_t.empty()) {
+            const size_t img = static_cast<size_t>(plan.image_token_begin);
+            std::printf(" first_image_mrope=%lld/%lld/%lld",
+                        static_cast<long long>(plan.mrope_position_ids_t[img]),
+                        static_cast<long long>(plan.mrope_position_ids_h[img]),
+                        static_cast<long long>(plan.mrope_position_ids_w[img]));
+            if (img + 1 < plan.mrope_position_ids_t.size()) {
+                std::printf(" second_image_mrope=%lld/%lld/%lld",
+                            static_cast<long long>(plan.mrope_position_ids_t[img + 1]),
+                            static_cast<long long>(plan.mrope_position_ids_h[img + 1]),
+                            static_cast<long long>(plan.mrope_position_ids_w[img + 1]));
+            }
+        }
+        std::printf("\n");
+        if (dry_run || !native_preview) return 0;
+    }
     if (native_exec_check) {
         if (!utopic::hidream_o1_dir_exists(req.model_dir)) {
             std::fprintf(stderr, "utopic_hidream_o1: missing HiDream-O1 model dir: %s\n", req.model_dir.c_str());

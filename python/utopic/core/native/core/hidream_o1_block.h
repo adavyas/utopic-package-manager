@@ -68,6 +68,12 @@ ggml_tensor* build_hidream_o1_pixeldit_visual_block(ggml_context* ctx,
                                                     const HiDreamO1VisualBlockGraphConfig& config,
                                                     const HiDreamO1VisualBlockGraphTensors& tensors);
 bool hidream_o1_qwen3vl_text_block_self_check(double* max_diff, std::string* error);
+std::string hidream_o1_build_official_t2i_text(const std::string& prompt);
+bool hidream_o1_tokenize_t2i_prompt(const std::string& model_dir,
+                                    const std::string& prompt,
+                                    std::vector<uint64_t>* token_ids,
+                                    bool* exact,
+                                    std::string* error);
 
 struct HiDreamO1RealBlockRunSummary {
     int layer = 0;

@@ -353,19 +353,22 @@ HiDreamO1ForwardPlan hidream_o1_build_t2i_forward_plan(const HiDreamO1RuntimeCon
     plan.patch_size = cfg.patch_size;
     plan.patch_dim = cfg.patch_size * cfg.patch_size * 3;
     if (width <= 0 || height <= 0 || cfg.patch_size <= 0 || width % cfg.patch_size != 0 || height % cfg.patch_size != 0 ||
-        text_tokens < 0) {
+        text_tokens < cfg.timestep_token_num) {
         return plan;
     }
     plan.h_patches = height / cfg.patch_size;
     plan.w_patches = width / cfg.patch_size;
     plan.text_tokens = text_tokens;
-    plan.timestep_token_begin = text_tokens;
-    plan.image_token_begin = plan.timestep_token_begin + cfg.timestep_token_num;
+    plan.timestep_token_begin = text_tokens - cfg.timestep_token_num;
+    plan.image_token_begin = text_tokens;
     plan.image_tokens = static_cast<int64_t>(plan.h_patches) * static_cast<int64_t>(plan.w_patches);
     plan.total_sequence_tokens = plan.image_token_begin + plan.image_tokens;
     plan.raw_token_types.assign(static_cast<size_t>(plan.total_sequence_tokens), 0);
     plan.token_types_bin.assign(static_cast<size_t>(plan.total_sequence_tokens), 0);
     plan.vinput_mask.assign(static_cast<size_t>(plan.total_sequence_tokens), 0);
+    plan.mrope_position_ids_t.assign(static_cast<size_t>(plan.total_sequence_tokens), 0);
+    plan.mrope_position_ids_h.assign(static_cast<size_t>(plan.total_sequence_tokens), 0);
+    plan.mrope_position_ids_w.assign(static_cast<size_t>(plan.total_sequence_tokens), 0);
 
     for (int64_t i = plan.timestep_token_begin; i < plan.image_token_begin; ++i) {
         plan.raw_token_types[static_cast<size_t>(i)] = 3;
@@ -376,6 +379,24 @@ HiDreamO1ForwardPlan hidream_o1_build_t2i_forward_plan(const HiDreamO1RuntimeCon
         plan.token_types_bin[static_cast<size_t>(i)] = 1;
         plan.vinput_mask[static_cast<size_t>(i)] = 1;
     }
+    for (int64_t i = 0; i < plan.image_token_begin; ++i) {
+        plan.mrope_position_ids_t[static_cast<size_t>(i)] = i;
+        plan.mrope_position_ids_h[static_cast<size_t>(i)] = i;
+        plan.mrope_position_ids_w[static_cast<size_t>(i)] = i;
+    }
+    int64_t max_pos = plan.image_token_begin > 0 ? plan.image_token_begin - 1 : 0;
+    constexpr int64_t fix_point = 4096;
+    for (int64_t tok = 0; tok < plan.image_tokens; ++tok) {
+        const int64_t h = tok / plan.w_patches;
+        const int64_t w = tok % plan.w_patches;
+        const size_t idx = static_cast<size_t>(plan.image_token_begin + tok);
+        plan.mrope_position_ids_t[idx] = fix_point;
+        plan.mrope_position_ids_h[idx] = fix_point + h;
+        plan.mrope_position_ids_w[idx] = fix_point + w;
+        max_pos = std::max(max_pos, std::max(plan.mrope_position_ids_t[idx],
+                                             std::max(plan.mrope_position_ids_h[idx], plan.mrope_position_ids_w[idx])));
+    }
+    plan.mrope_position_delta = max_pos + 1 - plan.total_sequence_tokens;
     return plan;
 }
 
